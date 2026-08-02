@@ -50,27 +50,12 @@ sudo apt-get install -y build-essential pkg-config libsystemd-dev libopus-dev
 ```
 
 The TOML parser ([tomlc99](https://github.com/cktan/tomlc99), MIT) is
-vendored — no separate install step. `vocab_8k/` (712 clips, converted to
-8 kHz mono S16LE) is pre-built and committed to this repo, so a normal clone
-+ build never needs `sox` or the 48 kHz reference vocabulary at all.
+vendored — no separate install step.
 
 ## Building
 
 ```bash
-make            # builds build/usrp-rc
-```
-
-That's it — `vocab_8k/` is already there.
-
-### Regenerating vocab_8k/ (maintainers only)
-
-Only needed if the reference vocabulary changes upstream; not part of the
-normal build/install flow.
-
-```bash
-sudo apt-get install -y sox
-make vocab VOCAB_SRC=/path/to/rc/vocab_pcm   # default: /home/cort/rc/vocab_pcm
-git add vocab_8k && git commit
+make
 ```
 
 To install system-wide (binary, example config, vocab, systemd unit):
@@ -78,10 +63,6 @@ To install system-wide (binary, example config, vocab, systemd unit):
 ```bash
 sudo make install
 ```
-
-Users adding custom vocabulary clips place 8 kHz mono 16-bit WAV files in
-`user_8k/` (or `/etc/usrp-rc/user_8k/` once installed) — same naming
-convention as `vocab_8k/`, and they take priority over the stock clips.
 
 ## Configuration
 
@@ -113,6 +94,25 @@ job. It's present for schema completeness and possible future use.
 # or, once installed:
 sudo systemctl enable --now usrp-rc
 journalctl -u usrp-rc -f
+```
+
+## Vocabulary
+
+`vocab_8k/` (712 clips) is pre-built and committed to this repo, converted
+from the 48 kHz reference vocabulary to the 8 kHz mono S16LE the USRP path
+uses — a normal clone and build never needs `sox` or the 48 kHz source.
+
+To add your own clips, drop 8 kHz mono 16-bit WAV files into `user_8k/` (or
+`/etc/usrp-rc/user_8k/` once installed), matching `vocab_8k/`'s naming
+convention — they take priority over the stock clips.
+
+To regenerate `vocab_8k/` itself from an updated 48 kHz reference set
+(maintainers only — not part of the normal build/install flow):
+
+```bash
+sudo apt-get install -y sox
+make vocab VOCAB_SRC=/path/to/rc/vocab_pcm   # default: /home/cort/rc/vocab_pcm
+git add vocab_8k && git commit
 ```
 
 ## Target platform note
