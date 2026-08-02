@@ -30,6 +30,9 @@ OBJS     = $(patsubst %.c,$(BUILDDIR)/%.o,$(SRCS))
 DEPFILES = $(OBJS:.o=.d)
 TARGET   = $(BUILDDIR)/usrp-rc
 
+# vocab_8k/ is pre-built and committed to the repo; VOCAB_SRC/`make vocab`
+# are only for regenerating it from the 48 kHz reference source (maintainers
+# only — not part of the normal build).
 VOCAB_SRC ?= /home/cort/rc/vocab_pcm
 
 .PHONY: all clean install uninstall vocab
