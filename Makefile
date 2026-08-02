@@ -70,6 +70,7 @@ install: $(TARGET)
 	install -Dm644 systemd/usrp-rc.service     $(DESTDIR)$(UNITDIR)/usrp-rc.service
 	@mkdir -p $(DESTDIR)$(SYSCONFDIR)/usrp-rc/vocab_8k
 	@cp -n vocab_8k/*.wav $(DESTDIR)$(SYSCONFDIR)/usrp-rc/vocab_8k/ 2>/dev/null || true
+	install -Dm644 user_8k/README.md          $(DESTDIR)$(SYSCONFDIR)/usrp-rc/user_8k/README.md
 	@if [ -z "$(DESTDIR)" ]; then \
 		if [ ! -f $(SYSCONFDIR)/usrp-rc/usrp-rc.toml ]; then \
 			cp $(SYSCONFDIR)/usrp-rc/usrp-rc.toml.sample $(SYSCONFDIR)/usrp-rc/usrp-rc.toml; \

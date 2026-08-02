@@ -6,5 +6,7 @@ compile_commands.json
 # Live dev/deployment config — contains site-specific settings; not for repo
 usrp-rc.toml
 
-# User-added custom vocabulary clips — deployment-specific
-user_8k/
+# User-added custom vocabulary clips — deployment-specific; the folder
+# itself (and its README) is tracked so it exists out of the box.
+user_8k/*.wav
+user_8k/*.WAV

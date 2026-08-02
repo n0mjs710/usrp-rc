@@ -25,8 +25,10 @@ int  port_create(port_t **out, const config_t *cfg, vocab_cache_t *vocab);
 void port_destroy(port_t *p);
 
 /* Called once main.c is ready to accept PTT edges (KEY/UNKEY frames to
- * mmdvm) and pacing-timer (re)arm requests. */
-void port_set_ptt_callback(port_t *p, void (*cb)(void *arg, bool active), void *arg);
+ * mmdvm) and pacing-timer (re)arm requests. `reason` is a short static
+ * string (e.g. "repeat", "mandatory-id", "hang-expired") naming why PTT
+ * just changed, for logging — valid only for the duration of the call. */
+void port_set_ptt_callback(port_t *p, void (*cb)(void *arg, bool active, const char *reason), void *arg);
 
 /* Kicks off the startup message + initial ID sequence if configured.
  * Call once after wiring is complete. */
@@ -40,12 +42,8 @@ void port_on_link_keyup(port_t *p, bool active, uint64_t now);
 uint64_t port_next_deadline_ms(const port_t *p);   /* absolute ms; 0 = none armed */
 void     port_check_timers(port_t *p, uint64_t now);
 
-/* State queries. */
-port_state_t  port_state(const port_t *p);
-bool          port_ptt(const port_t *p);
-bool          port_mmdvm_active(const port_t *p);
-bool          port_link_active(const port_t *p);
-port_source_t port_last_source(const port_t *p);
+/* State query. */
+bool port_ptt(const port_t *p);
 
 /* Forwarding gates: whether main.c should currently be repeating audio
  * received on that port out to the *other* port. Both are false during

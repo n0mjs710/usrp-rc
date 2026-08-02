@@ -8,8 +8,8 @@
  * link-TX path. While the gate is held open, 20 ms frames are pushed in and
  * the oldest frame (once the queue depth is reached) is popped out. On gate
  * close the queue is dropped entirely — the squelch-crash tail never exits
- * it. ste_flush() resets the queue on the next open edge so stale audio
- * from the previous transmission never replays. */
+ * it. ste_reset() clears the queue on gate close so stale audio from the
+ * previous transmission never replays on the next open edge. */
 
 typedef struct ste ste_t;
 

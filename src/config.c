@@ -86,9 +86,9 @@ static void read_bool(toml_table_t *tbl, const char *key, bool *dst)
         *dst = (bool)d.u.b;
 }
 
-/* Read a TOML array of strings into a fixed-size C array of fixed-size strings. */
+/* Read a TOML array of strings into a fixed-size C array of CFG_NAME_STR strings. */
 static int read_str_array(toml_table_t *tbl, const char *key,
-                          char dst[][CFG_NAME_STR], int max, size_t elem_sz)
+                          char dst[][CFG_NAME_STR], int max)
 {
     toml_array_t *arr = toml_array_in(tbl, key);
     if (!arr)
@@ -98,8 +98,8 @@ static int read_str_array(toml_table_t *tbl, const char *key,
     for (int i = 0; i < n && count < max; i++) {
         toml_datum_t d = toml_string_at(arr, i);
         if (d.ok) {
-            strncpy(dst[count], d.u.s, elem_sz - 1);
-            dst[count][elem_sz - 1] = '\0';
+            strncpy(dst[count], d.u.s, CFG_NAME_STR - 1);
+            dst[count][CFG_NAME_STR - 1] = '\0';
             free(d.u.s);
             count++;
         }
@@ -328,9 +328,9 @@ int config_load(config_t *cfg, const char *path)
         read_str(t, "timeout_message",         cfg->events.timeout_message, sizeof(cfg->events.timeout_message));
         read_str(t, "timeout_cancel_message",  cfg->events.timeout_cancel_message, sizeof(cfg->events.timeout_cancel_message));
         cfg->events.n_initial_ids = read_str_array(t, "initial_ids",
-            cfg->events.initial_ids, CFG_MAX_ID_ROTATION, CFG_NAME_STR);
+            cfg->events.initial_ids, CFG_MAX_ID_ROTATION);
         cfg->events.n_mandatory_ids = read_str_array(t, "mandatory_ids",
-            cfg->events.mandatory_ids, CFG_MAX_ID_ROTATION, CFG_NAME_STR);
+            cfg->events.mandatory_ids, CFG_MAX_ID_ROTATION);
     }
 
     {

@@ -28,6 +28,10 @@
  * UNKEY frame. Matches rusrp's own default network_timeout_ms. */
 #define WATCHDOG_MS 500
 
+/* Periodic link-peer jitter/silence telemetry log (jitter_buffer.c tracks
+ * these continuously; this is just the missing consumer). */
+#define HEARTBEAT_INTERVAL_MS 60000u
+
 static volatile sig_atomic_t g_stop = 0;
 
 static void sig_handler(int sig)
@@ -58,6 +62,8 @@ typedef struct {
     uint64_t link_watchdog_deadline;
 
     uint64_t pace_deadline;   /* 20 ms mmdvm-TX pacing timer; armed while port PTT is on */
+    uint64_t heartbeat_deadline;   /* periodic link jitter/silence telemetry; 0 = no link */
+    uint64_t ptt_start_ms;    /* set on each PTT-on edge; used to log PTT-off duration */
 
     int16_t opus_accum[480];
     int     opus_accum_n;
@@ -178,13 +184,19 @@ static void send_link_key(app_t *a, bool keyup)
 
 /* ── port PTT callback: KEY/UNKEY marker to mmdvm + arm/disarm pacing ────── */
 
-static void on_port_ptt(void *arg, bool active)
+static void on_port_ptt(void *arg, bool active, const char *reason)
 {
     app_t *a = arg;
     uint64_t now = monotonic_ms();
     send_mmdvm_key(a, active);
     a->pace_deadline = active ? now + 20 : 0;
-    fprintf(stderr, "mmdvm: PTT %s\n", active ? "ON" : "OFF");
+    if (active) {
+        a->ptt_start_ms = now;
+        fprintf(stderr, "ptt: ON   reason=%s\n", reason);
+    } else {
+        double duration_s = (double)(now - a->ptt_start_ms) / 1000.0;
+        fprintf(stderr, "ptt: OFF  reason=%s  duration=%.1fs\n", reason, duration_s);
+    }
 }
 
 /* ── 20 ms mmdvm-TX pacing tick: controller audio or link-forward audio ──── */
@@ -217,8 +229,9 @@ static void pace_tick(app_t *a, uint64_t now)
 static void mmdvm_key_edge(app_t *a, uint64_t now)
 {
     send_link_key(a, true);
+    if (a->link_sock >= 0)
+        fprintf(stderr, "link: KEY -> peer\n");
     port_on_mmdvm_keyup(a->port, true, now);
-    fprintf(stderr, "mmdvm: COR ACTIVE\n");
 }
 
 static void mmdvm_unkey_edge(app_t *a, uint64_t now)
@@ -234,8 +247,9 @@ static void mmdvm_unkey_edge(app_t *a, uint64_t now)
         }
     }
     send_link_key(a, false);
+    if (a->link_sock >= 0)
+        fprintf(stderr, "link: UNKEY -> peer\n");
     port_on_mmdvm_keyup(a->port, false, now);
-    fprintf(stderr, "mmdvm: COR IDLE\n");
 }
 
 static void handle_mmdvm(app_t *a)
@@ -304,10 +318,18 @@ static void handle_link(app_t *a)
         bool keyup = pkt.keyup != 0;
         if (keyup != a->prev_link_keyup) {
             a->prev_link_keyup = keyup;
-            if (!keyup)
+            if (keyup) {
+                jitter_buffer_reset_silence_count(a->jb);
+            } else {
+                jitter_buffer_latch_silence(a->jb);
+                uint64_t late    = jitter_buffer_late_count(a->jb);
+                uint64_t silence = jitter_buffer_latched_silence_count(a->jb);
+                float    jitter  = jitter_buffer_estimate_ms(a->jb);
+                fprintf(stderr, "link: RX ended  late=%llu silence=%llu jitter=%.1fms\n",
+                        (unsigned long long)late, (unsigned long long)silence, jitter);
                 jitter_buffer_flush(a->jb);
+            }
             port_on_link_keyup(a->port, keyup, now);
-            fprintf(stderr, "link: COR %s\n", keyup ? "ACTIVE" : "IDLE");
         }
 
         if (!keyup)
@@ -332,7 +354,7 @@ static void handle_link(app_t *a)
 static int next_timeout_ms(app_t *a, uint64_t now)
 {
     uint64_t min = 0;
-    uint64_t cand[4];
+    uint64_t cand[5];
     int nc = 0;
 
     uint64_t pd = port_next_deadline_ms(a->port);
@@ -340,6 +362,7 @@ static int next_timeout_ms(app_t *a, uint64_t now)
     if (a->pace_deadline) cand[nc++] = a->pace_deadline;
     if (a->prev_mmdvm_keyup && a->mmdvm_watchdog_deadline) cand[nc++] = a->mmdvm_watchdog_deadline;
     if (a->prev_link_keyup && a->link_watchdog_deadline)   cand[nc++] = a->link_watchdog_deadline;
+    if (a->heartbeat_deadline) cand[nc++] = a->heartbeat_deadline;
 
     for (int i = 0; i < nc; i++)
         if (min == 0 || cand[i] < min) min = cand[i];
@@ -364,11 +387,24 @@ static void check_all_timers(app_t *a, uint64_t now)
         mmdvm_unkey_edge(a, now);
     }
     if (a->prev_link_keyup && a->link_watchdog_deadline && now >= a->link_watchdog_deadline) {
-        fprintf(stderr, "link: watchdog timeout — treating as unkey\n");
         a->prev_link_keyup = false;
         a->link_watchdog_deadline = 0;
+        jitter_buffer_latch_silence(a->jb);
+        uint64_t late    = jitter_buffer_late_count(a->jb);
+        uint64_t silence = jitter_buffer_latched_silence_count(a->jb);
+        float    jitter  = jitter_buffer_estimate_ms(a->jb);
+        fprintf(stderr, "link: watchdog timeout — treating as unkey  late=%llu silence=%llu jitter=%.1fms\n",
+                (unsigned long long)late, (unsigned long long)silence, jitter);
         jitter_buffer_flush(a->jb);
         port_on_link_keyup(a->port, false, now);
+    }
+
+    if (a->heartbeat_deadline && now >= a->heartbeat_deadline) {
+        float    jitter  = jitter_buffer_estimate_ms(a->jb);
+        uint64_t silence = jitter_buffer_hb_silence_count(a->jb);
+        fprintf(stderr, "link: heartbeat  jitter=%.1fms  silence(%us)=%llu\n",
+                jitter, HEARTBEAT_INTERVAL_MS / 1000u, (unsigned long long)silence);
+        a->heartbeat_deadline = now + HEARTBEAT_INTERVAL_MS;
     }
 }
 
@@ -433,6 +469,7 @@ int main(int argc, char *argv[])
             fprintf(stderr, "usrp-rc: failed to init jitter buffer\n");
             return 1;
         }
+        a->heartbeat_deadline = monotonic_ms() + HEARTBEAT_INTERVAL_MS;
         if (a->cfg.link.codec == LINK_CODEC_OPUS) {
             if (opus_codec_create(&a->opus, a->cfg.link.opus_bitrate, a->cfg.link.opus_frame_ms) != 0) {
                 fprintf(stderr, "usrp-rc: failed to init opus codec\n");

@@ -34,14 +34,6 @@ MMDVMHost (loopback)                   usrp-rc                    Network
   network caller opens the repeater exactly like a local radio caller, and
   gets a distinct courtesy tone (`ct_link_message`) so listeners can tell
   local and network-originated traffic apart.
-- All controller audio (tones, CW, pre-rendered voice clips) is rendered
-  into a buffer up front the instant the state machine decides to play it,
-  then drained as 20 ms USRP frames — no on-demand synthesis in the hot
-  path, and no threads.
-
-See `CLAUDE.md`-equivalent design notes in the project history for the full
-state-machine specification; it is a from-scratch C translation of the
-Python reference controller at `../rc` (see especially `port.py`).
 
 ## Build dependencies
 
@@ -67,37 +59,108 @@ sudo make install
 ## Configuration
 
 Copy `usrp-rc.toml.sample` to `/etc/usrp-rc/usrp-rc.toml` (or pass a path as
-the first argument) and edit for your site. Config sections:
+the first argument) and edit for your site. `usrp-rc.toml.sample` is the
+full reference — every option, commented — the sections below just explain
+what each part is for.
 
-- `[mmdvm]` — local UDP endpoint and MMDVMHost's endpoint for the loopback
-  USRP session. Set MMDVMHost's USRP **Local Port** to usrp-rc's `rpt_port`
-  and its **Gateway/RPT Port** to usrp-rc's `local_port`.
-- `[link]` — the network peer (rusrp, usrp-reflector, ASL). `codec = "pcm"`
-  or `"opus"` (narrowband SILK, 8 kHz). Set `enabled = false` to run as a
-  standalone local repeater with no network bridge at all — no link socket
-  is created.
-- `[audio]` — `master_gain` is a final multiplier applied to all generated
-  controller audio (tones, CW, voice) — set it once for your site's
-  modulator/deviation headroom (a sustained tone reads much "louder" in FM
-  deviation than speech at the same digital peak, so start well below
-  1.0 — MMDVMHost's own USRP audio gain setting is a factor here too), then
-  balance individual sounds against each other with `morse_level`,
-  `voice_level`, and per-tone `amp` within that range. Also STE delay,
-  pre/post-message padding.
-- `[timers]` — hang, ct_delay, kerchunk, timeout (TOT), id_interval,
-  id_anxious. Mirrors standard analog repeater controller terminology.
-- `[events]` — which named message plays for each occasion (startup,
-  initial/mandatory/anxious/impolite ID, courtesy tones, timeout).
-- `[messages.*]` — named sequences of `cw` / `voice` / `tone` elements,
-  shared by all events. A `voice` element's `clip` can hold several clip
-  names separated by spaces (e.g. `"THIS IS W ONE X Y Z REPEATER"`), played
-  back to back — clip names never contain spaces, so this is unambiguous.
-  `cw` text is *not* split this way; spaces there are real Morse word gaps.
-  A word `"_"` inserts a pause instead of a clip: bare `_` uses
-  `audio.voice_gap_ms`, `"_400"` is an explicit 400 ms pause. Only
-  recognized when `_` is followed solely by digits or nothing, so clip
-  names like `_TEEN` are unaffected. A message can hold up to 32 elements,
-  and a single `voice` element's word list up to 32 words/pauses.
+### `[mmdvm]` — the loopback link to MMDVMHost
+
+```toml
+[mmdvm]
+local_address = "127.0.0.1"
+local_port    = 34001
+rpt_address   = "127.0.0.1"
+rpt_port      = 32001
+```
+
+Set MMDVMHost's USRP **Local Port** to usrp-rc's `rpt_port`, and its
+**Gateway/RPT Port** to usrp-rc's `local_port`.
+
+### `[link]` — the network peer (rusrp, usrp-reflector, ASL)
+
+```toml
+[link]
+enabled       = true
+remote_host   = "127.0.0.1"
+remote_port   = 41001
+local_port    = 34002
+codec         = "pcm"   # "pcm" or "opus" (narrowband SILK, 8 kHz)
+```
+
+Set `enabled = false` to run as a standalone local repeater with no network
+bridge at all — no link socket is created, and nothing else in `[link]`
+matters.
+
+### `[audio]` — levels and padding
+
+`master_gain` is a final multiplier applied to all generated controller
+audio (tones, CW, voice) — set it once for your site's modulator/deviation
+headroom (a sustained tone reads much "louder" in FM deviation than speech
+at the same digital peak, so start well below 1.0 — MMDVMHost's own USRP
+audio gain setting is a factor here too), then balance individual sounds
+against each other with `morse_level`, `voice_level`, and per-tone `amp`
+within that range. Also covers STE delay and pre/post-message padding — see
+`usrp-rc.toml.sample` for the full list with defaults.
+
+### `[timers]` — hang, courtesy-tone delay, timeout, ID interval
+
+Mirrors standard analog repeater controller terminology: `hang`, `ct_delay`,
+`kerchunk` (anti-kerchunk COR hold), `timeout` (TOT), `id_interval`,
+`id_anxious`.
+
+### `[events]` — which message plays for each occasion
+
+```toml
+[events]
+initial_ids  = ["default_voice"]
+mandatory_ids = ["default_cw"]
+ct_message    = "yellow_jacket"
+ct_link_message = "bumble_bee"
+timeout_message = "timeout_warn"
+```
+
+Maps occasions (startup, initial/mandatory/anxious/impolite ID, courtesy
+tones, timeout) to message names defined under `[messages.*]`. Several keys
+(`initial_ids`, `mandatory_ids`) take a list and rotate through it.
+
+### `[messages.*]` — the actual audio content
+
+Each message is a named sequence of `cw` / `voice` / `tone` elements, mixed
+freely, referenced by name from `[events]` above:
+
+```toml
+[messages.default_cw]
+elements = [{type = "cw", text = "W1XYZ/R"}]
+
+[messages.default_voice]
+elements = [{type = "voice", clip = "THIS IS W ONE X Y Z REPEATER"}]
+
+[messages.yellow_jacket]
+elements = [
+  {type = "tone", freq1 = 330.0, freq2 = 0.0, ms = 50, amp = 0.5},
+  {type = "tone", freq1 = 495.0, freq2 = 0.0, ms = 50, amp = 0.5},
+  {type = "tone", freq1 = 660.0, freq2 = 0.0, ms = 50, amp = 0.5},
+]
+```
+
+- A `voice` element's `clip` holds one or more clip names separated by
+  spaces, played back to back (clip names never contain spaces, so this is
+  unambiguous). `cw` `text` is *not* split this way — spaces there are real
+  Morse word gaps.
+- A word `"_"` inserts a pause instead of a clip, using `audio.voice_gap_ms`;
+  `"_400"` is an explicit 400 ms pause. Only recognized when `_` is followed
+  solely by digits or nothing, so a clip literally named `_TEEN` is
+  unaffected. For example, `clip = "THIS IS _ W ONE _400 REPEATING"` plays
+  "THIS IS", a default-length pause, "W ONE", a 400 ms pause, then
+  "REPEATING".
+- `tone` elements take `freq1`/`freq2` (a second frequency mixes in a dual
+  tone; 0 = unused), `ms` duration, and `amp` (0.0–1.0).
+- A message can hold up to 32 elements; a single `voice` element's word list
+  up to 32 words/pauses.
+
+`usrp-rc.toml.sample` ships with a full courtesy-tone catalog
+(`[messages.honk]`, `[messages.yellow_jacket]`, etc.) you can reference
+directly or use as templates.
 
 **Name length**: message names, clip names, and anywhere you reference a
 message name (`ct_message`, `initial_ids`, etc.) are capped at 31
@@ -106,8 +169,9 @@ silently truncated at load. This does not apply to CW `text`.
 
 `access_mode` (top-level key, default `"cor"`) is accepted but `"cor_ctcss"`
 has no functional effect in this build: USRP carries a single keyup bit, so
-there's no independent CTCSS signal to gate on — CTCSS decode is MMDVMHost's
-job. It's present for schema completeness and possible future use.
+there's no independent CTCSS signal to gate on — CTCSS decode is
+MMDVMHost's job. It's present for schema completeness and possible future
+use.
 
 ## Running
 
@@ -120,34 +184,25 @@ journalctl -u usrp-rc -f
 
 ## Vocabulary
 
-`vocab_8k/` (712 clips) is pre-built and committed to this repo, converted
-from the 48 kHz reference vocabulary to the 8 kHz mono S16LE the USRP path
-uses — a normal clone and build never needs `sox` or the 48 kHz source.
+`vocab_8k/` ships pre-built with the repo — a normal clone and build never
+needs any extra vocabulary tooling.
 
-To add your own clips, drop 8 kHz mono 16-bit WAV files into `user_8k/` (or
-`/etc/usrp-rc/user_8k/` once installed), matching `vocab_8k/`'s naming
-convention — they take priority over the stock clips.
-
-To regenerate `vocab_8k/` itself from an updated 48 kHz reference set
-(maintainers only — not part of the normal build/install flow):
-
-```bash
-sudo apt-get install -y sox
-make vocab VOCAB_SRC=/path/to/rc/vocab_pcm   # default: /home/cort/rc/vocab_pcm
-git add vocab_8k && git commit
-```
-
-## Target platform note
-
-Developed on a Raspberry Pi 3B+ (similar architecture/OS to the production
-target, a NanoPi NEO, which can't run a remote VS Code session). Code is
-pushed to GitHub from this dev box and pulled/built on the NanoPi NEO —
-there's nothing Pi-specific in the source; it's plain C11 against
-`libopus`/`libsystemd`/vendored `tomlc99`.
+`user_8k/` ships with the repo (and gets installed to `/etc/usrp-rc/user_8k/`)
+ready for your own clips — no need to create it or guess permissions. To add
+a clip (or replace a stock one), drop an 8 kHz mono 16-bit WAV file in,
+matching `vocab_8k/`'s naming convention (the WAV filename, minus `.wav`, is
+the clip name referenced from `voice` elements — see `[messages.*]` above).
+Files in `user_8k/` take priority over stock clips of the same name, so you
+can override one word without touching the shipped set. See
+[user_8k/README.md](user_8k/README.md) for the same detail in one place.
 
 ## Not implemented (by design, v1)
 
 No CM119/ALSA/hidraw, no Unix socket monitoring API, no DTMF decode or
 remote control, no CTCSS encode or software decode, no IAX2, and exactly
-two fixed ports (no multi-port linking). See the project history for
-rationale — these mirror the Python reference controller's own roadmap.
+two fixed ports (no multi-port linking).
+
+## Contributing / internals
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for project origin, target-platform
+notes, and how to regenerate the built-in vocabulary from source audio.

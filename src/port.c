@@ -77,7 +77,7 @@ struct port {
     bool         job_was_ptt;
     bool         job_post_pad_needed;
 
-    void (*set_ptt_cb)(void *arg, bool active);
+    void (*set_ptt_cb)(void *arg, bool active, const char *reason);
     void  *set_ptt_arg;
 };
 
@@ -125,13 +125,13 @@ static void ctrl_buf_pull_frame(port_t *p, int16_t out[160], uint64_t now)
 
 static bool cor_active(const port_t *p) { return p->mmdvm_active || p->link_active; }
 
-static void set_ptt(port_t *p, bool active, uint64_t now)
+static void set_ptt(port_t *p, bool active, uint64_t now, const char *reason)
 {
     (void)now;
     bool changed = (p->ptt != active);
     p->ptt = active;
     if (changed && p->set_ptt_cb)
-        p->set_ptt_cb(p->set_ptt_arg, active);
+        p->set_ptt_cb(p->set_ptt_arg, active, reason);
 }
 
 static void queue_message(port_t *p, const char *name, double morse_level_override)
@@ -148,6 +148,7 @@ static void queue_message(port_t *p, const char *name, double morse_level_overri
 static void schedule_hang(port_t *p, uint64_t now)
 {
     p->hang_deadline = now + (uint64_t)(p->cfg->timers.hang * 1000.0);
+    fprintf(stderr, "hang: armed  %.1fs\n", p->cfg->timers.hang);
 }
 
 static void schedule_ct_delay(port_t *p, uint64_t now)
@@ -209,7 +210,7 @@ static void port_transition(port_t *p, port_state_t new_state, uint64_t now)
 static void timeout_announce_after_drain(port_t *p, uint64_t now)
 {
     if (p->state == PORT_TIMEOUT)
-        set_ptt(p, false, now);
+        set_ptt(p, false, now, "timeout-announced");
 }
 
 static void do_timeout_announce(port_t *p, uint64_t now)
@@ -225,7 +226,7 @@ static void do_timeout_announce(port_t *p, uint64_t now)
         }
     }
     if (p->state == PORT_TIMEOUT)
-        set_ptt(p, false, now);
+        set_ptt(p, false, now, "timeout-announced");
 }
 
 static void timeout_recovery_after_drain(port_t *p, uint64_t now)
@@ -283,6 +284,7 @@ static void do_impolite_id(port_t *p, uint64_t now)
         name = picked;
     }
 
+    fprintf(stderr, "id: impolite  '%s'\n", name);
     p->impolite_id_playing = true;
     rendered_audio_t r = message_render(p->cfg, p->vocab, name,
                                         p->cfg->audio.impolite_morse_level);
@@ -311,7 +313,7 @@ static void mandatory_id_finish(port_t *p, uint64_t now)
 static void mandatory_id_after_post_pad(port_t *p, uint64_t now)
 {
     if (p->state == p->job_state_before)
-        set_ptt(p, false, now);
+        set_ptt(p, false, now, "mandatory-id-done");
     mandatory_id_finish(p, now);
 }
 
@@ -336,6 +338,7 @@ static void mandatory_id_render_and_queue(port_t *p, uint64_t now)
     const char *name = p->cfg->events.mandatory_ids[idx];
     p->id_rot_mandatory = (idx + 1) % p->cfg->events.n_mandatory_ids;
 
+    fprintf(stderr, "id: mandatory  '%s'  (%d/%d)\n", name, idx + 1, p->cfg->events.n_mandatory_ids);
     p->voice_id_active = message_has_voice(p->cfg, name);
     queue_message(p, name, -1.0);
 
@@ -361,7 +364,7 @@ static void do_mandatory_id(port_t *p, uint64_t now)
     p->job_post_pad_needed = !p->job_was_ptt && message_needs_padding(p->cfg, peek);
 
     if (!p->job_was_ptt) {
-        set_ptt(p, true, now);
+        set_ptt(p, true, now, "mandatory-id");
         if (p->job_post_pad_needed && p->cfg->audio.pre_message_ms > 0) {
             p->pad_deadline = now + (uint64_t)p->cfg->audio.pre_message_ms;
             p->pad_cont     = mandatory_id_render_and_queue;
@@ -400,6 +403,7 @@ static void initial_id_render_and_queue(port_t *p, uint64_t now)
     const char *name = p->cfg->events.initial_ids[idx];
     p->id_rot_initial = (idx + 1) % p->cfg->events.n_initial_ids;
 
+    fprintf(stderr, "id: initial  '%s'  (%d/%d)\n", name, idx + 1, p->cfg->events.n_initial_ids);
     p->voice_id_active = message_has_voice(p->cfg, name);
     queue_message(p, name, -1.0);
     p->ctrl.on_drain = initial_id_after_drain;
@@ -434,6 +438,7 @@ static void anxious_id_render_and_queue(port_t *p, uint64_t now)
 {
     const char *name = p->cfg->events.anxious_id;
     if (name[0]) {
+        fprintf(stderr, "id: anxious  '%s'\n", name);
         p->voice_id_active = message_has_voice(p->cfg, name);
         queue_message(p, name, -1.0);
         p->ctrl.on_drain = anxious_id_finish;
@@ -458,7 +463,7 @@ static void do_anxious_id(port_t *p, uint64_t now)
 
 static void startup_finish(port_t *p, uint64_t now)
 {
-    set_ptt(p, false, now);
+    set_ptt(p, false, now, "startup-done");
     port_transition(p, PORT_IDLE, now);
 }
 
@@ -492,6 +497,7 @@ static void startup_queue_id(port_t *p, uint64_t now)
     const char *name = p->cfg->events.initial_ids[idx];
     p->id_rot_initial = (idx + 1) % p->cfg->events.n_initial_ids;
 
+    fprintf(stderr, "id: initial  '%s'  (%d/%d)\n", name, idx + 1, p->cfg->events.n_initial_ids);
     p->voice_id_active = message_has_voice(p->cfg, name);
     queue_message(p, name, -1.0);
     p->ctrl.on_drain = startup_after_id_drain;
@@ -521,7 +527,7 @@ void port_start(port_t *p, uint64_t now)
         fprintf(stderr, "port: no startup_message configured — starting quietly in IDLE\n");
         return;
     }
-    set_ptt(p, true, now);
+    set_ptt(p, true, now, "startup");
     int pre_ms = p->cfg->audio.pre_message_ms;
     if (pre_ms > 0 && message_needs_padding(p->cfg, p->cfg->events.startup_message)) {
         p->pad_deadline = now + (uint64_t)pre_ms;
@@ -553,13 +559,15 @@ static void on_hang(port_t *p, uint64_t now)
     p->hang_deadline = 0;
     if (cor_active(p))
         return;
-    set_ptt(p, false, now);
+    fprintf(stderr, "state: TAIL -> IDLE  (hang expired)\n");
+    set_ptt(p, false, now, "hang-expired");
     port_transition(p, PORT_IDLE, now);
 }
 
 static void on_timeout(port_t *p, uint64_t now)
 {
     p->timeout_deadline = 0;
+    fprintf(stderr, "state: -> TIMEOUT  (tx time exceeded)\n");
     port_transition(p, PORT_TIMEOUT, now);
     ctrl_buf_clear(p);
     do_timeout_announce(p, now);
@@ -584,30 +592,40 @@ static void on_id(port_t *p, uint64_t now)
 
 /* ── COR edge handling (access_mode "cor"; "cor_ctcss" collapses to this) ── */
 
-static void cor_active_edge(port_t *p, uint64_t now)
+static void cor_active_edge(port_t *p, port_source_t source, uint64_t now)
 {
     p->cor_up_ms         = now;
     p->hang_deadline     = 0;
     p->ct_delay_deadline = 0;
 
+    const char *src = source == SRC_LOCAL ? "local" : "link";
+    const char *action = source == SRC_LOCAL
+        ? (p->cfg->link.enabled ? "repeat + link-fwd" : "repeat")
+        : "rf-fwd";
+    fprintf(stderr, "cor: ACTIVE  source=%s  -> %s\n", src, action);
+
     if (p->state == PORT_IDLE || p->state == PORT_TAIL) {
-        set_ptt(p, true, now);
+        set_ptt(p, true, now, source == SRC_LOCAL ? "repeat" : "link-fwd");
         port_transition(p, PORT_ACTIVE, now);
     }
 }
 
-static void cor_idle_edge(port_t *p, uint64_t now)
+static void cor_idle_edge(port_t *p, port_source_t source, uint64_t now)
 {
     double duration_s = (double)(now - p->cor_up_ms) / 1000.0;
+    const char *src = source == SRC_LOCAL ? "local" : "link";
+    fprintf(stderr, "cor: IDLE  source=%s  held=%.1fs\n", src, duration_s);
 
     if (p->state == PORT_ACTIVE || p->state == PORT_TAIL) {
         if (p->state == PORT_ACTIVE && duration_s < p->cfg->timers.kerchunk) {
+            fprintf(stderr, "cor: kerchunk (%.1fs < %.1fs)  — ignored\n",
+                    duration_s, p->cfg->timers.kerchunk);
             p->timeout_deadline    = 0;
             p->tot_used_s          = 0.0;
             p->initial_id_pending  = false;
             if (p->id_deadline == 0)
                 schedule_id(p, now);
-            set_ptt(p, false, now);
+            set_ptt(p, false, now, "kerchunk");
             port_transition(p, PORT_IDLE, now);
         } else {
             port_transition(p, PORT_TAIL, now);
@@ -621,7 +639,8 @@ static void cor_idle_edge(port_t *p, uint64_t now)
             }
         }
     } else if (p->state == PORT_TIMEOUT) {
-        set_ptt(p, true, now);
+        fprintf(stderr, "state: TIMEOUT -> TAIL  (recovered)\n");
+        set_ptt(p, true, now, "timeout-recovery");
         port_transition(p, PORT_TAIL, now);
         do_timeout_recovery(p, now);
     }
@@ -635,8 +654,8 @@ void port_on_mmdvm_keyup(port_t *p, bool active, uint64_t now)
         p->last_source = SRC_LOCAL;
     bool new_combined = cor_active(p);
     if (new_combined != old_combined) {
-        if (new_combined) cor_active_edge(p, now);
-        else              cor_idle_edge(p, now);
+        if (new_combined) cor_active_edge(p, SRC_LOCAL, now);
+        else              cor_idle_edge(p, SRC_LOCAL, now);
     }
 }
 
@@ -648,8 +667,8 @@ void port_on_link_keyup(port_t *p, bool active, uint64_t now)
         p->last_source = SRC_LINK;
     bool new_combined = cor_active(p);
     if (new_combined != old_combined) {
-        if (new_combined) cor_active_edge(p, now);
-        else              cor_idle_edge(p, now);
+        if (new_combined) cor_active_edge(p, SRC_LINK, now);
+        else              cor_idle_edge(p, SRC_LINK, now);
     }
 }
 
@@ -694,11 +713,7 @@ void port_check_timers(port_t *p, uint64_t now)
 
 /* ── public accessors ─────────────────────────────────────────────────── */
 
-port_state_t  port_state(const port_t *p)        { return p->state; }
-bool          port_ptt(const port_t *p)           { return p->ptt; }
-bool          port_mmdvm_active(const port_t *p)  { return p->mmdvm_active; }
-bool          port_link_active(const port_t *p)   { return p->link_active; }
-port_source_t port_last_source(const port_t *p)   { return p->last_source; }
+bool port_ptt(const port_t *p) { return p->ptt; }
 
 bool port_mmdvm_gate_open(const port_t *p)
 {
@@ -757,7 +772,7 @@ int port_create(port_t **out, const config_t *cfg, vocab_cache_t *vocab)
     return 0;
 }
 
-void port_set_ptt_callback(port_t *p, void (*cb)(void *arg, bool active), void *arg)
+void port_set_ptt_callback(port_t *p, void (*cb)(void *arg, bool active, const char *reason), void *arg)
 {
     p->set_ptt_cb  = cb;
     p->set_ptt_arg = arg;
