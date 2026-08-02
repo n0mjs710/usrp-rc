@@ -71,203 +71,172 @@ timeout_cancel_message = ""
 [messages.default_cw]
 elements = [{type = "cw", text = "W1XYZ/R"}]
 
-[messages.yellow_jacket]
-elements = [
-  {type = "tone", freq1 = 330.0, freq2 = 0.0, ms = 50, amp = 0.7},
-  {type = "tone", freq1 = 495.0, freq2 = 0.0, ms = 50, amp = 0.7},
-  {type = "tone", freq1 = 660.0, freq2 = 0.0, ms = 50, amp = 0.7},
-]
-
-[messages.bumble_bee]
-elements = [
-  {type = "tone", freq1 = 330.0, freq2 = 0.0, ms = 100, amp = 0.7},
-  {type = "tone", freq1 = 495.0, freq2 = 0.0, ms = 100, amp = 0.7},
-  {type = "tone", freq1 = 660.0, freq2 = 0.0, ms = 100, amp = 0.7},
-]
-
 # ── Courtesy tone catalog ──────────────────────────────────────────────────
 # A grab-bag of classic repeater-controller courtesy tones (ACC RC-* and
 # others), pulled from a well-known reference list of freq/duration specs.
-# All in the shared [messages.*] pool and unused unless referenced from
-# [events] (ct_message, ct_link_message) or elsewhere — pick what you like,
-# delete the rest. Two entries from that reference list aren't here: the ACC
-# "Explosion" and "Tick-tock" effects were built into a TI speech-synthesizer
-# chip, not simple tones, so there's nothing to translate. The reference also
-# names tones #6/7/8 as Morse letters K/N/B (below as acc_morse_k/n/b) while
-# separately giving frequency specs for tones #8/9/10 that don't match
-# "Morse B" — both are included since the source material itself was
-# inconsistent on that point.
 #
 # The "640ms delay from squelch closure to 1st tone" several of these
 # reference is a timers.ct_delay setting (global, not per-tone) — set
 # ct_delay = 0.64 for that classic ACC timing.
 
+[messages.honk]
+elements = [{type = "tone", freq1 = 500.0, freq2 = 700.0, ms = 100, amp = 0.5}]
+
+[messages.beep]
+elements = [{type = "tone", freq1 = 880.0, freq2 = 0.0, ms = 100, amp = 0.5}]
+
+[messages.boop]
+elements = [{type = "tone", freq1 = 440.0, freq2 = 0.0, ms = 100, amp = 0.5}]
+
+[messages.bloop]
+elements = [{type = "tone", freq1 = 840.0, freq2 = 500.0, ms = 100, amp = 0.5}]
+
 [messages.piano_chord]
-elements = [{type = "tone", freq1 = 660.0, freq2 = 880.0, ms = 100, amp = 0.7}]
+elements = [{type = "tone", freq1 = 660.0, freq2 = 880.0, ms = 100, amp = 0.5}]
+
+[messages.quindar_on]
+elements = [{type = "tone", freq1 = 2525, freq2 = 0.0, ms = 250, amp = 0.5}]
+
+[messages.quindar_off]
+elements = [{type = "tone", freq1 = 2475, freq2 = 0.0, ms = 250, amp = 0.5}]
 
 [messages.shooting_star]
 elements = [
-  {type = "tone", freq1 = 800.0, freq2 = 0.0, ms = 100, amp = 0.7},
-  {type = "tone", freq1 = 800.0, freq2 = 0.0, ms = 100, amp = 0.7},
-  {type = "tone", freq1 = 540.0, freq2 = 0.0, ms = 100, amp = 0.7},
+  {type = "tone", freq1 = 800.0, freq2 = 0.0, ms = 100, amp = 0.5},
+  {type = "tone", freq1 = 800.0, freq2 = 0.0, ms = 100, amp = 0.5},
+  {type = "tone", freq1 = 540.0, freq2 = 0.0, ms = 100, amp = 0.5},
 ]
 
-[messages.acc_ct_2]
-# Bumble Bee with 75ms tones instead of 100ms
+[messages.yellow_jacket]
 elements = [
-  {type = "tone", freq1 = 330.0, freq2 = 0.0, ms = 75, amp = 0.7},
-  {type = "tone", freq1 = 495.0, freq2 = 0.0, ms = 75, amp = 0.7},
-  {type = "tone", freq1 = 660.0, freq2 = 0.0, ms = 75, amp = 0.7},
+  {type = "tone", freq1 = 330.0, freq2 = 0.0, ms = 50, amp = 0.5},
+  {type = "tone", freq1 = 495.0, freq2 = 0.0, ms = 50, amp = 0.5},
+  {type = "tone", freq1 = 660.0, freq2 = 0.0, ms = 50, amp = 0.5},
 ]
 
-[messages.acc_morse_k]
-elements = [{type = "cw", text = "K"}]
-
-[messages.acc_morse_n]
-elements = [{type = "cw", text = "N"}]
-
-[messages.acc_morse_b]
-elements = [{type = "cw", text = "B"}]
-
-[messages.acc_ct_8]
-elements = [{type = "tone", freq1 = 660.0, freq2 = 0.0, ms = 580, amp = 0.7}]
-
-[messages.acc_ct_9]
-elements = [{type = "tone", freq1 = 660.0, freq2 = 0.0, ms = 120, amp = 0.7}]
-
-[messages.acc_ct_10]
-elements = [{type = "tone", freq1 = 660.0, freq2 = 250.0, ms = 100, amp = 0.7}]
+[messages.bumble_bee]
+elements = [
+  {type = "tone", freq1 = 330.0, freq2 = 0.0, ms = 100, amp = 0.5},
+  {type = "tone", freq1 = 495.0, freq2 = 0.0, ms = 100, amp = 0.5},
+  {type = "tone", freq1 = 660.0, freq2 = 0.0, ms = 100, amp = 0.5},
+]
 
 [messages.comet]
 elements = [
-  {type = "tone", freq1 = 500.0, freq2 = 0.0, ms = 100, amp = 0.7},
-  {type = "tone", freq1 = 500.0, freq2 = 0.0, ms = 100, amp = 0.7},
-  {type = "tone", freq1 = 750.0, freq2 = 0.0, ms = 100, amp = 0.7},
+  {type = "tone", freq1 = 500.0, freq2 = 0.0, ms = 100, amp = 0.5},
+  {type = "tone", freq1 = 500.0, freq2 = 0.0, ms = 100, amp = 0.5},
+  {type = "tone", freq1 = 750.0, freq2 = 0.0, ms = 100, amp = 0.5},
 ]
 
 [messages.stardust]
 elements = [
-  {type = "tone", freq1 = 750.0, freq2 = 0.0,    ms = 125, amp = 0.7},
-  {type = "tone", freq1 = 880.0, freq2 = 0.0,    ms = 80,  amp = 0.7},
-  {type = "tone", freq1 = 880.0, freq2 = 1200.0, ms = 80,  amp = 0.7},
+  {type = "tone", freq1 = 750.0, freq2 = 0.0,    ms = 125, amp = 0.5},
+  {type = "tone", freq1 = 880.0, freq2 = 0.0,    ms = 80,  amp = 0.5},
+  {type = "tone", freq1 = 880.0, freq2 = 1200.0, ms = 80,  amp = 0.5},
 ]
 
 [messages.hornet]
 elements = [
-  {type = "tone", freq1 = 660.0, freq2 = 0.0, ms = 50, amp = 0.7},
-  {type = "tone", freq1 = 500.0, freq2 = 0.0, ms = 50, amp = 0.7},
-  {type = "tone", freq1 = 385.0, freq2 = 0.0, ms = 50, amp = 0.7},
+  {type = "tone", freq1 = 660.0, freq2 = 0.0, ms = 50, amp = 0.5},
+  {type = "tone", freq1 = 500.0, freq2 = 0.0, ms = 50, amp = 0.5},
+  {type = "tone", freq1 = 385.0, freq2 = 0.0, ms = 50, amp = 0.5},
 ]
 
 [messages.wasp]
-# Hornet with double the duration
 elements = [
-  {type = "tone", freq1 = 660.0, freq2 = 0.0, ms = 100, amp = 0.7},
-  {type = "tone", freq1 = 500.0, freq2 = 0.0, ms = 100, amp = 0.7},
-  {type = "tone", freq1 = 385.0, freq2 = 0.0, ms = 100, amp = 0.7},
+  {type = "tone", freq1 = 660.0, freq2 = 0.0, ms = 100, amp = 0.5},
+  {type = "tone", freq1 = 500.0, freq2 = 0.0, ms = 100, amp = 0.5},
+  {type = "tone", freq1 = 385.0, freq2 = 0.0, ms = 100, amp = 0.5},
 ]
 
 [messages.tumbleweed]
 elements = [
-  {type = "tone", freq1 = 1000.0, freq2 = 0.0, ms = 20, amp = 0.7},
-  {type = "tone", freq1 = 800.0,  freq2 = 0.0, ms = 20, amp = 0.7},
-  {type = "tone", freq1 = 600.0,  freq2 = 0.0, ms = 20, amp = 0.7},
+  {type = "tone", freq1 = 1000.0, freq2 = 0.0, ms = 20, amp = 0.5},
+  {type = "tone", freq1 = 800.0,  freq2 = 0.0, ms = 20, amp = 0.5},
+  {type = "tone", freq1 = 600.0,  freq2 = 0.0, ms = 20, amp = 0.5},
 ]
 
 [messages.fire_fly]
 elements = [
-  {type = "tone", freq1 = 1000.0, freq2 = 1200.0, ms = 120, amp = 0.7},
-  {type = "tone", freq1 = 1200.0, freq2 = 1400.0, ms = 80,  amp = 0.7},
-  {type = "tone", freq1 = 600.0,  freq2 = 800.0,  ms = 100, amp = 0.7},
+  {type = "tone", freq1 = 1000.0, freq2 = 1200.0, ms = 120, amp = 0.5},
+  {type = "tone", freq1 = 1200.0, freq2 = 1400.0, ms = 80,  amp = 0.5},
+  {type = "tone", freq1 = 600.0,  freq2 = 800.0,  ms = 100, amp = 0.5},
 ]
 
 [messages.chirp_chomp]
 elements = [
-  {type = "tone", freq1 = 1500.0, freq2 = 0.0, ms = 20, amp = 0.7},
-  {type = "tone", freq1 = 1250.0, freq2 = 0.0, ms = 20, amp = 0.7},
-  {type = "tone", freq1 = 1000.0, freq2 = 0.0, ms = 20, amp = 0.7},
-  {type = "tone", freq1 = 750.0,  freq2 = 0.0, ms = 20, amp = 0.7},
-  {type = "tone", freq1 = 500.0,  freq2 = 0.0, ms = 20, amp = 0.7},
-  {type = "tone", freq1 = 2550.0, freq2 = 0.0, ms = 20, amp = 0.7},
+  {type = "tone", freq1 = 1500.0, freq2 = 0.0, ms = 20, amp = 0.5},
+  {type = "tone", freq1 = 1250.0, freq2 = 0.0, ms = 20, amp = 0.5},
+  {type = "tone", freq1 = 1000.0, freq2 = 0.0, ms = 20, amp = 0.5},
+  {type = "tone", freq1 = 750.0,  freq2 = 0.0, ms = 20, amp = 0.5},
+  {type = "tone", freq1 = 500.0,  freq2 = 0.0, ms = 20, amp = 0.5},
+  {type = "tone", freq1 = 2550.0, freq2 = 0.0, ms = 20, amp = 0.5},
 ]
 
 [messages.moonbounce]
 elements = [
-  {type = "tone", freq1 = 1000.0, freq2 = 800.0, ms = 50, amp = 0.7},
-  {type = "tone", freq1 = 800.0,  freq2 = 0.0,   ms = 50, amp = 0.7},
-  {type = "tone", freq1 = 600.0,  freq2 = 0.0,   ms = 50, amp = 0.7},
-  {type = "tone", freq1 = 1500.0, freq2 = 0.0,   ms = 50, amp = 0.7},
+  {type = "tone", freq1 = 1000.0, freq2 = 800.0, ms = 50, amp = 0.5},
+  {type = "tone", freq1 = 800.0,  freq2 = 0.0,   ms = 50, amp = 0.5},
+  {type = "tone", freq1 = 600.0,  freq2 = 0.0,   ms = 50, amp = 0.5},
+  {type = "tone", freq1 = 1500.0, freq2 = 0.0,   ms = 50, amp = 0.5},
 ]
 
 [messages.dunce_cap]
 elements = [
-  {type = "tone", freq1 = 440.0, freq2 = 500.0, ms = 200, amp = 0.7},
-  {type = "tone", freq1 = 440.0, freq2 = 350.0, ms = 200, amp = 0.7},
+  {type = "tone", freq1 = 440.0, freq2 = 500.0, ms = 200, amp = 0.5},
+  {type = "tone", freq1 = 440.0, freq2 = 350.0, ms = 200, amp = 0.5},
 ]
-
-[messages.honk]
-elements = [{type = "tone", freq1 = 500.0, freq2 = 700.0, ms = 100, amp = 0.7}]
-
-[messages.beep]
-elements = [{type = "tone", freq1 = 880.0, freq2 = 0.0, ms = 100, amp = 0.7}]
-
-[messages.boop]
-elements = [{type = "tone", freq1 = 440.0, freq2 = 0.0, ms = 100, amp = 0.7}]
-
-[messages.bloop]
-elements = [{type = "tone", freq1 = 840.0, freq2 = 500.0, ms = 100, amp = 0.7}]
 
 [messages.doorbell]
 elements = [
-  {type = "tone", freq1 = 800.0, freq2 = 0.0, ms = 75, amp = 0.7},
-  {type = "tone", freq1 = 400.0, freq2 = 0.0, ms = 50, amp = 0.7},
+  {type = "tone", freq1 = 800.0, freq2 = 0.0, ms = 75, amp = 0.5},
+  {type = "tone", freq1 = 400.0, freq2 = 0.0, ms = 50, amp = 0.5},
 ]
 
 [messages.doorbell_chord]
 elements = [
-  {type = "tone", freq1 = 1450.0, freq2 = 725.0, ms = 75, amp = 0.7},
-  {type = "tone", freq1 = 725.0,  freq2 = 360.0, ms = 50, amp = 0.7},
+  {type = "tone", freq1 = 1450.0, freq2 = 725.0, ms = 75, amp = 0.5},
+  {type = "tone", freq1 = 725.0,  freq2 = 360.0, ms = 50, amp = 0.5},
 ]
 
 [messages.descending]
 elements = [
-  {type = "tone", freq1 = 1000.0, freq2 = 0.0, ms = 50, amp = 0.7},
-  {type = "tone", freq1 = 750.0,  freq2 = 0.0, ms = 50, amp = 0.7},
-  {type = "tone", freq1 = 500.0,  freq2 = 0.0, ms = 50, amp = 0.7},
+  {type = "tone", freq1 = 1000.0, freq2 = 0.0, ms = 50, amp = 0.5},
+  {type = "tone", freq1 = 750.0,  freq2 = 0.0, ms = 50, amp = 0.5},
+  {type = "tone", freq1 = 500.0,  freq2 = 0.0, ms = 50, amp = 0.5},
 ]
 
 [messages.ascending]
 elements = [
-  {type = "tone", freq1 = 500.0,  freq2 = 0.0, ms = 50, amp = 0.7},
-  {type = "tone", freq1 = 750.0,  freq2 = 0.0, ms = 50, amp = 0.7},
-  {type = "tone", freq1 = 1000.0, freq2 = 0.0, ms = 50, amp = 0.7},
+  {type = "tone", freq1 = 500.0,  freq2 = 0.0, ms = 50, amp = 0.5},
+  {type = "tone", freq1 = 750.0,  freq2 = 0.0, ms = 50, amp = 0.5},
+  {type = "tone", freq1 = 1000.0, freq2 = 0.0, ms = 50, amp = 0.5},
 ]
 
 [messages.rolm]
-# Source gives 100-200ms; 150ms picked as a middle value.
-elements = [{type = "tone", freq1 = 525.0, freq2 = 660.0, ms = 150, amp = 0.7}]
+elements = [{type = "tone", freq1 = 525.0, freq2 = 660.0, ms = 150, amp = 0.5}]
 
 [messages.nextel_beep]
 elements = [
-  {type = "tone", freq1 = 1760.0, freq2 = 0.0, ms = 30, amp = 0.7},
+  {type = "tone", freq1 = 1760.0, freq2 = 0.0, ms = 30, amp = 0.5},
   {type = "tone", freq1 = 0.0,    freq2 = 0.0, ms = 30, amp = 0.0},
-  {type = "tone", freq1 = 1760.0, freq2 = 0.0, ms = 30, amp = 0.7},
+  {type = "tone", freq1 = 1760.0, freq2 = 0.0, ms = 30, amp = 0.5},
   {type = "tone", freq1 = 0.0,    freq2 = 0.0, ms = 30, amp = 0.0},
-  {type = "tone", freq1 = 1760.0, freq2 = 0.0, ms = 30, amp = 0.7},
+  {type = "tone", freq1 = 1760.0, freq2 = 0.0, ms = 30, amp = 0.5},
 ]
 
 [messages.function_complete]
 elements = [
-  {type = "tone", freq1 = 480.0, freq2 = 1200.0, ms = 40, amp = 0.7},
+  {type = "tone", freq1 = 480.0, freq2 = 1200.0, ms = 40, amp = 0.5},
   {type = "tone", freq1 = 0.0,   freq2 = 0.0,    ms = 40, amp = 0.0},
-  {type = "tone", freq1 = 480.0, freq2 = 1200.0, ms = 40, amp = 0.7},
+  {type = "tone", freq1 = 480.0, freq2 = 1200.0, ms = 40, amp = 0.5},
 ]
 
 [messages.function_complete_2]
 elements = [
-  {type = "tone", freq1 = 900.0, freq2 = 0.0, ms = 60, amp = 0.7},
+  {type = "tone", freq1 = 900.0, freq2 = 0.0, ms = 60, amp = 0.5},
   {type = "tone", freq1 = 0.0,   freq2 = 0.0, ms = 60, amp = 0.0},
-  {type = "tone", freq1 = 900.0, freq2 = 0.0, ms = 60, amp = 0.7},
+  {type = "tone", freq1 = 900.0, freq2 = 0.0, ms = 60, amp = 0.5},
 ]
 
 [messages.timeout_warn]
