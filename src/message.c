@@ -67,17 +67,19 @@ rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
             break;
         }
         case ELEM_VOICE: {
-            if (!e->voice_clip[0]) {
-                fprintf(stderr, "message: '%s' VOICE element has no clip\n", name);
+            if (e->n_voice_clips == 0) {
+                fprintf(stderr, "message: '%s' VOICE element has no clips\n", name);
                 break;
             }
-            size_t n;
-            const int16_t *samples = vocab_get(vocab, e->voice_clip, &n);
-            if (!samples) {
-                fprintf(stderr, "message: voice clip '%s' not found\n", e->voice_clip);
-                break;
+            for (int w = 0; w < e->n_voice_clips; w++) {
+                size_t n;
+                const int16_t *samples = vocab_get(vocab, e->voice_clips[w], &n);
+                if (!samples) {
+                    fprintf(stderr, "message: voice clip '%s' not found\n", e->voice_clips[w]);
+                    continue;
+                }
+                sbuf_append_scaled(&buf, samples, n, cfg->audio.voice_level);
             }
-            sbuf_append_scaled(&buf, samples, n, cfg->audio.voice_level);
             break;
         }
         case ELEM_TONE: {
@@ -91,6 +93,8 @@ rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
         }
         }
     }
+
+    sbuf_scale(&buf, cfg->audio.master_gain);
 
     result.samples = buf.data;
     result.n       = buf.len;

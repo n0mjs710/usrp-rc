@@ -23,6 +23,7 @@ void config_defaults(config_t *cfg)
     cfg->link.opus_bitrate  = 8000;
     cfg->link.opus_frame_ms = 60;
 
+    cfg->audio.master_gain          = 1.0;
     cfg->audio.morse_wpm            = 20;
     cfg->audio.morse_pitch          = 700;
     cfg->audio.morse_level          = 0.9;
@@ -128,7 +129,18 @@ static void read_message_elements(toml_table_t *msg_tbl, config_message_t *out)
             read_str(e, "text", elem->cw_text, sizeof(elem->cw_text));
         } else if (strcmp(type, "voice") == 0) {
             elem->type = ELEM_VOICE;
-            read_str(e, "clip", elem->voice_clip, sizeof(elem->voice_clip));
+            char raw[512] = {0};
+            read_str(e, "clip", raw, sizeof(raw));
+            char *save = NULL;
+            char *tok = strtok_r(raw, " \t", &save);
+            while (tok && elem->n_voice_clips < CFG_MAX_VOICE_WORDS) {
+                strncpy(elem->voice_clips[elem->n_voice_clips], tok, CFG_STR - 1);
+                elem->n_voice_clips++;
+                tok = strtok_r(NULL, " \t", &save);
+            }
+            if (elem->n_voice_clips == 0)
+                fprintf(stderr, "config: message '%s' element %d: VOICE has no clip words\n",
+                        out->name, i);
         } else if (strcmp(type, "tone") == 0 || strcmp(type, "ct") == 0) {
             elem->type = ELEM_TONE;
             elem->ms   = 80;
@@ -256,6 +268,7 @@ int config_load(config_t *cfg, const char *path)
     }
 
     if ((t = toml_table_in(root, "audio"))) {
+        read_double(t, "master_gain",           &cfg->audio.master_gain);
         read_int(t,    "morse_wpm",            &cfg->audio.morse_wpm);
         read_int(t,    "morse_pitch",           &cfg->audio.morse_pitch);
         read_double(t, "morse_level",           &cfg->audio.morse_level);

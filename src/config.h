@@ -7,6 +7,7 @@
 #define CFG_MAX_MESSAGES     64
 #define CFG_MAX_ELEMENTS     32
 #define CFG_MAX_ID_ROTATION  8
+#define CFG_MAX_VOICE_WORDS  16
 #define CFG_STR              128
 
 typedef enum {
@@ -19,8 +20,10 @@ typedef struct {
     elem_type_t type;
     /* cw */
     char     cw_text[CFG_STR];
-    /* voice */
-    char     voice_clip[CFG_STR];
+    /* voice: one or more clip names, played back to back.
+     * `clip = "THIS IS W ONE"` in TOML splits into 4 words here. */
+    char     voice_clips[CFG_MAX_VOICE_WORDS][CFG_STR];
+    int      n_voice_clips;
     /* tone */
     double   freq1;
     double   freq2;
@@ -58,6 +61,7 @@ typedef struct {
 } config_link_t;
 
 typedef struct {
+    double   master_gain;   /* final multiplier on all rendered controller audio */
     int      morse_wpm;
     int      morse_pitch;
     double   morse_level;

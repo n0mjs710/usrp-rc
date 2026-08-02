@@ -43,6 +43,19 @@ static inline void sbuf_append_silence(sbuf_t *b, size_t n)
     b->len += n;
 }
 
+/* Scale b->data[0..len) in place by `gain` (clamped to int16 range). */
+static inline void sbuf_scale(sbuf_t *b, double gain)
+{
+    if (gain == 1.0)
+        return;
+    for (size_t i = 0; i < b->len; i++) {
+        double s = (double)b->data[i] * gain;
+        if (s > 32767.0)  s = 32767.0;
+        if (s < -32768.0) s = -32768.0;
+        b->data[i] = (int16_t)s;
+    }
+}
+
 /* Append src scaled by `level` (0.0-1.0+, clamped to int16 range). */
 static inline void sbuf_append_scaled(sbuf_t *b, const int16_t *src, size_t n, double level)
 {

@@ -76,13 +76,23 @@ the first argument) and edit for your site. Config sections:
   or `"opus"` (narrowband SILK, 8 kHz). Set `enabled = false` to run as a
   standalone local repeater with no network bridge at all — no link socket
   is created.
-- `[audio]` — Morse/tone/voice levels, STE delay, pre/post-message padding.
+- `[audio]` — `master_gain` is a final multiplier applied to all generated
+  controller audio (tones, CW, voice) — set it once for your site's
+  modulator/deviation headroom (a sustained tone reads much "louder" in FM
+  deviation than speech at the same digital peak, so start well below
+  1.0 — MMDVMHost's own USRP audio gain setting is a factor here too), then
+  balance individual sounds against each other with `morse_level`,
+  `voice_level`, and per-tone `amp` within that range. Also STE delay,
+  pre/post-message padding.
 - `[timers]` — hang, ct_delay, kerchunk, timeout (TOT), id_interval,
   id_anxious. Mirrors standard analog repeater controller terminology.
 - `[events]` — which named message plays for each occasion (startup,
   initial/mandatory/anxious/impolite ID, courtesy tones, timeout).
 - `[messages.*]` — named sequences of `cw` / `voice` / `tone` elements,
-  shared by all events.
+  shared by all events. A `voice` element's `clip` can hold several clip
+  names separated by spaces (e.g. `"THIS IS W ONE X Y Z REPEATER"`), played
+  back to back — clip names never contain spaces, so this is unambiguous.
+  `cw` text is *not* split this way; spaces there are real Morse word gaps.
 
 `access_mode` (top-level key, default `"cor"`) is accepted but `"cor_ctcss"`
 has no functional effect in this build: USRP carries a single keyup bit, so
