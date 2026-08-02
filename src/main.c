@@ -380,54 +380,61 @@ int main(int argc, char *argv[])
     if (argc > 1)
         config_path = argv[1];
 
-    app_t a = {0};
-    a.link_sock = -1;
+    /* app_t embeds config_t directly (messages[64] x elements[32] x
+     * voice_words[32] adds up to several MB) -- heap-allocate it rather
+     * than risk overflowing the thread stack. */
+    app_t *a = calloc(1, sizeof(*a));
+    if (!a) {
+        fprintf(stderr, "usrp-rc: out of memory\n");
+        return 1;
+    }
+    a->link_sock = -1;
 
-    if (config_load(&a.cfg, config_path) != 0) {
+    if (config_load(&a->cfg, config_path) != 0) {
         fprintf(stderr, "usrp-rc: failed to load config: %s\n", config_path);
         return 1;
     }
 
-    if (a.cfg.link.enabled) {
+    if (a->cfg.link.enabled) {
         printf("usrp-rc: mmdvm %s:%u <-> %s:%u   link %s:%u <-> %s:%u (%s)\n",
-               a.cfg.mmdvm.local_address, a.cfg.mmdvm.local_port,
-               a.cfg.mmdvm.rpt_address,   a.cfg.mmdvm.rpt_port,
-               a.cfg.link.bind_address,   a.cfg.link.local_port,
-               a.cfg.link.remote_host,    a.cfg.link.remote_port,
-               a.cfg.link.codec == LINK_CODEC_OPUS ? "opus" : "pcm");
+               a->cfg.mmdvm.local_address, a->cfg.mmdvm.local_port,
+               a->cfg.mmdvm.rpt_address,   a->cfg.mmdvm.rpt_port,
+               a->cfg.link.bind_address,   a->cfg.link.local_port,
+               a->cfg.link.remote_host,    a->cfg.link.remote_port,
+               a->cfg.link.codec == LINK_CODEC_OPUS ? "opus" : "pcm");
     } else {
         printf("usrp-rc: mmdvm %s:%u <-> %s:%u   link disabled (standalone repeater)\n",
-               a.cfg.mmdvm.local_address, a.cfg.mmdvm.local_port,
-               a.cfg.mmdvm.rpt_address,   a.cfg.mmdvm.rpt_port);
+               a->cfg.mmdvm.local_address, a->cfg.mmdvm.local_port,
+               a->cfg.mmdvm.rpt_address,   a->cfg.mmdvm.rpt_port);
     }
-    printf("usrp-rc: %d messages loaded\n", a.cfg.nmessages);
+    printf("usrp-rc: %d messages loaded\n", a->cfg.nmessages);
 
     const char *vocab_dirs[] = {
         "user_8k", "vocab_8k",
         "/etc/usrp-rc/user_8k", "/etc/usrp-rc/vocab_8k",
     };
-    if (vocab_cache_create(&a.vocab, vocab_dirs, 4) != 0) {
+    if (vocab_cache_create(&a->vocab, vocab_dirs, 4) != 0) {
         fprintf(stderr, "usrp-rc: failed to init vocab cache\n");
         return 1;
     }
 
-    if (port_create(&a.port, &a.cfg, a.vocab) != 0) {
+    if (port_create(&a->port, &a->cfg, a->vocab) != 0) {
         fprintf(stderr, "usrp-rc: failed to init port state machine\n");
         return 1;
     }
-    port_set_ptt_callback(a.port, on_port_ptt, &a);
+    port_set_ptt_callback(a->port, on_port_ptt, a);
 
-    if (a.cfg.link.enabled) {
-        if (ste_create(&a.ste, a.cfg.audio.ste_delay_ms) != 0) {
+    if (a->cfg.link.enabled) {
+        if (ste_create(&a->ste, a->cfg.audio.ste_delay_ms) != 0) {
             fprintf(stderr, "usrp-rc: failed to init STE buffer\n");
             return 1;
         }
-        if (jitter_buffer_create(&a.jb, JITTER_BUF_DEFAULT) != 0) {
+        if (jitter_buffer_create(&a->jb, JITTER_BUF_DEFAULT) != 0) {
             fprintf(stderr, "usrp-rc: failed to init jitter buffer\n");
             return 1;
         }
-        if (a.cfg.link.codec == LINK_CODEC_OPUS) {
-            if (opus_codec_create(&a.opus, a.cfg.link.opus_bitrate, a.cfg.link.opus_frame_ms) != 0) {
+        if (a->cfg.link.codec == LINK_CODEC_OPUS) {
+            if (opus_codec_create(&a->opus, a->cfg.link.opus_bitrate, a->cfg.link.opus_frame_ms) != 0) {
                 fprintf(stderr, "usrp-rc: failed to init opus codec\n");
                 return 1;
             }
@@ -439,47 +446,47 @@ int main(int argc, char *argv[])
     sigaction(SIGINT,  &sa, NULL);
     signal(SIGPIPE, SIG_IGN);
 
-    a.mmdvm_sock = make_udp_socket(a.cfg.mmdvm.local_address, a.cfg.mmdvm.local_port,
-                                   a.cfg.mmdvm.rpt_address,   a.cfg.mmdvm.rpt_port);
-    if (a.mmdvm_sock < 0)
+    a->mmdvm_sock = make_udp_socket(a->cfg.mmdvm.local_address, a->cfg.mmdvm.local_port,
+                                    a->cfg.mmdvm.rpt_address,   a->cfg.mmdvm.rpt_port);
+    if (a->mmdvm_sock < 0)
         return 1;
 
-    if (a.cfg.link.enabled) {
-        a.link_sock = make_udp_socket(a.cfg.link.bind_address, a.cfg.link.local_port,
-                                      a.cfg.link.remote_host,  a.cfg.link.remote_port);
-        if (a.link_sock < 0) {
-            close(a.mmdvm_sock);
+    if (a->cfg.link.enabled) {
+        a->link_sock = make_udp_socket(a->cfg.link.bind_address, a->cfg.link.local_port,
+                                       a->cfg.link.remote_host,  a->cfg.link.remote_port);
+        if (a->link_sock < 0) {
+            close(a->mmdvm_sock);
             return 1;
         }
     }
 
-    a.epfd = epoll_create1(0);
-    if (a.epfd < 0) {
+    a->epfd = epoll_create1(0);
+    if (a->epfd < 0) {
         perror("epoll_create1");
-        close(a.mmdvm_sock);
-        close(a.link_sock);
+        close(a->mmdvm_sock);
+        close(a->link_sock);
         return 1;
     }
 
     struct epoll_event ev = {0};
     ev.events  = EPOLLIN;
-    ev.data.fd = a.mmdvm_sock;
-    epoll_ctl(a.epfd, EPOLL_CTL_ADD, a.mmdvm_sock, &ev);
-    if (a.link_sock >= 0) {
-        ev.data.fd = a.link_sock;
-        epoll_ctl(a.epfd, EPOLL_CTL_ADD, a.link_sock, &ev);
+    ev.data.fd = a->mmdvm_sock;
+    epoll_ctl(a->epfd, EPOLL_CTL_ADD, a->mmdvm_sock, &ev);
+    if (a->link_sock >= 0) {
+        ev.data.fd = a->link_sock;
+        epoll_ctl(a->epfd, EPOLL_CTL_ADD, a->link_sock, &ev);
     }
 
-    port_start(a.port, monotonic_ms());
+    port_start(a->port, monotonic_ms());
 
     printf("usrp-rc: ready\n");
 
     struct epoll_event events[MAX_EVENTS];
     while (!g_stop) {
         uint64_t now = monotonic_ms();
-        int timeout_ms = next_timeout_ms(&a, now);
+        int timeout_ms = next_timeout_ms(a, now);
 
-        int n = epoll_wait(a.epfd, events, MAX_EVENTS, timeout_ms);
+        int n = epoll_wait(a->epfd, events, MAX_EVENTS, timeout_ms);
         if (n < 0) {
             if (errno == EINTR)
                 continue;
@@ -488,24 +495,25 @@ int main(int argc, char *argv[])
         }
 
         now = monotonic_ms();
-        check_all_timers(&a, now);
+        check_all_timers(a, now);
 
         for (int i = 0; i < n; i++) {
-            if (events[i].data.fd == a.mmdvm_sock)
-                handle_mmdvm(&a);
-            else if (events[i].data.fd == a.link_sock)
-                handle_link(&a);
+            if (events[i].data.fd == a->mmdvm_sock)
+                handle_mmdvm(a);
+            else if (events[i].data.fd == a->link_sock)
+                handle_link(a);
         }
     }
 
     printf("usrp-rc: stopping\n");
-    close(a.epfd);
-    close(a.mmdvm_sock);
-    if (a.link_sock >= 0) close(a.link_sock);
-    if (a.opus) opus_codec_destroy(a.opus);
-    jitter_buffer_destroy(a.jb);
-    ste_destroy(a.ste);
-    port_destroy(a.port);
-    vocab_cache_destroy(a.vocab);
+    close(a->epfd);
+    close(a->mmdvm_sock);
+    if (a->link_sock >= 0) close(a->link_sock);
+    if (a->opus) opus_codec_destroy(a->opus);
+    jitter_buffer_destroy(a->jb);
+    ste_destroy(a->ste);
+    port_destroy(a->port);
+    vocab_cache_destroy(a->vocab);
+    free(a);
     return 0;
 }

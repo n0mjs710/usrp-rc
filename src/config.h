@@ -7,7 +7,7 @@
 #define CFG_MAX_MESSAGES     64
 #define CFG_MAX_ELEMENTS     32
 #define CFG_MAX_ID_ROTATION  8
-#define CFG_MAX_VOICE_WORDS  16
+#define CFG_MAX_VOICE_WORDS  32
 #define CFG_STR              128
 
 typedef enum {
