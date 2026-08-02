@@ -1,5 +1,11 @@
 # usrp-rc sample configuration.
 # Copy to /etc/usrp-rc/usrp-rc.toml and edit for your site.
+#
+# NAME LIMIT: message names (the "X" in [messages.X]), voice clip names in
+# a `clip` word list, and every place you reference a message name below
+# (ct_message, initial_ids, etc.) are capped at 31 characters — these are
+# short identifiers, not free text, and longer values are silently
+# truncated. This does NOT apply to actual content like CW `text`.
 
 # "cor" (default) — COR alone opens the repeater. USRP carries a single
 # keyup bit, so "cor_ctcss" has no independent CTCSS source in this build;

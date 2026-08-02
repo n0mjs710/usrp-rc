@@ -269,7 +269,7 @@ static void impolite_id_after_mix(port_t *p, uint64_t now)
 static void do_impolite_id(port_t *p, uint64_t now)
 {
     const char *name = p->cfg->events.impolite_id;
-    char picked[CFG_STR] = {0};
+    char picked[CFG_NAME_STR] = {0};
 
     if (!name[0]) {
         if (p->cfg->events.n_mandatory_ids == 0) {

@@ -87,7 +87,7 @@ static void read_bool(toml_table_t *tbl, const char *key, bool *dst)
 
 /* Read a TOML array of strings into a fixed-size C array of fixed-size strings. */
 static int read_str_array(toml_table_t *tbl, const char *key,
-                          char dst[][CFG_STR], int max, size_t elem_sz)
+                          char dst[][CFG_NAME_STR], int max, size_t elem_sz)
 {
     toml_array_t *arr = toml_array_in(tbl, key);
     if (!arr)
@@ -161,7 +161,7 @@ static void read_message_elements(toml_table_t *msg_tbl, config_message_t *out)
                     w->gap_ms = gap_ms;
                 } else {
                     w->is_gap = false;
-                    strncpy(w->clip, tok, CFG_STR - 1);
+                    strncpy(w->clip, tok, sizeof(w->clip) - 1);
                 }
                 elem->n_voice_words++;
                 tok = strtok_r(NULL, " \t", &save);
@@ -326,9 +326,9 @@ int config_load(config_t *cfg, const char *path)
         read_str(t, "timeout_message",         cfg->events.timeout_message, sizeof(cfg->events.timeout_message));
         read_str(t, "timeout_cancel_message",  cfg->events.timeout_cancel_message, sizeof(cfg->events.timeout_cancel_message));
         cfg->events.n_initial_ids = read_str_array(t, "initial_ids",
-            cfg->events.initial_ids, CFG_MAX_ID_ROTATION, CFG_STR);
+            cfg->events.initial_ids, CFG_MAX_ID_ROTATION, CFG_NAME_STR);
         cfg->events.n_mandatory_ids = read_str_array(t, "mandatory_ids",
-            cfg->events.mandatory_ids, CFG_MAX_ID_ROTATION, CFG_STR);
+            cfg->events.mandatory_ids, CFG_MAX_ID_ROTATION, CFG_NAME_STR);
     }
 
     {

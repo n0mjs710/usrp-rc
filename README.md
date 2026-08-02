@@ -96,7 +96,13 @@ the first argument) and edit for your site. Config sections:
   A word `"_"` inserts a pause instead of a clip: bare `_` uses
   `audio.voice_gap_ms`, `"_400"` is an explicit 400 ms pause. Only
   recognized when `_` is followed solely by digits or nothing, so clip
-  names like `_TEEN` are unaffected.
+  names like `_TEEN` are unaffected. A message can hold up to 32 elements,
+  and a single `voice` element's word list up to 32 words/pauses.
+
+**Name length**: message names, clip names, and anywhere you reference a
+message name (`ct_message`, `initial_ids`, etc.) are capped at 31
+characters — they're short identifiers, not content, and longer values are
+silently truncated at load. This does not apply to CW `text`.
 
 `access_mode` (top-level key, default `"cor"`) is accepted but `"cor_ctcss"`
 has no functional effect in this build: USRP carries a single keyup bit, so

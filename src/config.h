@@ -10,6 +10,15 @@
 #define CFG_MAX_VOICE_WORDS  32
 #define CFG_STR              128
 
+/* Short identifier strings: vocab clip names, message names, and message-
+ * name references (ct_message, initial_ids, etc.). None of these are free
+ * text -- they're names you make up and refer back to -- so 32 bytes (31
+ * usable characters) is deliberately tight to keep config_t's size down;
+ * the longest real clip name in vocab_8k/ is 18 characters. Longer values
+ * are silently truncated at parse time. Use CFG_STR instead for fields
+ * that hold actual content (e.g. CW text) rather than a name. */
+#define CFG_NAME_STR         32
+
 typedef enum {
     ELEM_CW,
     ELEM_VOICE,
@@ -22,8 +31,8 @@ typedef enum {
  * or nothing, so clip names like "_TEEN" are unaffected). */
 typedef struct {
     bool     is_gap;
-    int      gap_ms;        /* valid when is_gap; -1 = use configured default */
-    char     clip[CFG_STR]; /* valid when !is_gap */
+    int      gap_ms;             /* valid when is_gap; -1 = use configured default */
+    char     clip[CFG_NAME_STR]; /* valid when !is_gap */
 } config_voice_word_t;
 
 typedef struct {
@@ -42,7 +51,7 @@ typedef struct {
 } config_elem_t;
 
 typedef struct {
-    char           name[CFG_STR];
+    char           name[CFG_NAME_STR];
     config_elem_t  elements[CFG_MAX_ELEMENTS];
     int            nelements;
 } config_message_t;
@@ -93,17 +102,17 @@ typedef struct {
 } config_timers_t;
 
 typedef struct {
-    char startup_message[CFG_STR];
-    char initial_ids[CFG_MAX_ID_ROTATION][CFG_STR];
+    char startup_message[CFG_NAME_STR];
+    char initial_ids[CFG_MAX_ID_ROTATION][CFG_NAME_STR];
     int  n_initial_ids;
-    char mandatory_ids[CFG_MAX_ID_ROTATION][CFG_STR];
+    char mandatory_ids[CFG_MAX_ID_ROTATION][CFG_NAME_STR];
     int  n_mandatory_ids;
-    char anxious_id[CFG_STR];
-    char impolite_id[CFG_STR];
-    char ct_message[CFG_STR];
-    char ct_link_message[CFG_STR];
-    char timeout_message[CFG_STR];
-    char timeout_cancel_message[CFG_STR];
+    char anxious_id[CFG_NAME_STR];
+    char impolite_id[CFG_NAME_STR];
+    char ct_message[CFG_NAME_STR];
+    char ct_link_message[CFG_NAME_STR];
+    char timeout_message[CFG_NAME_STR];
+    char timeout_cancel_message[CFG_NAME_STR];
 } config_events_t;
 
 typedef enum {
