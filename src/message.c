@@ -67,15 +67,21 @@ rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
             break;
         }
         case ELEM_VOICE: {
-            if (e->n_voice_clips == 0) {
-                fprintf(stderr, "message: '%s' VOICE element has no clips\n", name);
+            if (e->n_voice_words == 0) {
+                fprintf(stderr, "message: '%s' VOICE element has no words\n", name);
                 break;
             }
-            for (int w = 0; w < e->n_voice_clips; w++) {
+            for (int w = 0; w < e->n_voice_words; w++) {
+                const config_voice_word_t *word = &e->voice_words[w];
+                if (word->is_gap) {
+                    int ms = word->gap_ms >= 0 ? word->gap_ms : cfg->audio.voice_gap_ms;
+                    sbuf_append_silence(&buf, (size_t)((double)ms / 1000.0 * TONE_SAMPLE_RATE));
+                    continue;
+                }
                 size_t n;
-                const int16_t *samples = vocab_get(vocab, e->voice_clips[w], &n);
+                const int16_t *samples = vocab_get(vocab, word->clip, &n);
                 if (!samples) {
-                    fprintf(stderr, "message: voice clip '%s' not found\n", e->voice_clips[w]);
+                    fprintf(stderr, "message: voice clip '%s' not found\n", word->clip);
                     continue;
                 }
                 sbuf_append_scaled(&buf, samples, n, cfg->audio.voice_level);

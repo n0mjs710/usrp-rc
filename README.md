@@ -93,6 +93,10 @@ the first argument) and edit for your site. Config sections:
   names separated by spaces (e.g. `"THIS IS W ONE X Y Z REPEATER"`), played
   back to back — clip names never contain spaces, so this is unambiguous.
   `cw` text is *not* split this way; spaces there are real Morse word gaps.
+  A word `"_"` inserts a pause instead of a clip: bare `_` uses
+  `audio.voice_gap_ms`, `"_400"` is an explicit 400 ms pause. Only
+  recognized when `_` is followed solely by digits or nothing, so clip
+  names like `_TEEN` are unaffected.
 
 `access_mode` (top-level key, default `"cor"`) is accepted but `"cor_ctcss"`
 has no functional effect in this build: USRP carries a single keyup bit, so

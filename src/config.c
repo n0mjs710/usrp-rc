@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <ctype.h>
 
 void config_defaults(config_t *cfg)
 {
@@ -29,6 +30,7 @@ void config_defaults(config_t *cfg)
     cfg->audio.morse_level          = 0.9;
     cfg->audio.impolite_morse_level = 0.3;
     cfg->audio.voice_level          = 0.9;
+    cfg->audio.voice_gap_ms         = 150;
     cfg->audio.ste_delay_ms         = 0;
     cfg->audio.pre_message_ms       = 0;
     cfg->audio.post_message_ms      = 0;
@@ -106,6 +108,24 @@ static int read_str_array(toml_table_t *tbl, const char *key,
 
 /* ── message elements ──────────────────────────────────────────────────── */
 
+/* "_" -> gap, default length (*out_ms = -1). "_NNN" -> gap, NNN ms.
+ * Anything else (including "_TEEN" etc.) is not a gap. */
+static bool parse_voice_gap(const char *tok, int *out_ms)
+{
+    if (tok[0] != '_')
+        return false;
+    const char *rest = tok + 1;
+    if (*rest == '\0') {
+        *out_ms = -1;
+        return true;
+    }
+    for (const char *p = rest; *p; p++)
+        if (!isdigit((unsigned char)*p))
+            return false;
+    *out_ms = atoi(rest);
+    return true;
+}
+
 static void read_message_elements(toml_table_t *msg_tbl, config_message_t *out)
 {
     toml_array_t *elems = toml_array_in(msg_tbl, "elements");
@@ -133,13 +153,21 @@ static void read_message_elements(toml_table_t *msg_tbl, config_message_t *out)
             read_str(e, "clip", raw, sizeof(raw));
             char *save = NULL;
             char *tok = strtok_r(raw, " \t", &save);
-            while (tok && elem->n_voice_clips < CFG_MAX_VOICE_WORDS) {
-                strncpy(elem->voice_clips[elem->n_voice_clips], tok, CFG_STR - 1);
-                elem->n_voice_clips++;
+            while (tok && elem->n_voice_words < CFG_MAX_VOICE_WORDS) {
+                config_voice_word_t *w = &elem->voice_words[elem->n_voice_words];
+                int gap_ms;
+                if (parse_voice_gap(tok, &gap_ms)) {
+                    w->is_gap = true;
+                    w->gap_ms = gap_ms;
+                } else {
+                    w->is_gap = false;
+                    strncpy(w->clip, tok, CFG_STR - 1);
+                }
+                elem->n_voice_words++;
                 tok = strtok_r(NULL, " \t", &save);
             }
-            if (elem->n_voice_clips == 0)
-                fprintf(stderr, "config: message '%s' element %d: VOICE has no clip words\n",
+            if (elem->n_voice_words == 0)
+                fprintf(stderr, "config: message '%s' element %d: VOICE has no words\n",
                         out->name, i);
         } else if (strcmp(type, "tone") == 0 || strcmp(type, "ct") == 0) {
             elem->type = ELEM_TONE;
@@ -274,6 +302,7 @@ int config_load(config_t *cfg, const char *path)
         read_double(t, "morse_level",           &cfg->audio.morse_level);
         read_double(t, "impolite_morse_level",  &cfg->audio.impolite_morse_level);
         read_double(t, "voice_level",           &cfg->audio.voice_level);
+        read_int(t,    "voice_gap_ms",          &cfg->audio.voice_gap_ms);
         read_int(t,    "ste_delay_ms",          &cfg->audio.ste_delay_ms);
         read_int(t,    "pre_message_ms",        &cfg->audio.pre_message_ms);
         read_int(t,    "post_message_ms",       &cfg->audio.post_message_ms);

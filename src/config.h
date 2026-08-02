@@ -16,14 +16,24 @@ typedef enum {
     ELEM_TONE,
 } elem_type_t;
 
+/* One word in a voice element's space-separated clip list: either a real
+ * clip name, or a pause ("_" = cfg->audio.voice_gap_ms default, "_NNN" =
+ * NNN ms explicit — recognized only when '_' is followed solely by digits
+ * or nothing, so clip names like "_TEEN" are unaffected). */
+typedef struct {
+    bool     is_gap;
+    int      gap_ms;        /* valid when is_gap; -1 = use configured default */
+    char     clip[CFG_STR]; /* valid when !is_gap */
+} config_voice_word_t;
+
 typedef struct {
     elem_type_t type;
     /* cw */
     char     cw_text[CFG_STR];
-    /* voice: one or more clip names, played back to back.
-     * `clip = "THIS IS W ONE"` in TOML splits into 4 words here. */
-    char     voice_clips[CFG_MAX_VOICE_WORDS][CFG_STR];
-    int      n_voice_clips;
+    /* voice: one or more words, played back to back.
+     * `clip = "THIS IS _ W ONE"` in TOML splits into 5 words here. */
+    config_voice_word_t voice_words[CFG_MAX_VOICE_WORDS];
+    int      n_voice_words;
     /* tone */
     double   freq1;
     double   freq2;
@@ -67,6 +77,7 @@ typedef struct {
     double   morse_level;
     double   impolite_morse_level;
     double   voice_level;
+    int      voice_gap_ms;  /* default pause length for a bare "_" word */
     int      ste_delay_ms;
     int      pre_message_ms;
     int      post_message_ms;
