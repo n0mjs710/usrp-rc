@@ -447,7 +447,7 @@ int main(int argc, char *argv[])
 
     const char *vocab_dirs[] = {
         "user_8k", "vocab_8k",
-        "/etc/usrp-rc/user_8k", "/etc/usrp-rc/vocab_8k",
+        "/usr/local/share/usrp-rc/user_8k", "/usr/local/share/usrp-rc/vocab_8k",
     };
     if (vocab_cache_create(&a->vocab, vocab_dirs, 4) != 0) {
         fprintf(stderr, "usrp-rc: failed to init vocab cache\n");

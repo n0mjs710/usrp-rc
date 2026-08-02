@@ -111,7 +111,12 @@ static void ctrl_buf_pull_frame(port_t *p, int16_t out[160], uint64_t now)
         memset(out + n, 0, (160 - n) * sizeof(int16_t));
     c->pos += n;
 
-    if (c->buf.len > 0 && c->pos >= c->buf.len) {
+    /* Fires on_drain once pos catches up to len -- including immediately,
+     * when a message rendered to nothing (missing/failed clip) and len was
+     * already 0. A `len > 0` guard here would silently swallow that case:
+     * on_drain would never fire, and a standalone ID job's PTT would never
+     * release, keying the transmitter on silence indefinitely. */
+    if (c->pos >= c->buf.len) {
         c->buf.len = 0;
         c->pos     = 0;
         port_cont_fn cb = c->on_drain;

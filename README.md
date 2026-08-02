@@ -187,13 +187,15 @@ journalctl -u usrp-rc -f
 `vocab_8k/` ships pre-built with the repo — a normal clone and build never
 needs any extra vocabulary tooling.
 
-`user_8k/` ships with the repo (and gets installed to `/etc/usrp-rc/user_8k/`)
-ready for your own clips — no need to create it or guess permissions. To add
-a clip (or replace a stock one), drop an 8 kHz mono 16-bit WAV file in,
-matching `vocab_8k/`'s naming convention (the WAV filename, minus `.wav`, is
-the clip name referenced from `voice` elements — see `[messages.*]` above).
-Files in `user_8k/` take priority over stock clips of the same name, so you
-can override one word without touching the shipped set. See
+`user_8k/` ships with the repo (and gets installed to
+`/usr/local/share/usrp-rc/user_8k/` — not `/etc/`, since these are data
+files, not configuration) ready for your own clips — no need to create it or
+guess permissions. To add a clip (or replace a stock one), drop an 8 kHz
+mono 16-bit WAV file in, matching `vocab_8k/`'s naming convention (the WAV
+filename, minus `.wav`, is the clip name referenced from `voice` elements —
+see `[messages.*]` above). Files in `user_8k/` take priority over stock
+clips of the same name, so you can override one word without touching the
+shipped set. See
 [user_8k/README.md](user_8k/README.md) for the same detail in one place.
 
 ## Not implemented (by design, v1)

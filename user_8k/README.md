@@ -15,3 +15,7 @@ removing your file here always reverts to the original.
 
 This folder is loaded before `vocab_8k/`, so a same-named file here always
 wins. See the main [README.md](../README.md) "Vocabulary" section for more.
+
+On an installed system (via `make install`), this is
+`/usr/local/share/usrp-rc/user_8k/` — data, not configuration, so it's not
+under `/etc/`.
