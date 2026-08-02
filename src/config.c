@@ -31,6 +31,7 @@ void config_defaults(config_t *cfg)
     cfg->audio.impolite_morse_level = 0.3;
     cfg->audio.voice_level          = 0.9;
     cfg->audio.voice_gap_ms         = 150;
+    cfg->audio.voice_filter         = true;
     cfg->audio.ste_delay_ms         = 0;
     cfg->audio.pre_message_ms       = 0;
     cfg->audio.post_message_ms      = 0;
@@ -303,6 +304,7 @@ int config_load(config_t *cfg, const char *path)
         read_double(t, "impolite_morse_level",  &cfg->audio.impolite_morse_level);
         read_double(t, "voice_level",           &cfg->audio.voice_level);
         read_int(t,    "voice_gap_ms",          &cfg->audio.voice_gap_ms);
+        read_bool(t,   "voice_filter",          &cfg->audio.voice_filter);
         read_int(t,    "ste_delay_ms",          &cfg->audio.ste_delay_ms);
         read_int(t,    "pre_message_ms",        &cfg->audio.pre_message_ms);
         read_int(t,    "post_message_ms",       &cfg->audio.post_message_ms);

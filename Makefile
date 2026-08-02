@@ -21,6 +21,7 @@ SRCS = src/main.c \
        src/tone.c \
        src/morse.c \
        src/vocab.c \
+       src/voice_filter.c \
        src/message.c \
        src/ste.c \
        src/port.c \

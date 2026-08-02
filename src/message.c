@@ -2,9 +2,11 @@
 #include "tone.h"
 #include "morse.h"
 #include "sbuf.h"
+#include "voice_filter.h"
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 int message_has_voice(const config_t *cfg, const char *name)
 {
@@ -79,12 +81,26 @@ rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
                     continue;
                 }
                 size_t n;
-                const int16_t *samples = vocab_get(vocab, word->clip, &n);
-                if (!samples) {
+                const int16_t *cached = vocab_get(vocab, word->clip, &n);
+                if (!cached) {
                     fprintf(stderr, "message: voice clip '%s' not found\n", word->clip);
                     continue;
                 }
-                sbuf_append_scaled(&buf, samples, n, cfg->audio.voice_level);
+                if (!cfg->audio.voice_filter) {
+                    sbuf_append_scaled(&buf, cached, n, cfg->audio.voice_level);
+                    continue;
+                }
+                /* Filter a copy -- `cached` is owned by the vocab cache and
+                 * reused for every future play of this clip. */
+                int16_t *filtered = malloc(n * sizeof(int16_t));
+                if (!filtered) {
+                    sbuf_append_scaled(&buf, cached, n, cfg->audio.voice_level);
+                    continue;
+                }
+                memcpy(filtered, cached, n * sizeof(int16_t));
+                voice_filter_apply(filtered, n);
+                sbuf_append_scaled(&buf, filtered, n, cfg->audio.voice_level);
+                free(filtered);
             }
             break;
         }

@@ -43,6 +43,7 @@ morse_level          = 0.9
 impolite_morse_level = 0.3   # CW level when IDing over an active QSO (ducking)
 voice_level          = 0.9
 voice_gap_ms         = 150   # default pause length for a bare "_" word in a voice clip list
+voice_filter         = true  # band-limit voice clips to match MMDVMHost's RX filter (300-2700 Hz)
 ste_delay_ms         = 0     # squelch tail elimination delay (0 = disabled)
 pre_message_ms       = 0     # dead air after PTT-on before CW/voice starts
 post_message_ms      = 0     # dead air after audio drains before PTT-off
