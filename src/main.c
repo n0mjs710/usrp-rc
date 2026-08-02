@@ -61,7 +61,25 @@ typedef struct {
 
     int16_t opus_accum[480];
     int     opus_accum_n;
+
+    uint64_t mmdvm_recv_err_logged_ms;
+    uint64_t link_recv_err_logged_ms;
 } app_t;
+
+/* Repeated recv() errors (most commonly ECONNREFUSED: the peer's ICMP port-
+ * unreachable landing on our connected UDP socket, e.g. while a link peer
+ * is down or not yet configured) would otherwise spam once per audio frame.
+ * Log immediately, then at most once every 5 s per socket while it persists. */
+#define RECV_ERR_LOG_INTERVAL_MS 5000
+
+static void log_recv_error(const char *label, uint64_t *last_logged_ms, uint64_t now)
+{
+    if (*last_logged_ms != 0 && now - *last_logged_ms < RECV_ERR_LOG_INTERVAL_MS)
+        return;
+    *last_logged_ms = now;
+    fprintf(stderr, "%s recv: %s (peer unreachable? check [%s] config — suppressing repeats for %ds)\n",
+            label, strerror(errno), label, RECV_ERR_LOG_INTERVAL_MS / 1000);
+}
 
 /* ── socket setup ──────────────────────────────────────────────────────── */
 
@@ -134,6 +152,8 @@ static void flush_opus_uplink(app_t *a)
 
 static void send_link_voice(app_t *a, const int16_t frame[160])
 {
+    if (a->link_sock < 0)
+        return;
     if (a->cfg.link.codec == LINK_CODEC_PCM) {
         uint8_t buf[USRP_PKT_LEN];
         usrp_build_voice(buf, a->link_tx_seq++, 1, frame);
@@ -149,6 +169,8 @@ static void send_link_voice(app_t *a, const int16_t frame[160])
 
 static void send_link_key(app_t *a, bool keyup)
 {
+    if (a->link_sock < 0)
+        return;
     uint8_t buf[USRP_PKT_LEN];
     usrp_build_key(buf, a->link_tx_seq++, keyup ? 1 : 0);
     send(a->link_sock, buf, USRP_PKT_LEN, 0);
@@ -201,13 +223,15 @@ static void mmdvm_key_edge(app_t *a, uint64_t now)
 
 static void mmdvm_unkey_edge(app_t *a, uint64_t now)
 {
-    ste_reset(a->ste);
-    if (a->cfg.link.codec == LINK_CODEC_OPUS && a->opus_accum_n > 0) {
-        int frame_samples = opus_codec_frame_samples(a->opus);
-        memset(a->opus_accum + a->opus_accum_n, 0,
-               (size_t)(frame_samples - a->opus_accum_n) * sizeof(int16_t));
-        a->opus_accum_n = frame_samples;
-        flush_opus_uplink(a);
+    if (a->link_sock >= 0) {
+        ste_reset(a->ste);
+        if (a->cfg.link.codec == LINK_CODEC_OPUS && a->opus_accum_n > 0) {
+            int frame_samples = opus_codec_frame_samples(a->opus);
+            memset(a->opus_accum + a->opus_accum_n, 0,
+                   (size_t)(frame_samples - a->opus_accum_n) * sizeof(int16_t));
+            a->opus_accum_n = frame_samples;
+            flush_opus_uplink(a);
+        }
     }
     send_link_key(a, false);
     port_on_mmdvm_keyup(a->port, false, now);
@@ -223,7 +247,7 @@ static void handle_mmdvm(app_t *a)
         ssize_t n = recv(a->mmdvm_sock, buf, sizeof(buf), 0);
         if (n < 0) {
             if (errno != EAGAIN && errno != EWOULDBLOCK)
-                fprintf(stderr, "mmdvm recv: %s\n", strerror(errno));
+                log_recv_error("mmdvm", &a->mmdvm_recv_err_logged_ms, monotonic_ms());
             return;
         }
         if (usrp_parse(buf, (size_t)n, &pkt) != 0)
@@ -249,9 +273,11 @@ static void handle_mmdvm(app_t *a)
         send_mmdvm_voice(a, frame, true);
 
         /* Flow 2: mmdvm RX -> link TX, through the STE delay gate. */
-        int16_t ste_out[160];
-        if (ste_push(a->ste, pkt.audio, ste_out))
-            send_link_voice(a, ste_out);
+        if (a->link_sock >= 0) {
+            int16_t ste_out[160];
+            if (ste_push(a->ste, pkt.audio, ste_out))
+                send_link_voice(a, ste_out);
+        }
     }
 }
 
@@ -266,7 +292,7 @@ static void handle_link(app_t *a)
         ssize_t n = recv(a->link_sock, buf, sizeof(buf), 0);
         if (n < 0) {
             if (errno != EAGAIN && errno != EWOULDBLOCK)
-                fprintf(stderr, "link recv: %s\n", strerror(errno));
+                log_recv_error("link", &a->link_recv_err_logged_ms, monotonic_ms());
             return;
         }
         if (usrp_parse(buf, (size_t)n, &pkt) != 0)
@@ -355,18 +381,25 @@ int main(int argc, char *argv[])
         config_path = argv[1];
 
     app_t a = {0};
+    a.link_sock = -1;
 
     if (config_load(&a.cfg, config_path) != 0) {
         fprintf(stderr, "usrp-rc: failed to load config: %s\n", config_path);
         return 1;
     }
 
-    printf("usrp-rc: mmdvm %s:%u <-> %s:%u   link %s:%u <-> %s:%u (%s)\n",
-           a.cfg.mmdvm.local_address, a.cfg.mmdvm.local_port,
-           a.cfg.mmdvm.rpt_address,   a.cfg.mmdvm.rpt_port,
-           a.cfg.link.bind_address,   a.cfg.link.local_port,
-           a.cfg.link.remote_host,    a.cfg.link.remote_port,
-           a.cfg.link.codec == LINK_CODEC_OPUS ? "opus" : "pcm");
+    if (a.cfg.link.enabled) {
+        printf("usrp-rc: mmdvm %s:%u <-> %s:%u   link %s:%u <-> %s:%u (%s)\n",
+               a.cfg.mmdvm.local_address, a.cfg.mmdvm.local_port,
+               a.cfg.mmdvm.rpt_address,   a.cfg.mmdvm.rpt_port,
+               a.cfg.link.bind_address,   a.cfg.link.local_port,
+               a.cfg.link.remote_host,    a.cfg.link.remote_port,
+               a.cfg.link.codec == LINK_CODEC_OPUS ? "opus" : "pcm");
+    } else {
+        printf("usrp-rc: mmdvm %s:%u <-> %s:%u   link disabled (standalone repeater)\n",
+               a.cfg.mmdvm.local_address, a.cfg.mmdvm.local_port,
+               a.cfg.mmdvm.rpt_address,   a.cfg.mmdvm.rpt_port);
+    }
     printf("usrp-rc: %d messages loaded\n", a.cfg.nmessages);
 
     const char *vocab_dirs[] = {
@@ -384,20 +417,20 @@ int main(int argc, char *argv[])
     }
     port_set_ptt_callback(a.port, on_port_ptt, &a);
 
-    if (ste_create(&a.ste, a.cfg.audio.ste_delay_ms) != 0) {
-        fprintf(stderr, "usrp-rc: failed to init STE buffer\n");
-        return 1;
-    }
-
-    if (jitter_buffer_create(&a.jb, JITTER_BUF_DEFAULT) != 0) {
-        fprintf(stderr, "usrp-rc: failed to init jitter buffer\n");
-        return 1;
-    }
-
-    if (a.cfg.link.codec == LINK_CODEC_OPUS) {
-        if (opus_codec_create(&a.opus, a.cfg.link.opus_bitrate, a.cfg.link.opus_frame_ms) != 0) {
-            fprintf(stderr, "usrp-rc: failed to init opus codec\n");
+    if (a.cfg.link.enabled) {
+        if (ste_create(&a.ste, a.cfg.audio.ste_delay_ms) != 0) {
+            fprintf(stderr, "usrp-rc: failed to init STE buffer\n");
             return 1;
+        }
+        if (jitter_buffer_create(&a.jb, JITTER_BUF_DEFAULT) != 0) {
+            fprintf(stderr, "usrp-rc: failed to init jitter buffer\n");
+            return 1;
+        }
+        if (a.cfg.link.codec == LINK_CODEC_OPUS) {
+            if (opus_codec_create(&a.opus, a.cfg.link.opus_bitrate, a.cfg.link.opus_frame_ms) != 0) {
+                fprintf(stderr, "usrp-rc: failed to init opus codec\n");
+                return 1;
+            }
         }
     }
 
@@ -411,11 +444,13 @@ int main(int argc, char *argv[])
     if (a.mmdvm_sock < 0)
         return 1;
 
-    a.link_sock = make_udp_socket(a.cfg.link.bind_address, a.cfg.link.local_port,
-                                  a.cfg.link.remote_host,  a.cfg.link.remote_port);
-    if (a.link_sock < 0) {
-        close(a.mmdvm_sock);
-        return 1;
+    if (a.cfg.link.enabled) {
+        a.link_sock = make_udp_socket(a.cfg.link.bind_address, a.cfg.link.local_port,
+                                      a.cfg.link.remote_host,  a.cfg.link.remote_port);
+        if (a.link_sock < 0) {
+            close(a.mmdvm_sock);
+            return 1;
+        }
     }
 
     a.epfd = epoll_create1(0);
@@ -430,8 +465,10 @@ int main(int argc, char *argv[])
     ev.events  = EPOLLIN;
     ev.data.fd = a.mmdvm_sock;
     epoll_ctl(a.epfd, EPOLL_CTL_ADD, a.mmdvm_sock, &ev);
-    ev.data.fd = a.link_sock;
-    epoll_ctl(a.epfd, EPOLL_CTL_ADD, a.link_sock, &ev);
+    if (a.link_sock >= 0) {
+        ev.data.fd = a.link_sock;
+        epoll_ctl(a.epfd, EPOLL_CTL_ADD, a.link_sock, &ev);
+    }
 
     port_start(a.port, monotonic_ms());
 
@@ -464,7 +501,7 @@ int main(int argc, char *argv[])
     printf("usrp-rc: stopping\n");
     close(a.epfd);
     close(a.mmdvm_sock);
-    close(a.link_sock);
+    if (a.link_sock >= 0) close(a.link_sock);
     if (a.opus) opus_codec_destroy(a.opus);
     jitter_buffer_destroy(a.jb);
     ste_destroy(a.ste);

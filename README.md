@@ -73,7 +73,9 @@ the first argument) and edit for your site. Config sections:
   USRP session. Set MMDVMHost's USRP **Local Port** to usrp-rc's `rpt_port`
   and its **Gateway/RPT Port** to usrp-rc's `local_port`.
 - `[link]` — the network peer (rusrp, usrp-reflector, ASL). `codec = "pcm"`
-  or `"opus"` (narrowband SILK, 8 kHz).
+  or `"opus"` (narrowband SILK, 8 kHz). Set `enabled = false` to run as a
+  standalone local repeater with no network bridge at all — no link socket
+  is created.
 - `[audio]` — Morse/tone/voice levels, STE delay, pre/post-message padding.
 - `[timers]` — hang, ct_delay, kerchunk, timeout (TOT), id_interval,
   id_anxious. Mirrors standard analog repeater controller terminology.

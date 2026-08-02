@@ -47,6 +47,7 @@ typedef struct {
 } config_mmdvm_t;
 
 typedef struct {
+    bool         enabled;   /* false = standalone local repeater; no link socket at all */
     char         remote_host[256];
     uint16_t     remote_port;
     uint16_t     local_port;

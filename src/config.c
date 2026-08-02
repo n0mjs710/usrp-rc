@@ -15,6 +15,7 @@ void config_defaults(config_t *cfg)
     strncpy(cfg->mmdvm.rpt_address, "127.0.0.1", sizeof(cfg->mmdvm.rpt_address) - 1);
     cfg->mmdvm.rpt_port = 32001;
 
+    cfg->link.enabled       = true;
     cfg->link.remote_port  = 34001;
     cfg->link.local_port   = 34002;
     strncpy(cfg->link.bind_address, "0.0.0.0", sizeof(cfg->link.bind_address) - 1);
@@ -72,6 +73,13 @@ static void read_double(toml_table_t *tbl, const char *key, double *dst)
     toml_datum_t d = toml_double_in(tbl, key);
     if (d.ok)
         *dst = d.u.d;
+}
+
+static void read_bool(toml_table_t *tbl, const char *key, bool *dst)
+{
+    toml_datum_t d = toml_bool_in(tbl, key);
+    if (d.ok)
+        *dst = (bool)d.u.b;
 }
 
 /* Read a TOML array of strings into a fixed-size C array of fixed-size strings. */
@@ -176,23 +184,25 @@ static int validate(const config_t *cfg)
         fprintf(stderr, "config: mmdvm ports must be 1-65535\n");
         ok = 0;
     }
-    if (cfg->link.remote_host[0] == '\0') {
-        fprintf(stderr, "config: link.remote_host is required\n");
-        ok = 0;
-    }
-    if (cfg->link.remote_port == 0 || cfg->link.local_port == 0) {
-        fprintf(stderr, "config: link ports must be 1-65535\n");
-        ok = 0;
-    }
-    if (cfg->link.codec == LINK_CODEC_OPUS) {
-        if (cfg->link.opus_bitrate < 4000 || cfg->link.opus_bitrate > 64000) {
-            fprintf(stderr, "config: link.opus_bitrate must be 4000-64000 bps\n");
+    if (cfg->link.enabled) {
+        if (cfg->link.remote_host[0] == '\0') {
+            fprintf(stderr, "config: link.remote_host is required (or set link.enabled = false)\n");
             ok = 0;
         }
-        if (cfg->link.opus_frame_ms != 20 && cfg->link.opus_frame_ms != 40
-            && cfg->link.opus_frame_ms != 60) {
-            fprintf(stderr, "config: link.opus_frame_ms must be 20, 40, or 60\n");
+        if (cfg->link.remote_port == 0 || cfg->link.local_port == 0) {
+            fprintf(stderr, "config: link ports must be 1-65535\n");
             ok = 0;
+        }
+        if (cfg->link.codec == LINK_CODEC_OPUS) {
+            if (cfg->link.opus_bitrate < 4000 || cfg->link.opus_bitrate > 64000) {
+                fprintf(stderr, "config: link.opus_bitrate must be 4000-64000 bps\n");
+                ok = 0;
+            }
+            if (cfg->link.opus_frame_ms != 20 && cfg->link.opus_frame_ms != 40
+                && cfg->link.opus_frame_ms != 60) {
+                fprintf(stderr, "config: link.opus_frame_ms must be 20, 40, or 60\n");
+                ok = 0;
+            }
         }
     }
     return ok ? 0 : -1;
@@ -229,6 +239,7 @@ int config_load(config_t *cfg, const char *path)
     }
 
     if ((t = toml_table_in(root, "link"))) {
+        read_bool(t,   "enabled",      &cfg->link.enabled);
         read_str(t,    "remote_host",  cfg->link.remote_host, sizeof(cfg->link.remote_host));
         read_uint16(t, "remote_port",  &cfg->link.remote_port);
         read_uint16(t, "local_port",   &cfg->link.local_port);

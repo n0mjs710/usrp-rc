@@ -17,8 +17,9 @@ rpt_port      = 32001
 
 [link]
 # Network USRP peer: rusrp, usrp-reflector, or ASL-compatible endpoint.
+enabled       = true      # false = standalone local repeater, no link socket at all
 remote_host   = "127.0.0.1"
-remote_port   = 34001
+remote_port   = 41001
 local_port    = 34002
 bind_address  = "0.0.0.0"
 codec         = "pcm"     # "pcm" or "opus"
