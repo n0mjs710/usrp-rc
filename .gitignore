@@ -1,0 +1,10 @@
+build/
+.cache/
+.claude/
+compile_commands.json
+
+# Live dev/deployment config — contains site-specific settings; not for repo
+usrp-rc.toml
+
+# User-added custom vocabulary clips — deployment-specific
+user_8k/

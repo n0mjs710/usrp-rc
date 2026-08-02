@@ -1,0 +1,95 @@
+# usrp-rc sample configuration.
+# Copy to /etc/usrp-rc/usrp-rc.toml and edit for your site.
+
+# "cor" (default) — COR alone opens the repeater. USRP carries a single
+# keyup bit, so "cor_ctcss" has no independent CTCSS source in this build;
+# it is accepted for structural completeness but behaves like "cor".
+access_mode = "cor"
+
+[mmdvm]
+# Loopback USRP link to MMDVMHost (FM analog mode, "remote gateway" protocol).
+# usrp-rc binds local_port to receive from MMDVMHost and sends to rpt_address:rpt_port.
+# Set MMDVMHost's USRP Local Port = rpt_port and Gateway/RPT Port = local_port.
+local_address = "127.0.0.1"
+local_port    = 34001
+rpt_address   = "127.0.0.1"
+rpt_port      = 32001
+
+[link]
+# Network USRP peer: rusrp, usrp-reflector, or ASL-compatible endpoint.
+remote_host   = "127.0.0.1"
+remote_port   = 34001
+local_port    = 34002
+bind_address  = "0.0.0.0"
+codec         = "pcm"     # "pcm" or "opus"
+opus_bitrate  = 8000
+opus_frame_ms = 60
+
+[audio]
+morse_wpm            = 20
+morse_pitch          = 700
+morse_level          = 0.9
+impolite_morse_level = 0.3   # CW level when IDing over an active QSO (ducking)
+voice_level          = 0.9
+ste_delay_ms         = 0     # squelch tail elimination delay (0 = disabled)
+pre_message_ms       = 0     # dead air after PTT-on before CW/voice starts
+post_message_ms      = 0     # dead air after audio drains before PTT-off
+
+[timers]
+hang        = 2.5     # s — hang time: PTT holdoff after CT
+ct_delay    = 0.5     # s — delay from RX loss to courtesy tone
+kerchunk    = 0.5     # s — minimum COR hold to respond (anti-kerchunk)
+timeout     = 180.0   # s — time-out timer (TOT) transmit cutoff
+id_interval = 600.0   # s — mandatory ID interval (FCC <= 10 min)
+id_anxious  = 60.0    # s — sneak anxious ID this far before the mandatory deadline
+
+[events]
+startup_message        = ""
+initial_ids            = ["default_voice"]
+mandatory_ids          = ["default_cw"]
+anxious_id             = ""
+impolite_id            = ""
+ct_message             = "yellow_jacket"
+ct_link_message        = "bumble_bee"
+timeout_message        = "timeout_warn"
+timeout_cancel_message = ""
+
+# Messages are a shared pool referenced by name from [events] above.
+
+[messages.default_cw]
+elements = [{type = "cw", text = "W1XYZ/R"}]
+
+[messages.yellow_jacket]
+elements = [
+  {type = "tone", freq1 = 330.0, freq2 = 0.0, ms = 50, amp = 0.7},
+  {type = "tone", freq1 = 495.0, freq2 = 0.0, ms = 50, amp = 0.7},
+  {type = "tone", freq1 = 660.0, freq2 = 0.0, ms = 50, amp = 0.7},
+]
+
+[messages.bumble_bee]
+elements = [
+  {type = "tone", freq1 = 330.0, freq2 = 0.0, ms = 100, amp = 0.7},
+  {type = "tone", freq1 = 495.0, freq2 = 0.0, ms = 100, amp = 0.7},
+  {type = "tone", freq1 = 660.0, freq2 = 0.0, ms = 100, amp = 0.7},
+]
+
+[messages.timeout_warn]
+elements = [
+  {type = "tone", freq1 = 1200, freq2 = 0, ms = 60, amp = 0.9},
+  {type = "tone", freq1 = 0,    freq2 = 0, ms = 20, amp = 0.0},
+  {type = "tone", freq1 = 1000, freq2 = 0, ms = 60, amp = 0.9},
+  {type = "tone", freq1 = 0,    freq2 = 0, ms = 20, amp = 0.0},
+  {type = "tone", freq1 = 800,  freq2 = 0, ms = 60, amp = 0.9},
+]
+
+[messages.default_voice]
+elements = [
+  {type = "voice", clip = "THIS"},
+  {type = "voice", clip = "IS"},
+  {type = "voice", clip = "W"},
+  {type = "voice", clip = "ONE"},
+  {type = "voice", clip = "X"},
+  {type = "voice", clip = "Y"},
+  {type = "voice", clip = "Z"},
+  {type = "voice", clip = "REPEATER"},
+]
