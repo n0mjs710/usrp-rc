@@ -35,12 +35,26 @@ OBJS     = $(patsubst %.c,$(BUILDDIR)/%.o,$(SRCS))
 DEPFILES = $(OBJS:.o=.d)
 TARGET   = $(BUILDDIR)/usrp-rc
 
+# tests/port_harness.c drives src/port.c's state machine directly with a
+# fake clock (see the file for why) -- it needs everything port.c pulls
+# in, but none of main.c's socket/pacing machinery.
+HARNESS_SRCS = src/port.c \
+               src/config.c \
+               src/vocab.c \
+               src/tone.c \
+               src/morse.c \
+               src/voice_filter.c \
+               src/message.c \
+               $(VENDORDIR)/toml.c
+HARNESS_OBJS = $(patsubst %.c,$(BUILDDIR)/%.o,$(HARNESS_SRCS))
+HARNESS      = $(BUILDDIR)/tests/port_harness
+
 # vocab_8k/ is pre-built and committed to the repo; VOCAB_SRC/`make vocab`
 # are only for regenerating it from the 48 kHz reference source (maintainers
 # only — not part of the normal build).
 VOCAB_SRC ?= /home/cort/rc/vocab_pcm
 
-.PHONY: all clean install uninstall vocab
+.PHONY: all clean install uninstall vocab check
 
 all: $(TARGET)
 
@@ -55,7 +69,19 @@ $(BUILDDIR)/$(VENDORDIR)/%.o: $(VENDORDIR)/%.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -Wno-unused-result -MMD -MP -c -o $@ $<
 
+$(BUILDDIR)/tests/%.o: tests/%.c
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -I$(VENDORDIR) -MMD -MP -c -o $@ $<
+
+$(HARNESS): $(BUILDDIR)/tests/port_harness.o $(HARNESS_OBJS)
+	$(CC) $(LDFLAGS) -o $@ $^ -lm
+
+# Run from the repo root -- tests/harness.toml and vocab_8k/ are relative.
+check: $(HARNESS)
+	./$(HARNESS)
+
 -include $(DEPFILES)
+-include $(BUILDDIR)/tests/port_harness.d
 
 vocab:
 	@mkdir -p vocab_8k

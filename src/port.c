@@ -48,6 +48,9 @@ struct port {
     bool initial_id_pending;
     bool anxious_id_armed;
     bool voice_id_active;
+    bool id_playing;        /* true for the entire lifecycle of any ID job
+                              * (mandatory/initial/anxious/startup),
+                              * including its post-message pad phase. */
     bool impolite_id_playing;
     int  id_epoch;
 
@@ -95,9 +98,11 @@ static bool ctrl_buf_playing(const port_t *p)
 
 static void ctrl_buf_clear(port_t *p)
 {
-    p->ctrl.buf.len  = 0;
-    p->ctrl.pos      = 0;
-    p->ctrl.on_drain = NULL;
+    p->ctrl.buf.len    = 0;
+    p->ctrl.pos        = 0;
+    p->ctrl.on_drain   = NULL;
+    p->voice_id_active = false;
+    p->id_playing      = false;
 }
 
 static void ctrl_buf_pull_frame(port_t *p, int16_t out[160], uint64_t now)
@@ -186,6 +191,7 @@ static void schedule_id(port_t *p, uint64_t now)
     p->id_sub_deadline = 0;
     p->anxious_id_armed = false;
     p->voice_id_active  = false;
+    p->id_playing       = false;
 
     double lead = p->cfg->timers.id_anxious;
     if (p->cfg->events.anxious_id[0] && lead > 0.0 && lead < p->cfg->timers.id_interval) {
@@ -216,15 +222,20 @@ static void port_transition(port_t *p, port_state_t new_state, uint64_t now)
 
     if (new_state == PORT_ACTIVE) {
         p->tx_activity = true;
-        if ((old == PORT_IDLE || old == PORT_PENDING) && p->id_deadline == 0) {
+        if ((old == PORT_IDLE || old == PORT_PENDING) && p->id_deadline == 0 &&
+            !ctrl_buf_playing(p) && !p->id_playing) {
             p->initial_id_pending = true;
         }
-        if (p->voice_id_active && ctrl_buf_playing(p)) {
-            p->initial_id_pending = false;
-            p->id_epoch++;
-            p->voice_id_active = false;
-            ctrl_buf_clear(p);
-            do_impolite_id(p, now);
+        if (ctrl_buf_playing(p)) {
+            bool cw_id_freeze = p->id_playing && !p->voice_id_active;
+            if (!cw_id_freeze) {
+                bool was_voice_id = p->voice_id_active;
+                p->initial_id_pending = false;
+                p->id_epoch++;
+                ctrl_buf_clear(p);   /* also resets voice_id_active/id_playing */
+                if (was_voice_id)
+                    do_impolite_id(p, now);
+            }
         }
     }
 }
@@ -364,6 +375,7 @@ static void mandatory_id_render_and_queue(port_t *p, uint64_t now)
 
     fprintf(stderr, "id: mandatory  '%s'  (%d/%d)\n", name, idx + 1, p->cfg->events.n_mandatory_ids);
     p->voice_id_active = message_has_voice(p->cfg, name);
+    p->id_playing = true;
     queue_message(p, name, -1.0);
 
     if (p->job_was_ptt)
@@ -403,6 +415,7 @@ static void do_mandatory_id(port_t *p, uint64_t now)
 static void initial_id_after_drain(port_t *p, uint64_t now)
 {
     p->voice_id_active = false;
+    p->id_playing      = false;
     if (p->id_epoch != p->job_epoch) {
         if (p->id_deadline == 0)
             schedule_id(p, now);
@@ -429,6 +442,7 @@ static void initial_id_render_and_queue(port_t *p, uint64_t now)
 
     fprintf(stderr, "id: initial  '%s'  (%d/%d)\n", name, idx + 1, p->cfg->events.n_initial_ids);
     p->voice_id_active = message_has_voice(p->cfg, name);
+    p->id_playing = true;
     queue_message(p, name, -1.0);
     p->ctrl.on_drain = initial_id_after_drain;
 }
@@ -450,6 +464,7 @@ static void do_initial_id(port_t *p, uint64_t now)
 static void anxious_id_finish(port_t *p, uint64_t now)
 {
     p->voice_id_active = false;
+    p->id_playing      = false;
     if (p->id_epoch != p->job_epoch)
         return;
     p->tx_activity = false;
@@ -464,6 +479,7 @@ static void anxious_id_render_and_queue(port_t *p, uint64_t now)
     if (name[0]) {
         fprintf(stderr, "id: anxious  '%s'\n", name);
         p->voice_id_active = message_has_voice(p->cfg, name);
+        p->id_playing = true;
         queue_message(p, name, -1.0);
         p->ctrl.on_drain = anxious_id_finish;
         return;
@@ -499,6 +515,7 @@ static void startup_after_post_pad(port_t *p, uint64_t now)
 static void startup_after_id_drain(port_t *p, uint64_t now)
 {
     p->voice_id_active = false;
+    p->id_playing      = false;
     schedule_id(p, now);
     p->tx_activity = false;
 
@@ -523,6 +540,7 @@ static void startup_queue_id(port_t *p, uint64_t now)
 
     fprintf(stderr, "id: initial  '%s'  (%d/%d)\n", name, idx + 1, p->cfg->events.n_initial_ids);
     p->voice_id_active = message_has_voice(p->cfg, name);
+    p->id_playing = true;
     queue_message(p, name, -1.0);
     p->ctrl.on_drain = startup_after_id_drain;
 }
@@ -568,6 +586,19 @@ static void on_ct_delay(port_t *p, uint64_t now)
     p->ct_delay_deadline = 0;
     if (p->state != PORT_TAIL)
         return;
+    if (ctrl_buf_playing(p))
+        return;   /* a frozen CW ID (or other leftover) is still draining;
+                   * its own natural-completion path re-arms ct_delay once
+                   * it finishes */
+
+    if (p->anxious_id_armed) {
+        p->anxious_id_armed = false;
+        do_anxious_id(p, now);   /* anxious_id_finish re-arms a fresh
+                                   * ct_delay, so the CT lands after the
+                                   * same pause as it would following any
+                                   * other message */
+        return;
+    }
 
     const char *name = p->cfg->events.ct_message;
     if (p->last_source == SRC_LINK && p->cfg->events.ct_link_message[0])
@@ -653,9 +684,7 @@ static void cor_idle_edge(port_t *p, port_source_t source, uint64_t now)
             port_transition(p, PORT_IDLE, now);
         } else {
             port_transition(p, PORT_TAIL, now);
-            if (p->anxious_id_armed)
-                do_anxious_id(p, now);
-            else if (p->initial_id_pending) {
+            if (p->initial_id_pending) {
                 p->initial_id_pending = false;
                 do_initial_id(p, now);
             } else if (!p->impolite_id_playing) {

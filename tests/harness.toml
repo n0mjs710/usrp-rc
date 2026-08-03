@@ -1,0 +1,63 @@
+# Config fixture for tests/port_harness.c -- NOT a real deployment config.
+# Timers are cut down so scenarios complete in real seconds. The harness
+# also pokes cfg.events fields directly in C between scenarios to swap
+# which message (CW vs voice) plays in a given rotation slot, reusing the
+# small message pool below rather than needing many fixture files.
+
+access_mode = "cor"
+
+[mmdvm]
+local_address = "127.0.0.1"
+local_port    = 34001
+rpt_address   = "127.0.0.1"
+rpt_port      = 32001
+
+[link]
+enabled = false
+
+[audio]
+master_gain          = 1.0
+morse_wpm            = 20
+morse_pitch          = 700
+morse_level          = 0.9
+impolite_morse_level = 0.3
+voice_level          = 0.9
+voice_gap_ms         = 150
+voice_filter         = false
+ste_delay_ms         = 0
+pre_message_ms       = 0
+post_message_ms      = 0
+
+[timers]
+hang        = 0.30
+ct_delay    = 0.20
+kerchunk    = 0.10
+timeout     = 5.00
+# Long enough that it doesn't coincidentally fire mid-scenario for tests
+# that aren't specifically exercising the mandatory-ID timer (priming +
+# a settle cycle already eats close to 2s). The anxious-ID scenario
+# overrides both of these on its own config copy to get fast, predictable
+# timing independent of this value.
+id_interval = 4.00
+id_anxious  = 0.90
+
+[events]
+startup_message        = ""
+initial_ids            = ["id_cw"]
+mandatory_ids          = ["id_cw"]
+anxious_id             = ""    # off by default (see id_anxious note above); scenarios that
+                                # want it enable it on their own config copy
+impolite_id            = "id_cw"
+ct_message             = "ct_tone"
+ct_link_message        = "ct_tone"
+timeout_message        = ""
+timeout_cancel_message = ""
+
+[messages.id_cw]
+elements = [{type = "cw", text = "TEST"}]
+
+[messages.id_voice]
+elements = [{type = "voice", clip = "REPEATER"}]
+
+[messages.ct_tone]
+elements = [{type = "tone", freq1 = 500.0, freq2 = 700.0, ms = 60, amp = 0.5}]
