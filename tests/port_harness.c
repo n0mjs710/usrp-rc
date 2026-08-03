@@ -115,16 +115,29 @@ static int count_occurrences(const char *hay, const char *needle)
 /* ── fake-clock tick / COS helpers ────────────────────────────────────── */
 
 /* Advances the fake clock by one 20ms frame, runs the timer checks, and --
- * mirroring main.c's pace_tick() exactly -- pulls one ctrl-buffer frame
- * only when neither real-audio gate is open. Returns true if that pulled
- * frame carried audible (non-all-zero) content. */
+ * mirroring main.c's handle_mmdvm()/pace_tick() -- pulls one ctrl-buffer
+ * frame only when neither real-audio gate is open, then applies any
+ * in-flight impolite-ID mix to whatever frame resulted (real repeat audio
+ * in production; the harness has none, so a zeroed frame -- but the mix
+ * still needs draining on schedule regardless). Returns true if the
+ * resulting frame carried audible (non-all-zero) content from the
+ * ctrl-buffer pull specifically. */
 static bool tick(port_t *p)
 {
     g_now += TICK_MS;
     port_check_timers(p, g_now);
-    if (port_ptt(p) && !port_mmdvm_gate_open(p) && !port_link_gate_open(p)) {
-        int16_t frame[160];
+    if (!port_ptt(p))
+        return false;
+
+    int16_t frame[160] = {0};
+    bool have_ctrl_content = false;
+    if (!port_mmdvm_gate_open(p) && !port_link_gate_open(p)) {
         port_ctrl_pull(p, frame, g_now);
+        have_ctrl_content = true;
+    }
+    port_mix_apply(p, frame, g_now);
+
+    if (have_ctrl_content) {
         for (int i = 0; i < 160; i++)
             if (frame[i] != 0)
                 return true;
@@ -457,6 +470,48 @@ static bool scenario_timeout_recovery(config_t *base, vocab_cache_t *vocab)
     return ok;
 }
 
+static bool scenario_impolite_resets_tx_activity(config_t *base, vocab_cache_t *vocab)
+{
+    printf("\n[7] impolite-ID substitution resets tx_activity, so a later silent period truly goes idle\n");
+    bool ok = true;
+    config_t cfg = *base;
+    cfg.timers.id_interval = 3.00;   /* long enough that priming settles well before it first expires */
+    port_t *p = fresh_port(&cfg, vocab);
+
+    prime(p);   /* arms id_deadline via the initial ID's own completion */
+
+    cap_start();
+    key_local(p, true);     /* transmission B: hold across id_deadline's expiry */
+    wait_ms(p, 2500);       /* id_deadline fires mid-hold -> impolite substitution, not mandatory */
+    key_local(p, false);
+
+    char *log1 = cap_stop();
+    CHECK(count_occurrences(log1, "id: impolite") == 1,
+          "impolite ID substituted while COR was active at expiry");
+    CHECK(count_occurrences(log1, "id: mandatory") == 0,
+          "not the ctrl-buffer mandatory path -- COR was active at expiry");
+    free(log1);
+
+    bool settled = wait_until_idle(p, 5000);
+    CHECK(settled, "settled back to idle after the impolite substitution's own CT/hang tail");
+
+    /* The id_deadline rearmed by impolite_id_after_mix() is what's under
+     * test here: with no further activity, tx_activity must have been
+     * reset to false so on_id() declines to fire again when it expires --
+     * otherwise this wrongly re-IDs during genuine silence and never
+     * reaches "go back to idle." */
+    cap_start();
+    wait_ms(p, 3200);   /* span the full rearmed id_interval with nothing happening */
+    char *log2 = cap_stop();
+    CHECK(count_occurrences(log2, "id: mandatory") == 0 && count_occurrences(log2, "id: impolite") == 0,
+          "no further ID fired during a genuinely silent period (tx_activity correctly reset)");
+    free(log2);
+
+    port_destroy(p);
+    printf(ok ? "[7] PASS\n" : "[7] FAIL\n");
+    return ok;
+}
+
 /* ── driver ───────────────────────────────────────────────────────────── */
 
 int main(void)
@@ -484,6 +539,7 @@ int main(void)
         scenario_anxious_between_ct_delay_and_ct,
         scenario_kerchunk_ignored,
         scenario_timeout_recovery,
+        scenario_impolite_resets_tx_activity,
     };
     int n = (int)(sizeof(scenarios) / sizeof(scenarios[0]));
 

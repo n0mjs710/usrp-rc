@@ -295,6 +295,7 @@ static void do_timeout_recovery(port_t *p, uint64_t now)
 static void impolite_id_after_mix(port_t *p, uint64_t now)
 {
     p->impolite_id_playing = false;
+    p->tx_activity         = false;
     schedule_id(p, now);
     if (p->state == PORT_TAIL && !cor_active(p)) {
         queue_message(p, p->cfg->events.ct_message, -1.0);
