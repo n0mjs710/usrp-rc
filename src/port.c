@@ -103,27 +103,46 @@ static void ctrl_buf_clear(port_t *p)
 static void ctrl_buf_pull_frame(port_t *p, int16_t out[160], uint64_t now)
 {
     ctrl_buf_t *c = &p->ctrl;
-    size_t avail = c->buf.len - c->pos;
-    size_t n     = avail < 160 ? avail : 160;
-    if (n > 0)
-        memcpy(out, c->buf.data + c->pos, n * sizeof(int16_t));
-    if (n < 160)
-        memset(out + n, 0, (160 - n) * sizeof(int16_t));
-    c->pos += n;
+    size_t filled = 0;
 
-    /* Fires on_drain once pos catches up to len -- including immediately,
-     * when a message rendered to nothing (missing/failed clip) and len was
-     * already 0. A `len > 0` guard here would silently swallow that case:
-     * on_drain would never fire, and a standalone ID job's PTT would never
-     * release, keying the transmitter on silence indefinitely. */
-    if (c->pos >= c->buf.len) {
+    /* Loop rather than single-shot: on_drain (fired below) can queue the
+     * next message synchronously (e.g. startup message -> initial ID), and
+     * that new audio needs to fill out the *rest of this same frame*, not
+     * wait for the next 20 ms tick -- otherwise the tail of every frame
+     * that ends mid-buffer gets silence-padded and the first samples of
+     * whatever chains on next are silently lost, producing an audible
+     * dropout at every message handoff. */
+    while (filled < 160) {
+        size_t avail = c->buf.len - c->pos;
+        size_t n     = avail < (160 - filled) ? avail : (160 - filled);
+        if (n > 0) {
+            memcpy(out + filled, c->buf.data + c->pos, n * sizeof(int16_t));
+            c->pos += n;
+            filled += n;
+        }
+
+        if (c->pos < c->buf.len)
+            break;   /* frame full; remaining buffer carries to the next tick */
+
+        /* Fires on_drain once pos catches up to len -- including
+         * immediately, when a message rendered to nothing (missing/failed
+         * clip) and len was already 0. A `len > 0` guard here would
+         * silently swallow that case: on_drain would never fire, and a
+         * standalone ID job's PTT would never release, keying the
+         * transmitter on silence indefinitely. */
         c->buf.len = 0;
         c->pos     = 0;
         port_cont_fn cb = c->on_drain;
         c->on_drain = NULL;
-        if (cb)
-            cb(p, now);
+        if (!cb)
+            break;
+        cb(p, now);
+        if (c->buf.len == 0)
+            break;   /* nothing new queued */
     }
+
+    if (filled < 160)
+        memset(out + filled, 0, (160 - filled) * sizeof(int16_t));
 }
 
 /* ── misc helpers ───────────────────────────────────────────────────────── */

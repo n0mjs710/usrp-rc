@@ -236,8 +236,8 @@ static void mmdvm_key_edge(app_t *a, uint64_t now)
 
 static void mmdvm_unkey_edge(app_t *a, uint64_t now)
 {
+    ste_reset(a->ste);
     if (a->link_sock >= 0) {
-        ste_reset(a->ste);
         if (a->cfg.link.codec == LINK_CODEC_OPUS && a->opus_accum_n > 0) {
             int frame_samples = opus_codec_frame_samples(a->opus);
             memset(a->opus_accum + a->opus_accum_n, 0,
@@ -280,18 +280,23 @@ static void handle_mmdvm(app_t *a)
         if (!port_mmdvm_gate_open(a->port))
             continue;
 
+        /* STE delay line, shared by both destinations: real audio once the
+         * buffer has filled, silence (not silence-by-omission) until then,
+         * so both flows key up immediately but with a gapless, delayed
+         * audio stream instead of a dropout. */
+        int16_t ste_out[160];
+        if (!ste_push(a->ste, pkt.audio, ste_out))
+            memset(ste_out, 0, sizeof(ste_out));
+
         /* Flow 1: local repeat, mmdvm RX -> mmdvm TX (+ impolite-ID mix). */
         int16_t frame[160];
-        memcpy(frame, pkt.audio, sizeof(frame));
+        memcpy(frame, ste_out, sizeof(frame));
         port_mix_apply(a->port, frame, now);
         send_mmdvm_voice(a, frame, true);
 
-        /* Flow 2: mmdvm RX -> link TX, through the STE delay gate. */
-        if (a->link_sock >= 0) {
-            int16_t ste_out[160];
-            if (ste_push(a->ste, pkt.audio, ste_out))
-                send_link_voice(a, ste_out);
-        }
+        /* Flow 2: mmdvm RX -> link TX. */
+        if (a->link_sock >= 0)
+            send_link_voice(a, ste_out);
     }
 }
 
@@ -460,11 +465,12 @@ int main(int argc, char *argv[])
     }
     port_set_ptt_callback(a->port, on_port_ptt, a);
 
+    if (ste_create(&a->ste, a->cfg.audio.ste_delay_ms) != 0) {
+        fprintf(stderr, "usrp-rc: failed to init STE buffer\n");
+        return 1;
+    }
+
     if (a->cfg.link.enabled) {
-        if (ste_create(&a->ste, a->cfg.audio.ste_delay_ms) != 0) {
-            fprintf(stderr, "usrp-rc: failed to init STE buffer\n");
-            return 1;
-        }
         if (jitter_buffer_create(&a->jb, JITTER_BUF_DEFAULT) != 0) {
             fprintf(stderr, "usrp-rc: failed to init jitter buffer\n");
             return 1;

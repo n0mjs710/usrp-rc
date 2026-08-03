@@ -4,12 +4,14 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-/* Squelch tail elimination: a FIFO delay of ste_delay_ms on the mmdvm-RX ->
- * link-TX path. While the gate is held open, 20 ms frames are pushed in and
- * the oldest frame (once the queue depth is reached) is popped out. On gate
- * close the queue is dropped entirely — the squelch-crash tail never exits
- * it. ste_reset() clears the queue on gate close so stale audio from the
- * previous transmission never replays on the next open edge. */
+/* Squelch tail elimination: a FIFO delay of ste_delay_ms shared by both
+ * mmdvm-RX destinations (repeat back to mmdvm TX, and forward to link TX).
+ * While the gate is held open, 20 ms frames are pushed in and the oldest
+ * frame (once the queue depth is reached) is popped out; the caller sends
+ * silence to both destinations until then. On gate close the queue is
+ * dropped entirely — the squelch-crash tail never exits it. ste_reset()
+ * clears the queue on gate close so stale audio from the previous
+ * transmission never replays on the next open edge. */
 
 typedef struct ste ste_t;
 

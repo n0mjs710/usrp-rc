@@ -20,7 +20,7 @@ controller behavior.
 
 ```
 MMDVMHost (loopback)                   usrp-rc                    Network
-  USRP PCM  ──► [mmdvm RX] ──┬─────────────────────────────► [link TX]  (STE-gated uplink)
+  USRP PCM  ──► [mmdvm RX] ──┬─────────────────────────────► [link TX]  (STE-delayed uplink)
                              │        repeater
                              │        controller
   USRP PCM  ◄── [mmdvm TX] ◄─┴──────┬──────────────────────  [link RX]  (jitter-buffered downlink)
@@ -30,6 +30,12 @@ MMDVMHost (loopback)                   usrp-rc                    Network
 
 - **COR** is derived from the USRP keyup bit — no hardware GPIO, no hidraw.
   MMDVMHost handles all radio hardware and CTCSS decode.
+- **STE** (squelch tail elimination) delays mmdvm-RX audio by `ste_delay_ms`
+  before repeating it, on *both* the local mmdvm-TX repeat leg and the
+  link-TX uplink, so the squelch-crash tail at the end of a transmission
+  is dropped rather than repeated or forwarded. Key-up/unkey signaling is
+  not delayed — only the audio is, with silence filling the gap until the
+  delay line catches up.
 - The repeater controller treats keyup from *either* port as access: a
   network caller opens the repeater exactly like a local radio caller, and
   gets a distinct courtesy tone (`ct_link_message`) so listeners can tell
