@@ -478,7 +478,7 @@ static void check_all_timers(app_t *a, uint64_t now)
     if (a->heartbeat_deadline && now >= a->heartbeat_deadline) {
         float    jitter  = jitter_buffer_estimate_ms(a->jb);
         uint64_t silence = jitter_buffer_hb_silence_count(a->jb);
-        LOGI("link: heartbeat  jitter=%.1fms  silence(%us)=%llu\n",
+        LOGD("link: heartbeat  jitter=%.1fms  silence(%us)=%llu\n",
                 jitter, HEARTBEAT_INTERVAL_MS / 1000u, (unsigned long long)silence);
         a->heartbeat_deadline = now + HEARTBEAT_INTERVAL_MS;
     }
