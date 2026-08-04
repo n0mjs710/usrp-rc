@@ -122,12 +122,17 @@ typedef enum {
 } access_mode_t;
 
 typedef struct {
+    char level[16];   /* "error", "warn", "info", or "debug" */
+} config_log_t;
+
+typedef struct {
     config_mmdvm_t   mmdvm;
     config_link_t    link;
     config_audio_t   audio;
     config_timers_t  timers;
     config_events_t  events;
     access_mode_t    access_mode;
+    config_log_t     log;
 
     config_message_t messages[CFG_MAX_MESSAGES];
     int               nmessages;

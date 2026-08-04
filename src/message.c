@@ -3,6 +3,7 @@
 #include "morse.h"
 #include "sbuf.h"
 #include "voice_filter.h"
+#include "log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,11 +37,11 @@ rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
     rendered_audio_t result = {0};
     const config_message_t *m = config_find_message(cfg, name);
     if (!m) {
-        fprintf(stderr, "message: '%s' not found\n", name ? name : "(null)");
+        LOGE("message: '%s' not found\n", name ? name : "(null)");
         return result;
     }
     if (m->nelements == 0) {
-        fprintf(stderr, "message: '%s' has no elements\n", name);
+        LOGE("message: '%s' has no elements\n", name);
         return result;
     }
 
@@ -55,7 +56,7 @@ rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
         switch (e->type) {
         case ELEM_CW: {
             if (!e->cw_text[0]) {
-                fprintf(stderr, "message: '%s' CW element has no text\n", name);
+                LOGE("message: '%s' CW element has no text\n", name);
                 break;
             }
             size_t n;
@@ -70,7 +71,7 @@ rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
         }
         case ELEM_VOICE: {
             if (e->n_voice_words == 0) {
-                fprintf(stderr, "message: '%s' VOICE element has no words\n", name);
+                LOGE("message: '%s' VOICE element has no words\n", name);
                 break;
             }
             for (int w = 0; w < e->n_voice_words; w++) {
@@ -83,7 +84,7 @@ rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
                 size_t n;
                 const int16_t *cached = vocab_get(vocab, word->clip, &n);
                 if (!cached) {
-                    fprintf(stderr, "message: voice clip '%s' not found\n", word->clip);
+                    LOGE("message: voice clip '%s' not found\n", word->clip);
                     continue;
                 }
                 if (!cfg->audio.voice_filter) {

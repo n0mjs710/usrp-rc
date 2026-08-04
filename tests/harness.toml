@@ -6,6 +6,12 @@
 
 access_mode = "cor"
 
+[log]
+# The harness's stderr-capture assertions (e.g. the kerchunk regression
+# check) need every line visible regardless of what a production default
+# would hide.
+level = "debug"
+
 [mmdvm]
 local_address = "127.0.0.1"
 local_port    = 34001

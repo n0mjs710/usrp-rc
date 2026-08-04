@@ -15,6 +15,7 @@
 #include "port.h"
 #include "message.h"
 #include "sbuf.h"
+#include "log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -177,7 +178,7 @@ static void queue_message(port_t *p, const char *name, double morse_level_overri
 static void schedule_hang(port_t *p, uint64_t now)
 {
     p->hang_deadline = now + (uint64_t)(p->cfg->timers.hang * 1000.0);
-    fprintf(stderr, "hang: armed  %.1fs\n", p->cfg->timers.hang);
+    LOGI("hang: armed  %.1fs\n", p->cfg->timers.hang);
 }
 
 static void schedule_ct_delay(port_t *p, uint64_t now)
@@ -310,7 +311,7 @@ static void do_impolite_id(port_t *p, uint64_t now)
 
     if (!name[0]) {
         if (p->cfg->events.n_mandatory_ids == 0) {
-            fprintf(stderr, "port: no impolite or mandatory ID configured\n");
+            LOGW("port: no impolite or mandatory ID configured\n");
             schedule_id(p, now);
             return;
         }
@@ -320,7 +321,7 @@ static void do_impolite_id(port_t *p, uint64_t now)
         name = picked;
     }
 
-    fprintf(stderr, "id: impolite  '%s'\n", name);
+    LOGI("id: impolite  '%s'\n", name);
     p->impolite_id_playing = true;
     rendered_audio_t r = message_render(p->cfg, p->vocab, name,
                                         p->cfg->audio.impolite_morse_level);
@@ -366,7 +367,7 @@ static void mandatory_id_after_drain(port_t *p, uint64_t now)
 static void mandatory_id_render_and_queue(port_t *p, uint64_t now)
 {
     if (p->cfg->events.n_mandatory_ids == 0) {
-        fprintf(stderr, "port: no mandatory_ids configured\n");
+        LOGW("port: no mandatory_ids configured\n");
         mandatory_id_finish(p, now);
         return;
     }
@@ -374,7 +375,7 @@ static void mandatory_id_render_and_queue(port_t *p, uint64_t now)
     const char *name = p->cfg->events.mandatory_ids[idx];
     p->id_rot_mandatory = (idx + 1) % p->cfg->events.n_mandatory_ids;
 
-    fprintf(stderr, "id: mandatory  '%s'  (%d/%d)\n", name, idx + 1, p->cfg->events.n_mandatory_ids);
+    LOGI("id: mandatory  '%s'  (%d/%d)\n", name, idx + 1, p->cfg->events.n_mandatory_ids);
     p->voice_id_active = message_has_voice(p->cfg, name);
     p->id_playing = true;
     queue_message(p, name, -1.0);
@@ -392,7 +393,7 @@ static void do_mandatory_id(port_t *p, uint64_t now)
     p->job_state_before  = p->state;
 
     if (p->cfg->events.n_mandatory_ids == 0) {
-        fprintf(stderr, "port: no mandatory_ids configured\n");
+        LOGW("port: no mandatory_ids configured\n");
         schedule_id(p, now);
         return;
     }
@@ -433,7 +434,7 @@ static void initial_id_after_drain(port_t *p, uint64_t now)
 static void initial_id_render_and_queue(port_t *p, uint64_t now)
 {
     if (p->cfg->events.n_initial_ids == 0) {
-        fprintf(stderr, "port: no initial_ids configured\n");
+        LOGW("port: no initial_ids configured\n");
         initial_id_after_drain(p, now);
         return;
     }
@@ -441,7 +442,7 @@ static void initial_id_render_and_queue(port_t *p, uint64_t now)
     const char *name = p->cfg->events.initial_ids[idx];
     p->id_rot_initial = (idx + 1) % p->cfg->events.n_initial_ids;
 
-    fprintf(stderr, "id: initial  '%s'  (%d/%d)\n", name, idx + 1, p->cfg->events.n_initial_ids);
+    LOGI("id: initial  '%s'  (%d/%d)\n", name, idx + 1, p->cfg->events.n_initial_ids);
     p->voice_id_active = message_has_voice(p->cfg, name);
     p->id_playing = true;
     queue_message(p, name, -1.0);
@@ -478,7 +479,7 @@ static void anxious_id_render_and_queue(port_t *p, uint64_t now)
 {
     const char *name = p->cfg->events.anxious_id;
     if (name[0]) {
-        fprintf(stderr, "id: anxious  '%s'\n", name);
+        LOGI("id: anxious  '%s'\n", name);
         p->voice_id_active = message_has_voice(p->cfg, name);
         p->id_playing = true;
         queue_message(p, name, -1.0);
@@ -539,7 +540,7 @@ static void startup_queue_id(port_t *p, uint64_t now)
     const char *name = p->cfg->events.initial_ids[idx];
     p->id_rot_initial = (idx + 1) % p->cfg->events.n_initial_ids;
 
-    fprintf(stderr, "id: initial  '%s'  (%d/%d)\n", name, idx + 1, p->cfg->events.n_initial_ids);
+    LOGI("id: initial  '%s'  (%d/%d)\n", name, idx + 1, p->cfg->events.n_initial_ids);
     p->voice_id_active = message_has_voice(p->cfg, name);
     p->id_playing = true;
     queue_message(p, name, -1.0);
@@ -567,7 +568,7 @@ static void startup_render_message(port_t *p, uint64_t now)
 void port_start(port_t *p, uint64_t now)
 {
     if (!p->cfg->events.startup_message[0]) {
-        fprintf(stderr, "port: no startup_message configured — starting quietly in IDLE\n");
+        LOGI("port: no startup_message configured — starting quietly in IDLE\n");
         return;
     }
     set_ptt(p, true, now, "startup");
@@ -615,7 +616,7 @@ static void on_hang(port_t *p, uint64_t now)
     p->hang_deadline = 0;
     if (cor_active(p))
         return;
-    fprintf(stderr, "state: TAIL -> IDLE  (hang expired)\n");
+    LOGI("state: TAIL -> IDLE  (hang expired)\n");
     set_ptt(p, false, now, "hang-expired");
     port_transition(p, PORT_IDLE, now);
 }
@@ -623,7 +624,7 @@ static void on_hang(port_t *p, uint64_t now)
 static void on_timeout(port_t *p, uint64_t now)
 {
     p->timeout_deadline = 0;
-    fprintf(stderr, "state: -> TIMEOUT  (tx time exceeded)\n");
+    LOGW("state: -> TIMEOUT  (tx time exceeded)\n");
     port_transition(p, PORT_TIMEOUT, now);
     ctrl_buf_clear(p);
     do_timeout_announce(p, now);
@@ -658,7 +659,7 @@ static void cor_active_edge(port_t *p, port_source_t source, uint64_t now)
     const char *action = source == SRC_LOCAL
         ? (p->cfg->link.enabled ? "repeat + link-fwd" : "repeat")
         : "rf-fwd";
-    fprintf(stderr, "cor: ACTIVE  source=%s  -> %s\n", src, action);
+    LOGI("cor: ACTIVE  source=%s  -> %s\n", src, action);
 
     if (p->state == PORT_IDLE || p->state == PORT_TAIL) {
         set_ptt(p, true, now, source == SRC_LOCAL ? "repeat" : "link-fwd");
@@ -670,11 +671,11 @@ static void cor_idle_edge(port_t *p, port_source_t source, uint64_t now)
 {
     double duration_s = (double)(now - p->cor_up_ms) / 1000.0;
     const char *src = source == SRC_LOCAL ? "local" : "link";
-    fprintf(stderr, "cor: IDLE  source=%s  held=%.1fs\n", src, duration_s);
+    LOGI("cor: IDLE  source=%s  held=%.1fs\n", src, duration_s);
 
     if (p->state == PORT_ACTIVE || p->state == PORT_TAIL) {
         if (p->state == PORT_ACTIVE && duration_s < p->cfg->timers.kerchunk) {
-            fprintf(stderr, "cor: kerchunk (%.1fs < %.1fs)  — ignored\n",
+            LOGD("cor: kerchunk (%.1fs < %.1fs)  — ignored\n",
                     duration_s, p->cfg->timers.kerchunk);
             p->timeout_deadline    = 0;
             p->tot_used_s          = 0.0;
@@ -693,7 +694,7 @@ static void cor_idle_edge(port_t *p, port_source_t source, uint64_t now)
             }
         }
     } else if (p->state == PORT_TIMEOUT) {
-        fprintf(stderr, "state: TIMEOUT -> TAIL  (recovered)\n");
+        LOGI("state: TIMEOUT -> TAIL  (recovered)\n");
         set_ptt(p, true, now, "timeout-recovery");
         port_transition(p, PORT_TAIL, now);
         do_timeout_recovery(p, now);

@@ -1,6 +1,7 @@
 #include "morse.h"
 #include "tone.h"
 #include "sbuf.h"
+#include "log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -71,7 +72,7 @@ int16_t *morse_render(const char *text, int wpm, double pitch_hz, double level,
 
         const char *pattern = lookup(ch);
         if (!pattern) {
-            fprintf(stderr, "morse: no code for '%c' — skipped\n", ch);
+            LOGW("morse: no code for '%c' — skipped\n", ch);
             continue;
         }
 

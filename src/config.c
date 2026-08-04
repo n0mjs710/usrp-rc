@@ -1,5 +1,6 @@
 #include "config.h"
 #include "toml.h"
+#include "log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,6 +45,8 @@ void config_defaults(config_t *cfg)
     cfg->timers.id_anxious  = 60.0;
 
     cfg->access_mode = ACCESS_COR;
+
+    strncpy(cfg->log.level, "info", sizeof(cfg->log.level) - 1);
 }
 
 /* ── scalar helpers ─────────────────────────────────────────────────────── */
@@ -168,7 +171,7 @@ static void read_message_elements(toml_table_t *msg_tbl, config_message_t *out)
                 tok = strtok_r(NULL, " \t", &save);
             }
             if (elem->n_voice_words == 0)
-                fprintf(stderr, "config: message '%s' element %d: VOICE has no words\n",
+                LOGE("config: message '%s' element %d: VOICE has no words\n",
                         out->name, i);
         } else if (strcmp(type, "tone") == 0 || strcmp(type, "ct") == 0) {
             elem->type = ELEM_TONE;
@@ -179,7 +182,7 @@ static void read_message_elements(toml_table_t *msg_tbl, config_message_t *out)
             read_int(e,    "ms",    &elem->ms);
             read_double(e, "amp",   &elem->amp);
         } else {
-            fprintf(stderr, "config: message '%s' element %d: unknown type '%s' — skipped\n",
+            LOGE("config: message '%s' element %d: unknown type '%s' — skipped\n",
                     out->name, i, type);
             continue;
         }
@@ -202,7 +205,7 @@ static void read_messages(toml_table_t *root, config_t *cfg)
             continue;   /* not a sub-table */
 
         if (cfg->nmessages >= CFG_MAX_MESSAGES) {
-            fprintf(stderr, "config: too many [messages.*] entries (max %d) — '%s' skipped\n",
+            LOGE("config: too many [messages.*] entries (max %d) — '%s' skipped\n",
                     CFG_MAX_MESSAGES, key);
             continue;
         }
@@ -222,26 +225,26 @@ static int validate(const config_t *cfg)
     int ok = 1;
 
     if (cfg->mmdvm.local_port == 0 || cfg->mmdvm.rpt_port == 0) {
-        fprintf(stderr, "config: mmdvm ports must be 1-65535\n");
+        LOGE("config: mmdvm ports must be 1-65535\n");
         ok = 0;
     }
     if (cfg->link.enabled) {
         if (cfg->link.remote_host[0] == '\0') {
-            fprintf(stderr, "config: link.remote_host is required (or set link.enabled = false)\n");
+            LOGE("config: link.remote_host is required (or set link.enabled = false)\n");
             ok = 0;
         }
         if (cfg->link.remote_port == 0 || cfg->link.local_port == 0) {
-            fprintf(stderr, "config: link ports must be 1-65535\n");
+            LOGE("config: link ports must be 1-65535\n");
             ok = 0;
         }
         if (cfg->link.codec == LINK_CODEC_OPUS) {
             if (cfg->link.opus_bitrate < 4000 || cfg->link.opus_bitrate > 64000) {
-                fprintf(stderr, "config: link.opus_bitrate must be 4000-64000 bps\n");
+                LOGE("config: link.opus_bitrate must be 4000-64000 bps\n");
                 ok = 0;
             }
             if (cfg->link.opus_frame_ms != 20 && cfg->link.opus_frame_ms != 40
                 && cfg->link.opus_frame_ms != 60) {
-                fprintf(stderr, "config: link.opus_frame_ms must be 20, 40, or 60\n");
+                LOGE("config: link.opus_frame_ms must be 20, 40, or 60\n");
                 ok = 0;
             }
         }
@@ -257,7 +260,7 @@ int config_load(config_t *cfg, const char *path)
 
     FILE *fp = fopen(path, "r");
     if (!fp) {
-        fprintf(stderr, "config: cannot open %s: %s\n", path, strerror(errno));
+        LOGE("config: cannot open %s: %s\n", path, strerror(errno));
         return -1;
     }
 
@@ -266,7 +269,7 @@ int config_load(config_t *cfg, const char *path)
     fclose(fp);
 
     if (!root) {
-        fprintf(stderr, "config: parse error in %s: %s\n", path, errbuf);
+        LOGE("config: parse error in %s: %s\n", path, errbuf);
         return -1;
     }
 
@@ -290,7 +293,7 @@ int config_load(config_t *cfg, const char *path)
         if (codec[0]) {
             if (strcmp(codec, "opus") == 0)      cfg->link.codec = LINK_CODEC_OPUS;
             else if (strcmp(codec, "pcm") == 0)  cfg->link.codec = LINK_CODEC_PCM;
-            else fprintf(stderr, "config: unknown link.codec '%s'; using pcm\n", codec);
+            else LOGW("config: unknown link.codec '%s'; using pcm\n", codec);
         }
         read_int(t, "opus_bitrate",  &cfg->link.opus_bitrate);
         read_int(t, "opus_frame_ms", &cfg->link.opus_frame_ms);
@@ -339,9 +342,13 @@ int config_load(config_t *cfg, const char *path)
         if (am[0]) {
             if (strcmp(am, "cor") == 0)             cfg->access_mode = ACCESS_COR;
             else if (strcmp(am, "cor_ctcss") == 0)  cfg->access_mode = ACCESS_COR_CTCSS;
-            else fprintf(stderr, "config: unknown access_mode '%s'; using cor\n", am);
+            else LOGW("config: unknown access_mode '%s'; using cor\n", am);
         }
     }
+
+    if ((t = toml_table_in(root, "log")))
+        read_str(t, "level", cfg->log.level, sizeof(cfg->log.level));
+    log_set_level(cfg->log.level);
 
     read_messages(root, cfg);
 

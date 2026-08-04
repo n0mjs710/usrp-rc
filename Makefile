@@ -29,6 +29,7 @@ SRCS = src/main.c \
        src/message.c \
        src/ste.c \
        src/port.c \
+       src/log.c \
        $(VENDORDIR)/toml.c
 
 OBJS     = $(patsubst %.c,$(BUILDDIR)/%.o,$(SRCS))
@@ -45,6 +46,7 @@ HARNESS_SRCS = src/port.c \
                src/morse.c \
                src/voice_filter.c \
                src/message.c \
+               src/log.c \
                $(VENDORDIR)/toml.c
 HARNESS_OBJS = $(patsubst %.c,$(BUILDDIR)/%.o,$(HARNESS_SRCS))
 HARNESS      = $(BUILDDIR)/tests/port_harness

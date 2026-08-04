@@ -1,4 +1,5 @@
 #include "vocab.h"
+#include "log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -91,7 +92,7 @@ static int load_wav(const char *path, int16_t **out, size_t *out_n)
         return -1;
     }
     if (rate != VOCAB_EXPECTED_RATE) {
-        fprintf(stderr, "vocab: %s: sample rate %u Hz != %d Hz — load anyway (unresampled)\n",
+        LOGW("vocab: %s: sample rate %u Hz != %d Hz — load anyway (unresampled)\n",
                 path, rate, VOCAB_EXPECTED_RATE);
     }
 
@@ -136,7 +137,7 @@ static void load_dir(struct vocab_cache *vc, const char *dir)
         int16_t *samples;
         size_t   n;
         if (load_wav(path, &samples, &n) != 0) {
-            fprintf(stderr, "vocab: failed to load %s\n", path);
+            LOGE("vocab: failed to load %s\n", path);
             continue;
         }
 
@@ -162,7 +163,7 @@ int vocab_cache_create(vocab_cache_t **out, const char *const *dirs, int ndirs)
     for (int i = 0; i < ndirs; i++)
         load_dir(vc, dirs[i]);
 
-    fprintf(stderr, "vocab: %d clips loaded\n", vc->n);
+    LOGI("vocab: %d clips loaded\n", vc->n);
     *out = vc;
     return 0;
 }

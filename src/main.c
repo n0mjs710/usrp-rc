@@ -6,6 +6,7 @@
 #include "ste.h"
 #include "port.h"
 #include "util.h"
+#include "log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -87,7 +88,7 @@ static void log_recv_error(const char *label, uint64_t *last_logged_ms, uint64_t
     if (*last_logged_ms != 0 && now - *last_logged_ms < RECV_ERR_LOG_INTERVAL_MS)
         return;
     *last_logged_ms = now;
-    fprintf(stderr, "%s recv: %s (peer unreachable? check [%s] config — suppressing repeats for %ds)\n",
+    LOGE("%s recv: %s (peer unreachable? check [%s] config — suppressing repeats for %ds)\n",
             label, strerror(errno), label, RECV_ERR_LOG_INTERVAL_MS / 1000);
 }
 
@@ -101,24 +102,24 @@ static int make_udp_socket(const char *bind_addr, uint16_t bind_port,
 
     struct sockaddr_in local = { .sin_family = AF_INET, .sin_port = htons(bind_port) };
     if (inet_pton(AF_INET, bind_addr, &local.sin_addr) != 1) {
-        fprintf(stderr, "invalid bind address: %s\n", bind_addr);
+        LOGE("invalid bind address: %s\n", bind_addr);
         close(fd);
         return -1;
     }
     if (bind(fd, (struct sockaddr *)&local, sizeof(local)) < 0) {
-        fprintf(stderr, "bind %s:%u: %s\n", bind_addr, bind_port, strerror(errno));
+        LOGE("bind %s:%u: %s\n", bind_addr, bind_port, strerror(errno));
         close(fd);
         return -1;
     }
 
     struct sockaddr_in peer = { .sin_family = AF_INET, .sin_port = htons(peer_port) };
     if (inet_pton(AF_INET, peer_addr, &peer.sin_addr) != 1) {
-        fprintf(stderr, "invalid peer address: %s\n", peer_addr);
+        LOGE("invalid peer address: %s\n", peer_addr);
         close(fd);
         return -1;
     }
     if (connect(fd, (struct sockaddr *)&peer, sizeof(peer)) < 0) {
-        fprintf(stderr, "connect %s:%u: %s\n", peer_addr, peer_port, strerror(errno));
+        LOGE("connect %s:%u: %s\n", peer_addr, peer_port, strerror(errno));
         close(fd);
         return -1;
     }
@@ -147,9 +148,9 @@ static void note_mmdvm_voice_pacing(app_t *a, uint64_t now)
         uint64_t gap = now - a->mmdvm_voice_last_ms;
         if (gap >= MMDVM_VOICE_GAP_WARN_MS) {
             if (a->mmdvm_voice_burst_run > 1)
-                fprintf(stderr, "audio: burst of %d mmdvm-TX frames sent back-to-back just before this gap\n",
+                LOGW("audio: burst of %d mmdvm-TX frames sent back-to-back just before this gap\n",
                         a->mmdvm_voice_burst_run);
-            fprintf(stderr, "audio: %llums gap between mmdvm-TX frames (nominal 20ms)%s\n",
+            LOGW("audio: %llums gap between mmdvm-TX frames (nominal 20ms)%s\n",
                     (unsigned long long)gap,
                     gap >= MMDVM_VOICE_GAP_DANGER_MS ? "  -- at/past the modem's link-mode drop threshold" : "");
             a->mmdvm_voice_burst_run = 0;
@@ -157,7 +158,7 @@ static void note_mmdvm_voice_pacing(app_t *a, uint64_t now)
             a->mmdvm_voice_burst_run++;
         } else {
             if (a->mmdvm_voice_burst_run > 1)
-                fprintf(stderr, "audio: burst of %d mmdvm-TX frames sent back-to-back\n",
+                LOGW("audio: burst of %d mmdvm-TX frames sent back-to-back\n",
                         a->mmdvm_voice_burst_run);
             a->mmdvm_voice_burst_run = 0;
         }
@@ -232,10 +233,10 @@ static void on_port_ptt(void *arg, bool active, const char *reason)
     a->pace_deadline = active ? now + 20 : 0;
     if (active) {
         a->ptt_start_ms = now;
-        fprintf(stderr, "ptt: ON   reason=%s\n", reason);
+        LOGI("ptt: ON   reason=%s\n", reason);
     } else {
         double duration_s = (double)(now - a->ptt_start_ms) / 1000.0;
-        fprintf(stderr, "ptt: OFF  reason=%s  duration=%.1fs\n", reason, duration_s);
+        LOGI("ptt: OFF  reason=%s  duration=%.1fs\n", reason, duration_s);
         /* Clean slate for the pacing monitor -- the idle gap between
          * transmissions is expected and not a delivery problem. */
         a->mmdvm_voice_last_ms   = 0;
@@ -274,7 +275,7 @@ static void mmdvm_key_edge(app_t *a, uint64_t now)
 {
     send_link_key(a, true);
     if (a->link_sock >= 0)
-        fprintf(stderr, "link: KEY -> peer\n");
+        LOGI("link: KEY -> peer\n");
     port_on_mmdvm_keyup(a->port, true, now);
 }
 
@@ -292,7 +293,7 @@ static void mmdvm_unkey_edge(app_t *a, uint64_t now)
     }
     send_link_key(a, false);
     if (a->link_sock >= 0)
-        fprintf(stderr, "link: UNKEY -> peer\n");
+        LOGI("link: UNKEY -> peer\n");
     port_on_mmdvm_keyup(a->port, false, now);
 }
 
@@ -332,7 +333,7 @@ static void handle_mmdvm(app_t *a)
         if (keyup && !edge && a->mmdvm_rx_last_ms != 0) {
             uint64_t gap = now - a->mmdvm_rx_last_ms;
             if (gap >= MMDVM_RX_GAP_WARN_MS)
-                fprintf(stderr, "audio: %llums gap between received mmdvm-RX packets (nominal 20ms) -- upstream of us\n",
+                LOGW("audio: %llums gap between received mmdvm-RX packets (nominal 20ms) -- upstream of us\n",
                         (unsigned long long)gap);
         }
         a->mmdvm_rx_last_ms = keyup ? now : 0;
@@ -366,7 +367,7 @@ static void handle_mmdvm(app_t *a)
     }
 
     if (packets_this_call > 1)
-        fprintf(stderr, "audio: %d mmdvm-RX packets were queued and drained in one pass -- our loop fell behind\n",
+        LOGW("audio: %d mmdvm-RX packets were queued and drained in one pass -- our loop fell behind\n",
                 packets_this_call);
 }
 
@@ -400,7 +401,7 @@ static void handle_link(app_t *a)
                 uint64_t late    = jitter_buffer_late_count(a->jb);
                 uint64_t silence = jitter_buffer_latched_silence_count(a->jb);
                 float    jitter  = jitter_buffer_estimate_ms(a->jb);
-                fprintf(stderr, "link: RX ended  late=%llu silence=%llu jitter=%.1fms\n",
+                LOGI("link: RX ended  late=%llu silence=%llu jitter=%.1fms\n",
                         (unsigned long long)late, (unsigned long long)silence, jitter);
                 jitter_buffer_flush(a->jb);
             }
@@ -456,7 +457,7 @@ static void check_all_timers(app_t *a, uint64_t now)
         pace_tick(a, now);
 
     if (a->prev_mmdvm_keyup && a->mmdvm_watchdog_deadline && now >= a->mmdvm_watchdog_deadline) {
-        fprintf(stderr, "mmdvm: watchdog timeout — treating as unkey\n");
+        LOGW("mmdvm: watchdog timeout — treating as unkey\n");
         a->prev_mmdvm_keyup = false;
         a->mmdvm_watchdog_deadline = 0;
         mmdvm_unkey_edge(a, now);
@@ -468,7 +469,7 @@ static void check_all_timers(app_t *a, uint64_t now)
         uint64_t late    = jitter_buffer_late_count(a->jb);
         uint64_t silence = jitter_buffer_latched_silence_count(a->jb);
         float    jitter  = jitter_buffer_estimate_ms(a->jb);
-        fprintf(stderr, "link: watchdog timeout — treating as unkey  late=%llu silence=%llu jitter=%.1fms\n",
+        LOGW("link: watchdog timeout — treating as unkey  late=%llu silence=%llu jitter=%.1fms\n",
                 (unsigned long long)late, (unsigned long long)silence, jitter);
         jitter_buffer_flush(a->jb);
         port_on_link_keyup(a->port, false, now);
@@ -477,7 +478,7 @@ static void check_all_timers(app_t *a, uint64_t now)
     if (a->heartbeat_deadline && now >= a->heartbeat_deadline) {
         float    jitter  = jitter_buffer_estimate_ms(a->jb);
         uint64_t silence = jitter_buffer_hb_silence_count(a->jb);
-        fprintf(stderr, "link: heartbeat  jitter=%.1fms  silence(%us)=%llu\n",
+        LOGI("link: heartbeat  jitter=%.1fms  silence(%us)=%llu\n",
                 jitter, HEARTBEAT_INTERVAL_MS / 1000u, (unsigned long long)silence);
         a->heartbeat_deadline = now + HEARTBEAT_INTERVAL_MS;
     }
@@ -496,13 +497,13 @@ int main(int argc, char *argv[])
      * than risk overflowing the thread stack. */
     app_t *a = calloc(1, sizeof(*a));
     if (!a) {
-        fprintf(stderr, "usrp-rc: out of memory\n");
+        LOGE("usrp-rc: out of memory\n");
         return 1;
     }
     a->link_sock = -1;
 
     if (config_load(&a->cfg, config_path) != 0) {
-        fprintf(stderr, "usrp-rc: failed to load config: %s\n", config_path);
+        LOGE("usrp-rc: failed to load config: %s\n", config_path);
         return 1;
     }
 
@@ -525,30 +526,30 @@ int main(int argc, char *argv[])
         "/usr/local/share/usrp-rc/user_8k", "/usr/local/share/usrp-rc/vocab_8k",
     };
     if (vocab_cache_create(&a->vocab, vocab_dirs, 4) != 0) {
-        fprintf(stderr, "usrp-rc: failed to init vocab cache\n");
+        LOGE("usrp-rc: failed to init vocab cache\n");
         return 1;
     }
 
     if (port_create(&a->port, &a->cfg, a->vocab) != 0) {
-        fprintf(stderr, "usrp-rc: failed to init port state machine\n");
+        LOGE("usrp-rc: failed to init port state machine\n");
         return 1;
     }
     port_set_ptt_callback(a->port, on_port_ptt, a);
 
     if (ste_create(&a->ste, a->cfg.audio.ste_delay_ms) != 0) {
-        fprintf(stderr, "usrp-rc: failed to init STE buffer\n");
+        LOGE("usrp-rc: failed to init STE buffer\n");
         return 1;
     }
 
     if (a->cfg.link.enabled) {
         if (jitter_buffer_create(&a->jb, JITTER_BUF_DEFAULT) != 0) {
-            fprintf(stderr, "usrp-rc: failed to init jitter buffer\n");
+            LOGE("usrp-rc: failed to init jitter buffer\n");
             return 1;
         }
         a->heartbeat_deadline = monotonic_ms() + HEARTBEAT_INTERVAL_MS;
         if (a->cfg.link.codec == LINK_CODEC_OPUS) {
             if (opus_codec_create(&a->opus, a->cfg.link.opus_bitrate, a->cfg.link.opus_frame_ms) != 0) {
-                fprintf(stderr, "usrp-rc: failed to init opus codec\n");
+                LOGE("usrp-rc: failed to init opus codec\n");
                 return 1;
             }
         }

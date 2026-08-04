@@ -12,6 +12,16 @@
 # it is accepted for structural completeness but behaves like "cor".
 access_mode = "cor"
 
+[log]
+# error   — startup/config failures and content problems (missing message,
+#           missing vocab clip, bad socket config) — never suppressed.
+# warn    — non-fatal anomalies worth seeing promptly: TOT hit, watchdog
+#           timeouts, mmdvm-TX pacing gaps/bursts, auto-corrected config.
+# info    (default) — meaningful operational events: PTT/COR transitions,
+#           IDs, courtesy tone/hang state changes, link key/unkey.
+# debug   — everything, including routine kerchunk-ignored noise.
+level = "info"
+
 [mmdvm]
 # Loopback USRP link to MMDVMHost (FM analog mode, "remote gateway" protocol).
 # usrp-rc binds local_port to receive from MMDVMHost and sends to rpt_address:rpt_port.
