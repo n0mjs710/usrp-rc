@@ -70,6 +70,10 @@ typedef struct {
 
     uint64_t mmdvm_recv_err_logged_ms;
     uint64_t link_recv_err_logged_ms;
+
+    uint64_t mmdvm_voice_last_ms;    /* pacing monitor: see note_mmdvm_voice_pacing() */
+    int      mmdvm_voice_burst_run;
+    uint64_t mmdvm_rx_last_ms;       /* receive-side pacing monitor: see handle_mmdvm() */
 } app_t;
 
 /* Repeated recv() errors (most commonly ECONNREFUSED: the peer's ICMP port-
@@ -126,11 +130,47 @@ static int make_udp_socket(const char *bind_addr, uint16_t bind_port,
 
 /* ── outbound frame builders ───────────────────────────────────────────── */
 
+/* MMDVMHost's FM network path (LinkMode=1) does no jitter-smoothing of its
+ * own -- it forwards whatever it has, whenever asked, and the modem
+ * firmware's ext-audio buffer only restarts once >75ms has re-accumulated
+ * after running dry, with zero debounce on the drop itself. A gap on our
+ * outbound side anywhere near that -- or a burst of frames sent
+ * back-to-back after one, evidence of a stall having let packets queue up
+ * before draining all at once -- is a plausible trigger for an on-air
+ * carrier drop. This logs only the rare anomaly, not every frame. */
+#define MMDVM_VOICE_GAP_WARN_MS   35U   /* nominal cadence is 20ms */
+#define MMDVM_VOICE_GAP_DANGER_MS 75U   /* modem's link-mode ext-audio restart threshold */
+
+static void note_mmdvm_voice_pacing(app_t *a, uint64_t now)
+{
+    if (a->mmdvm_voice_last_ms != 0) {
+        uint64_t gap = now - a->mmdvm_voice_last_ms;
+        if (gap >= MMDVM_VOICE_GAP_WARN_MS) {
+            if (a->mmdvm_voice_burst_run > 1)
+                fprintf(stderr, "audio: burst of %d mmdvm-TX frames sent back-to-back just before this gap\n",
+                        a->mmdvm_voice_burst_run);
+            fprintf(stderr, "audio: %llums gap between mmdvm-TX frames (nominal 20ms)%s\n",
+                    (unsigned long long)gap,
+                    gap >= MMDVM_VOICE_GAP_DANGER_MS ? "  -- at/past the modem's link-mode drop threshold" : "");
+            a->mmdvm_voice_burst_run = 0;
+        } else if (gap <= 2) {
+            a->mmdvm_voice_burst_run++;
+        } else {
+            if (a->mmdvm_voice_burst_run > 1)
+                fprintf(stderr, "audio: burst of %d mmdvm-TX frames sent back-to-back\n",
+                        a->mmdvm_voice_burst_run);
+            a->mmdvm_voice_burst_run = 0;
+        }
+    }
+    a->mmdvm_voice_last_ms = now;
+}
+
 static void send_mmdvm_voice(app_t *a, const int16_t frame[160], bool keyup)
 {
     uint8_t buf[USRP_PKT_LEN];
     usrp_build_voice(buf, a->mmdvm_tx_seq++, keyup ? 1 : 0, frame);
     send(a->mmdvm_sock, buf, USRP_PKT_LEN, 0);
+    note_mmdvm_voice_pacing(a, monotonic_ms());
 }
 
 static void send_mmdvm_key(app_t *a, bool keyup)
@@ -196,6 +236,10 @@ static void on_port_ptt(void *arg, bool active, const char *reason)
     } else {
         double duration_s = (double)(now - a->ptt_start_ms) / 1000.0;
         fprintf(stderr, "ptt: OFF  reason=%s  duration=%.1fs\n", reason, duration_s);
+        /* Clean slate for the pacing monitor -- the idle gap between
+         * transmissions is expected and not a delivery problem. */
+        a->mmdvm_voice_last_ms   = 0;
+        a->mmdvm_voice_burst_run = 0;
     }
 }
 
@@ -252,26 +296,48 @@ static void mmdvm_unkey_edge(app_t *a, uint64_t now)
     port_on_mmdvm_keyup(a->port, false, now);
 }
 
+/* Companion to note_mmdvm_voice_pacing() on the receive side: is MMDVMHost
+ * actually delivering mmdvm-RX packets to us on the expected ~20ms
+ * cadence in the first place? If gaps show up here, the irregularity
+ * predates us and no amount of tuning our own send timing will fix it.
+ * `packets_this_call`, checked after the drain loop below, is direct
+ * evidence (not an inference) that our loop fell behind: it's a literal
+ * count of how many datagrams were already sitting in the kernel socket
+ * buffer by the time we got back to reading it. */
+#define MMDVM_RX_GAP_WARN_MS 35U
+
 static void handle_mmdvm(app_t *a)
 {
     uint8_t buf[USRP_PKT_LEN + 64];
     usrp_packet_t pkt;
+    int packets_this_call = 0;
 
     for (;;) {
         ssize_t n = recv(a->mmdvm_sock, buf, sizeof(buf), 0);
         if (n < 0) {
             if (errno != EAGAIN && errno != EWOULDBLOCK)
                 log_recv_error("mmdvm", &a->mmdvm_recv_err_logged_ms, monotonic_ms());
-            return;
+            break;
         }
         if (usrp_parse(buf, (size_t)n, &pkt) != 0)
             continue;
+        packets_this_call++;
 
         uint64_t now = monotonic_ms();
         a->mmdvm_watchdog_deadline = now + WATCHDOG_MS;
 
         bool keyup = pkt.keyup != 0;
-        if (keyup != a->prev_mmdvm_keyup) {
+        bool edge  = keyup != a->prev_mmdvm_keyup;
+
+        if (keyup && !edge && a->mmdvm_rx_last_ms != 0) {
+            uint64_t gap = now - a->mmdvm_rx_last_ms;
+            if (gap >= MMDVM_RX_GAP_WARN_MS)
+                fprintf(stderr, "audio: %llums gap between received mmdvm-RX packets (nominal 20ms) -- upstream of us\n",
+                        (unsigned long long)gap);
+        }
+        a->mmdvm_rx_last_ms = keyup ? now : 0;
+
+        if (edge) {
             a->prev_mmdvm_keyup = keyup;
             if (keyup) mmdvm_key_edge(a, now);
             else       mmdvm_unkey_edge(a, now);
@@ -298,6 +364,10 @@ static void handle_mmdvm(app_t *a)
         if (a->link_sock >= 0)
             send_link_voice(a, ste_out);
     }
+
+    if (packets_this_call > 1)
+        fprintf(stderr, "audio: %d mmdvm-RX packets were queued and drained in one pass -- our loop fell behind\n",
+                packets_this_call);
 }
 
 /* ── link RX handling ──────────────────────────────────────────────────── */
