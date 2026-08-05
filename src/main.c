@@ -486,11 +486,11 @@ static void handle_link(app_t *a)
                 jitter_buffer_reset_silence_count(a->jb);
             } else {
                 jitter_buffer_latch_silence(a->jb);
-                uint64_t late    = jitter_buffer_late_count(a->jb);
-                uint64_t silence = jitter_buffer_latched_silence_count(a->jb);
-                float    jitter  = jitter_buffer_estimate_ms(a->jb);
-                LOGI("link: RX ended  late=%llu silence=%llu jitter=%.1fms\n",
-                        (unsigned long long)late, (unsigned long long)silence, jitter);
+                uint64_t overflow = jitter_buffer_overflow_count(a->jb);
+                uint64_t silence  = jitter_buffer_latched_silence_count(a->jb);
+                float    jitter   = jitter_buffer_estimate_ms(a->jb);
+                LOGI("link: RX ended  overflow=%llu silence=%llu jitter=%.1fms\n",
+                        (unsigned long long)overflow, (unsigned long long)silence, jitter);
                 jitter_buffer_flush(a->jb);
             }
             port_on_link_keyup(a->port, keyup, now);
@@ -500,14 +500,14 @@ static void handle_link(app_t *a)
             continue;
 
         if (pkt.type == USRP_TYPE_VOICE) {
-            jitter_buffer_push(a->jb, pkt.seq, pkt.audio);
+            jitter_buffer_push(a->jb, pkt.audio);
         } else if (pkt.type == USRP_TYPE_OPUS && a->opus) {
             int16_t pcm[480];
             int dn = opus_codec_decode(a->opus, pkt.opus, (int)pkt.opus_len, pcm);
             if (dn > 0) {
                 int sub = dn / 160;
                 for (int i = 0; i < sub; i++)
-                    jitter_buffer_push(a->jb, pkt.seq + (uint32_t)i, pcm + i * 160);
+                    jitter_buffer_push(a->jb, pcm + i * 160);
             }
         }
     }
@@ -566,11 +566,11 @@ static void check_all_timers(app_t *a, uint64_t now)
         a->prev_link_keyup = false;
         a->link_watchdog_deadline = 0;
         jitter_buffer_latch_silence(a->jb);
-        uint64_t late    = jitter_buffer_late_count(a->jb);
-        uint64_t silence = jitter_buffer_latched_silence_count(a->jb);
-        float    jitter  = jitter_buffer_estimate_ms(a->jb);
-        LOGW("link: watchdog timeout — treating as unkey  late=%llu silence=%llu jitter=%.1fms\n",
-                (unsigned long long)late, (unsigned long long)silence, jitter);
+        uint64_t overflow = jitter_buffer_overflow_count(a->jb);
+        uint64_t silence  = jitter_buffer_latched_silence_count(a->jb);
+        float    jitter   = jitter_buffer_estimate_ms(a->jb);
+        LOGW("link: watchdog timeout — treating as unkey  overflow=%llu silence=%llu jitter=%.1fms\n",
+                (unsigned long long)overflow, (unsigned long long)silence, jitter);
         jitter_buffer_flush(a->jb);
         port_on_link_keyup(a->port, false, now);
     }
@@ -642,7 +642,7 @@ int main(int argc, char *argv[])
     }
 
     if (a->cfg.link.enabled) {
-        if (jitter_buffer_create(&a->jb, JITTER_BUF_DEFAULT) != 0) {
+        if (jitter_buffer_create(&a->jb, JITTER_PREFILL_DEFAULT) != 0) {
             LOGE("usrp-rc: failed to init jitter buffer\n");
             return 1;
         }

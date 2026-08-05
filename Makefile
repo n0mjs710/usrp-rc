@@ -79,9 +79,16 @@ $(BUILDDIR)/tests/%.o: tests/%.c
 $(HARNESS): $(BUILDDIR)/tests/port_harness.o $(HARNESS_OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^ -lm
 
+JITTER_TEST = $(BUILDDIR)/tests/jitter_buffer_test
+JITTER_TEST_OBJS = $(BUILDDIR)/src/jitter_buffer.o
+
+$(JITTER_TEST): $(BUILDDIR)/tests/jitter_buffer_test.o $(JITTER_TEST_OBJS)
+	$(CC) $(LDFLAGS) -o $@ $^ -lpthread
+
 # Run from the repo root -- tests/harness.toml and vocab_8k/ are relative.
-check: $(HARNESS)
+check: $(HARNESS) $(JITTER_TEST)
 	./$(HARNESS)
+	./$(JITTER_TEST)
 
 -include $(DEPFILES)
 -include $(BUILDDIR)/tests/port_harness.d
