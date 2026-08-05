@@ -8,8 +8,9 @@
  * coroutines are serialized by the same clip queue.
  *
  * "cor_ctcss" access mode is accepted in config for structural completeness
- * but is not functionally distinct from "cor" here: USRP carries a single
- * keyup bit, so there is no independent CTCSS source to gate PENDING on.
+ * but is not functionally distinct from "cor" here: the mmdvm link carries
+ * only start/end-of-transmission, so there is no independent CTCSS source
+ * to gate PENDING on -- CTCSS decode is MMDVM-Host's job.
  */
 
 #include "port.h"

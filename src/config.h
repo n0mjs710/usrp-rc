@@ -87,7 +87,7 @@ typedef struct {
     double   impolite_morse_level;
     double   voice_level;
     int      voice_gap_ms;   /* default pause length for a bare "_" word */
-    bool     voice_filter;   /* band-limit voice clips to match MMDVMHost's RX filter -- see voice_filter.c */
+    bool     voice_filter;   /* band-limit voice clips to match MMDVM-Host's RX filter -- see voice_filter.c */
     int      ste_delay_ms;
     int      pre_message_ms;
     int      post_message_ms;

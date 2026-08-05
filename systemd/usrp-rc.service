@@ -1,5 +1,5 @@
 [Unit]
-Description=usrp-rc - USRP Repeater Controller
+Description=usrp-rc - Repeater Controller for MMDVM-Host
 Documentation=https://github.com/n0mjs710/usrp-rc
 After=network-online.target
 Wants=network-online.target

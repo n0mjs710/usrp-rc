@@ -20,6 +20,7 @@ VENDORDIR = vendor/tomlc99
 SRCS = src/main.c \
        src/config.c \
        src/usrp_protocol.c \
+       src/fm_protocol.c \
        src/opus_codec.c \
        src/jitter_buffer.c \
        src/tone.c \

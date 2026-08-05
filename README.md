@@ -1,35 +1,46 @@
-# usrp-rc — USRP Repeater Controller
+# usrp-rc — Repeater Controller for MMDVM-Host
 
-A compiled C daemon that runs on the same SBC as MMDVMHost (FM analog mode)
+A compiled C daemon that runs on the same SBC as MMDVM-Host (FM analog mode)
 and acts as both the repeater controller and network bridge. It replaces a
 separate AllStar node or remote controller process with a single
 single-threaded, no-dependency binary.
 
-`usrp-rc` has two USRP ports:
+`usrp-rc` has two ports, each speaking the native protocol of what's on the
+other end:
 
-- **mmdvm** — USRP PCM loopback to/from MMDVMHost (the "repeater" side)
-- **link** — USRP PCM or Opus to/from a `rusrp` peer, `usrp-reflector`, or
-  any ASL-compatible endpoint (the network side)
+- **mmdvm** — MMDVM-Host's **FM Network** protocol, on loopback (the
+  "repeater" side). `usrp-rc` takes the place of G4KLX's `fmgateway` here;
+  you do not run `fmgateway` as well.
+- **link** — **USRP** PCM or Opus to/from a `rusrp` peer, `usrp-reflector`,
+  or any ASL-compatible endpoint (the network side)
 
 Between those two ports sits a full repeater controller — IDs, courtesy
 tones, hang timer, timeout, squelch tail elimination, CW/voice/tone
 messages — generated entirely locally, with no network dependency for
 controller behavior.
 
+> **Note on the mmdvm-side protocol.** Earlier development connected to
+> MMDVM-Host over USRP. MMDVM-Host's 2026 restructuring removed native USRP
+> support and moved FM to its own tagged protocol plus a separate gateway
+> program, so `usrp-rc` now speaks that protocol directly. Audio parameters
+> are unchanged (8 kHz, 20 ms frames); only the framing on the loopback
+> differs. The link side is unaffected and still USRP.
+
 ## How it works
 
 ```
-MMDVMHost (loopback)                   usrp-rc                    Network
-  USRP PCM  ──► [mmdvm RX] ──┬─────────────────────────────► [link TX]  (STE-delayed uplink)
-                             │        repeater
-                             │        controller
-  USRP PCM  ◄── [mmdvm TX] ◄─┴──────┬──────────────────────  [link RX]  (jitter-buffered downlink)
-                                    │
-                     controller audio (IDs, CT, timeout, hang)
+MMDVM-Host (loopback)                  usrp-rc                    Network
+  FM Network ──► [mmdvm RX] ──┬────────────────────────────► [link TX]  (STE-delayed uplink)
+                              │        repeater                USRP
+                              │        controller
+  FM Network ◄── [mmdvm TX] ◄─┴──────┬─────────────────────  [link RX]  (jitter-buffered downlink)
+                                     │                         USRP
+                      controller audio (IDs, CT, timeout, hang)
 ```
 
-- **COR** is derived from the USRP keyup bit — no hardware GPIO, no hidraw.
-  MMDVMHost handles all radio hardware and CTCSS decode.
+- **COR** is derived from MMDVM-Host's explicit start/end-of-transmission
+  markers — no hardware GPIO, no hidraw. MMDVM-Host handles all radio
+  hardware and CTCSS decode.
 - **STE** (squelch tail elimination) delays mmdvm-RX audio by `ste_delay_ms`
   before repeating it, on *both* the local mmdvm-TX repeat leg and the
   link-TX uplink, so the squelch-crash tail at the end of a transmission
@@ -69,18 +80,34 @@ the first argument) and edit for your site. `usrp-rc.toml.sample` is the
 full reference — every option, commented — the sections below just explain
 what each part is for.
 
-### `[mmdvm]` — the loopback link to MMDVMHost
+### `[mmdvm]` — the loopback link to MMDVM-Host
 
 ```toml
 [mmdvm]
 local_address = "127.0.0.1"
-local_port    = 34001
+local_port    = 4810
 rpt_address   = "127.0.0.1"
-rpt_port      = 32001
+rpt_port      = 3810
 ```
 
-Set MMDVMHost's USRP **Local Port** to usrp-rc's `rpt_port`, and its
-**Gateway/RPT Port** to usrp-rc's `local_port`.
+`usrp-rc` binds `local_port` to receive from MMDVM-Host and sends to
+`rpt_address:rpt_port`. In `MMDVM-Host.ini` the mapping is reversed —
+`LocalPort` is what MMDVM-Host *binds*, `GatewayPort` is what it *sends to*:
+
+```ini
+[FM Network]
+Enable=1
+LocalPort=3810       ; must equal usrp-rc's rpt_port
+GatewayPort=4810     ; must equal usrp-rc's local_port
+```
+
+Two more requirements on the MMDVM-Host side:
+
+- **`[FM] LinkMode=1`.** This strips MMDVM-Host and the modem of their own
+  kerchunk / hang / courtesy-tone / ID logic so `usrp-rc` owns the repeater.
+  Without it you get two controllers fighting each other.
+- **Do not run `fmgateway`.** `usrp-rc` occupies that role. Running both
+  means two programs bound to the same gateway port.
 
 ### `[link]` — the network peer (rusrp, usrp-reflector, ASL)
 
@@ -102,8 +129,8 @@ matters.
 `master_gain` is a final multiplier applied to all generated controller
 audio (tones, CW, voice) — set it once for your site's modulator/deviation
 headroom (a sustained tone reads much "louder" in FM deviation than speech
-at the same digital peak, so start well below 1.0 — MMDVMHost's own USRP
-audio gain setting is a factor here too), then balance individual sounds
+at the same digital peak, so start well below 1.0 — MMDVM-Host's own
+`[FM Network] TXAudioGain` is a factor here too), then balance individual sounds
 against each other with `morse_level`, `voice_level`, and per-tone `amp`
 within that range. Also covers STE delay and pre/post-message padding — see
 `usrp-rc.toml.sample` for the full list with defaults.
@@ -174,10 +201,10 @@ characters — they're short identifiers, not content, and longer values are
 silently truncated at load. This does not apply to CW `text`.
 
 `access_mode` (top-level key, default `"cor"`) is accepted but `"cor_ctcss"`
-has no functional effect in this build: USRP carries a single keyup bit, so
-there's no independent CTCSS signal to gate on — CTCSS decode is
-MMDVMHost's job. It's present for schema completeness and possible future
-use.
+has no functional effect in this build: the mmdvm link carries only
+start/end-of-transmission, so there's no independent CTCSS signal to gate
+on — CTCSS decode is MMDVM-Host's job (`[FM] CTCSSFrequency` / `AccessMode`).
+It's present for schema completeness and possible future use.
 
 ## Running
 
