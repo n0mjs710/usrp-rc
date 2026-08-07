@@ -87,6 +87,7 @@ typedef struct {
     uint64_t link_recv_err_logged_ms;
 
     uint64_t mmdvm_voice_last_ms;    /* pacing monitor: see note_mmdvm_voice_pacing() */
+    uint64_t mmdvm_voice_last_cpu_ms; /* CPU-time twin of the above, for stall attribution */
     int      mmdvm_voice_burst_run;
     uint64_t mmdvm_rx_last_ms;       /* receive-side pacing monitor: see handle_mmdvm() */
 } app_t;
@@ -164,14 +165,16 @@ static int make_udp_socket(const char *bind_addr, uint16_t bind_port,
 
 static void note_mmdvm_voice_pacing(app_t *a, uint64_t now)
 {
+    uint64_t now_cpu = cpu_time_ms();
     if (a->mmdvm_voice_last_ms != 0) {
         uint64_t gap = now - a->mmdvm_voice_last_ms;
         if (gap >= MMDVM_VOICE_GAP_WARN_MS) {
+            uint64_t cpu_gap = now_cpu - a->mmdvm_voice_last_cpu_ms;
             if (a->mmdvm_voice_burst_run > 1)
                 LOGW("audio: burst of %d mmdvm-TX frames sent back-to-back just before this gap\n",
                         a->mmdvm_voice_burst_run);
-            LOGW("audio: %llums gap between mmdvm-TX frames (nominal 20ms)%s\n",
-                    (unsigned long long)gap,
+            LOGW("audio: %llums gap between mmdvm-TX frames (nominal 20ms), %llums of that was our own CPU time%s\n",
+                    (unsigned long long)gap, (unsigned long long)cpu_gap,
                     gap >= MMDVM_VOICE_GAP_DANGER_MS ? "  -- at/past the modem's link-mode drop threshold" : "");
             a->mmdvm_voice_burst_run = 0;
         } else if (gap <= 2) {
@@ -183,7 +186,8 @@ static void note_mmdvm_voice_pacing(app_t *a, uint64_t now)
             a->mmdvm_voice_burst_run = 0;
         }
     }
-    a->mmdvm_voice_last_ms = now;
+    a->mmdvm_voice_last_ms     = now;
+    a->mmdvm_voice_last_cpu_ms = now_cpu;
 }
 
 /* `keyup` is vestigial on this path and deliberately ignored: MMDVM-Host's
