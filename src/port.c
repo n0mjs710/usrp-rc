@@ -204,6 +204,7 @@ static void schedule_id(port_t *p, uint64_t now)
 /* ── transitions ────────────────────────────────────────────────────────── */
 
 static void do_impolite_id(port_t *p, uint64_t now);
+static void ct_after_drain(port_t *p, uint64_t now);
 
 static void port_transition(port_t *p, port_state_t new_state, uint64_t now)
 {
@@ -301,7 +302,10 @@ static void impolite_id_after_mix(port_t *p, uint64_t now)
     schedule_id(p, now);
     if (p->state == PORT_TAIL && !cor_active(p)) {
         queue_message(p, p->cfg->events.ct_message, -1.0);
-        schedule_hang(p, now);
+        if (ctrl_buf_playing(p))
+            p->ctrl.on_drain = ct_after_drain;
+        else
+            schedule_hang(p, now);
     }
 }
 
@@ -584,6 +588,15 @@ void port_start(port_t *p, uint64_t now)
 
 /* ── courtesy tone / hang timer callbacks ─────────────────────────────────── */
 
+/* Deferred continuation for the CT audio queued in on_ct_delay() and
+ * impolite_id_after_mix() -- hang must not start counting until the CT
+ * has actually finished playing, or it can overlap/cut off the CT. */
+static void ct_after_drain(port_t *p, uint64_t now)
+{
+    if (p->state == PORT_TAIL)
+        schedule_hang(p, now);
+}
+
 static void on_ct_delay(port_t *p, uint64_t now)
 {
     p->ct_delay_deadline = 0;
@@ -609,7 +622,10 @@ static void on_ct_delay(port_t *p, uint64_t now)
     queue_message(p, name, -1.0);
 
     p->tot_used_s = 0.0;
-    schedule_hang(p, now);
+    if (ctrl_buf_playing(p))
+        p->ctrl.on_drain = ct_after_drain;
+    else
+        schedule_hang(p, now);
 }
 
 static void on_hang(port_t *p, uint64_t now)
