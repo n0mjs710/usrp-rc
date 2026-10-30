@@ -47,6 +47,10 @@ MMDVM-Host (loopback)                  usrp-rc                    Network
   is dropped rather than repeated or forwarded. Key-up/unkey signaling is
   not delayed — only the audio is, with silence filling the gap until the
   delay line catches up.
+- **Leading-edge trim** mutes the first `lead_trim_ms` of mmdvm-RX audio in
+  each transmission, on the same two legs, for the noise MMDVM-Host can
+  pass just before the carrier is fully up. The trimmed span goes out as
+  silence, so it adds no latency and doesn't shift frame timing.
 - The repeater controller treats keyup from *either* port as access: a
   network caller opens the repeater exactly like a local radio caller, and
   gets a distinct courtesy tone (`ct_link_message`) so listeners can tell

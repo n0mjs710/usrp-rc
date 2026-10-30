@@ -640,7 +640,7 @@ int main(int argc, char *argv[])
     }
     port_set_ptt_callback(a->port, on_port_ptt, a);
 
-    if (ste_create(&a->ste, a->cfg.audio.ste_delay_ms) != 0) {
+    if (ste_create(&a->ste, a->cfg.audio.ste_delay_ms, a->cfg.audio.lead_trim_ms) != 0) {
         LOGE("usrp-rc: failed to init STE buffer\n");
         return 1;
     }

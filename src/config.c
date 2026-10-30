@@ -34,6 +34,7 @@ void config_defaults(config_t *cfg)
     cfg->audio.voice_gap_ms         = 150;
     cfg->audio.voice_filter         = true;
     cfg->audio.ste_delay_ms         = 0;
+    cfg->audio.lead_trim_ms         = 0;
     cfg->audio.pre_message_ms       = 0;
     cfg->audio.post_message_ms      = 0;
 
@@ -309,6 +310,7 @@ int config_load(config_t *cfg, const char *path)
         read_int(t,    "voice_gap_ms",          &cfg->audio.voice_gap_ms);
         read_bool(t,   "voice_filter",          &cfg->audio.voice_filter);
         read_int(t,    "ste_delay_ms",          &cfg->audio.ste_delay_ms);
+        read_int(t,    "lead_trim_ms",          &cfg->audio.lead_trim_ms);
         read_int(t,    "pre_message_ms",        &cfg->audio.pre_message_ms);
         read_int(t,    "post_message_ms",       &cfg->audio.post_message_ms);
     }

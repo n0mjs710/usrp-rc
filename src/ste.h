@@ -11,12 +11,18 @@
  * silence to both destinations until then. On gate close the queue is
  * dropped entirely — the squelch-crash tail never exits it. ste_reset()
  * clears the queue on gate close so stale audio from the previous
- * transmission never replays on the next open edge. */
+ * transmission never replays on the next open edge.
+ *
+ * The first lead_trim_ms of each transmission is muted on the way in, so
+ * the noise that MMDVM-Host passes before the carrier is fully up is never
+ * repeated or forwarded either. It's muted, not dropped, so frame timing
+ * on both destinations is unchanged. */
 
 typedef struct ste ste_t;
 
-/* delay_ms == 0 disables STE: push/pop become a pass-through. */
-int  ste_create(ste_t **out, int delay_ms);
+/* delay_ms == 0 disables STE: push/pop become a pass-through.
+ * lead_trim_ms == 0 disables the leading-edge mute. */
+int  ste_create(ste_t **out, int delay_ms, int lead_trim_ms);
 
 /* Push one 160-sample (20 ms) frame while the gate is open. If the queue
  * has reached its configured depth, pops the oldest frame into *out and
@@ -24,7 +30,8 @@ int  ste_create(ste_t **out, int delay_ms);
  * (still filling the delay window — forward nothing yet). */
 bool ste_push(ste_t *s, const int16_t *in, int16_t *out);
 
-/* Call on gate close: discard all buffered frames. */
+/* Call on gate close: discard all buffered frames and re-arm the
+ * leading-edge mute for the next transmission. */
 void ste_reset(ste_t *s);
 
 void ste_destroy(ste_t *s);
