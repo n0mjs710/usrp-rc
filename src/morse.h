@@ -11,3 +11,6 @@
  * Caller must free() the result. */
 int16_t *morse_render(const char *text, int wpm, double pitch_hz, double level,
                       size_t *out_n);
+
+/* True if morse_render can send ch (spaces count: they're word gaps). */
+int morse_has_code(char ch);

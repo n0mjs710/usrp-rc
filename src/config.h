@@ -15,8 +15,8 @@
  * text -- they're names you make up and refer back to -- so 32 bytes (31
  * usable characters) is deliberately tight to keep config_t's size down;
  * the longest real clip name in vocab_8k/ is 18 characters. Longer values
- * are silently truncated at parse time. Use CFG_STR instead for fields
- * that hold actual content (e.g. CW text) rather than a name. */
+ * are a config error. Use CFG_STR instead for fields that hold actual
+ * content (e.g. CW text) rather than a name. */
 #define CFG_NAME_STR         32
 
 typedef enum {
@@ -40,20 +40,21 @@ typedef struct {
     /* cw */
     char     cw_text[CFG_STR];
     /* voice: one or more words, played back to back.
-     * `clip = "THIS IS _ W ONE"` in TOML splits into 5 words here. */
+     * `voice: THISIS _ W ONE` in the config splits into 4 words here. */
     config_voice_word_t voice_words[CFG_MAX_VOICE_WORDS];
     int      n_voice_words;
     /* tone */
     double   freq1;
     double   freq2;
     int      ms;
-    double   amp;
+    double   amp;   /* < 0 = use cfg->audio.tone_level */
 } config_elem_t;
 
 typedef struct {
     char           name[CFG_NAME_STR];
     config_elem_t  elements[CFG_MAX_ELEMENTS];
     int            nelements;
+    int            line;   /* where it was defined, for error messages */
 } config_message_t;
 
 typedef enum {
@@ -86,6 +87,7 @@ typedef struct {
     double   morse_level;
     double   impolite_morse_level;
     double   voice_level;
+    double   tone_level;     /* tones without their own @LEVEL */
     int      voice_gap_ms;   /* default pause length for a bare "_" word */
     bool     voice_filter;   /* band-limit voice clips to match MMDVM-Host's RX filter -- see voice_filter.c */
     int      ste_delay_ms;
@@ -126,7 +128,10 @@ typedef struct {
     char level[16];   /* "error", "warn", "info", or "debug" */
 } config_log_t;
 
+#define CFG_CALLSIGN_STR 16
+
 typedef struct {
+    char             callsign[CFG_CALLSIGN_STR];  /* letters and digits; {call} in messages */
     config_mmdvm_t   mmdvm;
     config_link_t    link;
     config_audio_t   audio;
@@ -140,6 +145,13 @@ typedef struct {
 } config_t;
 
 void config_defaults(config_t *cfg);
+
+/* Load and validate, along with the tone catalog. Every problem found is
+ * logged, not just the first. Returns 0 only if the file is entirely valid:
+ * unknown settings, wrong types, out-of-range values and dangling message
+ * references are all errors. On failure cfg is still populated as far as
+ * parsing got, so a caller can carry on checking and report further problems,
+ * but must not run with it. */
 int  config_load(config_t *cfg, const char *path);
 
 /* Look up a message by name; returns NULL if not found or name is empty. */

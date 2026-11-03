@@ -23,3 +23,9 @@ int message_needs_padding(const config_t *cfg, const char *name);
  * Caller must free(result.samples). */
 rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
                                 const char *name, double morse_level_override);
+
+/* Check every message's content against what's actually available: voice
+ * clips exist in the vocab cache, CW text is all sendable. Logs each problem
+ * and returns how many there were. Separate from config_load because the
+ * vocab cache isn't loaded until after the config. */
+int message_validate(const config_t *cfg, vocab_cache_t *vocab);

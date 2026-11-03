@@ -62,9 +62,6 @@ MMDVM-Host (loopback)                  usrp-rc                    Network
 sudo apt-get install -y build-essential pkg-config libsystemd-dev libopus-dev
 ```
 
-The TOML parser ([tomlc99](https://github.com/cktan/tomlc99), MIT) is
-vendored — no separate install step.
-
 ## Building
 
 ```bash
@@ -79,22 +76,78 @@ sudo make install
 
 ## Configuration
 
-Copy `usrp-rc.toml.sample` to `/etc/usrp-rc/usrp-rc.toml` (or pass a path as
-the first argument) and edit for your site. `usrp-rc.toml.sample` is the
-full reference — every option, commented — the sections below just explain
-what each part is for.
+Copy `usrp-rc.conf.sample` to `/etc/usrp-rc/usrp-rc.conf` (or pass a path on
+the command line) and edit for your site. The format is plain `key = value`
+lines under `[section]` headers, with no quotes, and `#` starts a comment. Any
+setting you leave out takes its default, so a typical config is short:
+
+```ini
+callsign = W1XYZ
+
+[link]
+remote_host = 127.0.0.1
+remote_port = 41001
+
+[events]
+initial_ids     = my_voice
+mandatory_ids   = my_cw
+ct_message      = yellow_jacket
+ct_link_message = bumble_bee
+timeout_message = timeout_warn
+
+[messages]
+my_voice = voice: THISIS {call} REPEATER
+my_cw    = cw: {call}/R
+```
+
+`usrp-rc.conf.sample` is the full reference, with every option and its default.
+
+### Checking a config
+
+```bash
+usrp-rc --check /etc/usrp-rc/usrp-rc.conf
+```
+
+`usrp-rc` refuses to start if the config has errors, and reports all of them
+at once, with line numbers:
+
+```text
+config: line 12: timers.hnag: unknown setting (did you mean timers.hang?)
+config: line 20: events.ct_message: no message named 'yelow_jacket' (did you mean 'yellow_jacket'?)
+config: line 31: messages.my_voice: no voice clip named 'THSIS'
+```
+
+Unknown or misplaced settings, wrong types, out-of-range values, and references
+to messages or voice clips that don't exist are all errors. Run `--check` from
+the same directory the service uses, since `tones.conf`, `user_8k/` and
+`vocab_8k/` are looked for there before the installed copies. An empty
+`events.mandatory_ids` is only a warning, in case the site IDs some other way.
+
+### Converting an old `usrp-rc.toml`
+
+```bash
+python3 tools/toml2conf.py usrp-rc.toml usrp-rc.conf   # needs Python 3.11+
+usrp-rc --check usrp-rc.conf
+```
+
+Settings carry over as written, including any the old parser quietly ignored,
+so `--check` shows those by line number. Messages identical to a catalog tone
+are left out. Comments don't carry over, and it won't overwrite an existing
+file. `sudo make install` runs this for you if it finds a
+`/etc/usrp-rc/usrp-rc.toml` and no `usrp-rc.conf`.
 
 ### `[mmdvm]` — the loopback link to MMDVM-Host
 
-```toml
+```ini
 [mmdvm]
-local_address = "127.0.0.1"
+local_address = 127.0.0.1
 local_port    = 4810
-rpt_address   = "127.0.0.1"
+rpt_address   = 127.0.0.1
 rpt_port      = 3810
 ```
 
-`usrp-rc` binds `local_port` to receive from MMDVM-Host and sends to
+These are the defaults, so most sites can leave this section out. `usrp-rc`
+binds `local_port` to receive from MMDVM-Host and sends to
 `rpt_address:rpt_port`. In `MMDVM-Host.ini` the mapping is reversed —
 `LocalPort` is what MMDVM-Host *binds*, `GatewayPort` is what it *sends to*:
 
@@ -115,13 +168,13 @@ Two more requirements on the MMDVM-Host side:
 
 ### `[link]` — the network peer (rusrp, usrp-reflector, ASL)
 
-```toml
+```ini
 [link]
-enabled       = true
-remote_host   = "127.0.0.1"
-remote_port   = 41001
-local_port    = 34002
-codec         = "pcm"   # "pcm" or "opus" (narrowband SILK, 8 kHz)
+enabled     = true
+remote_host = 127.0.0.1
+remote_port = 41001
+local_port  = 34002
+codec       = pcm     # pcm or opus (narrowband SILK, 8 kHz)
 ```
 
 Set `enabled = false` to run as a standalone local repeater with no network
@@ -135,9 +188,9 @@ audio (tones, CW, voice) — set it once for your site's modulator/deviation
 headroom (a sustained tone reads much "louder" in FM deviation than speech
 at the same digital peak, so start well below 1.0 — MMDVM-Host's own
 `[FM Network] TXAudioGain` is a factor here too), then balance individual sounds
-against each other with `morse_level`, `voice_level`, and per-tone `amp`
+against each other with `morse_level`, `voice_level`, and `tone_level`
 within that range. Also covers STE delay and pre/post-message padding — see
-`usrp-rc.toml.sample` for the full list with defaults.
+`usrp-rc.conf.sample` for the full list with defaults.
 
 ### `[timers]` — hang, courtesy-tone delay, timeout, ID interval
 
@@ -147,64 +200,64 @@ Mirrors standard analog repeater controller terminology: `hang`, `ct_delay`,
 
 ### `[events]` — which message plays for each occasion
 
-```toml
+```ini
 [events]
-initial_ids  = ["default_voice"]
-mandatory_ids = ["default_cw"]
-ct_message    = "yellow_jacket"
-ct_link_message = "bumble_bee"
-timeout_message = "timeout_warn"
+initial_ids     = my_voice
+mandatory_ids   = my_cw
+ct_message      = yellow_jacket
+ct_link_message = bumble_bee
+timeout_message = timeout_warn
 ```
 
 Maps occasions (startup, initial/mandatory/anxious/impolite ID, courtesy
-tones, timeout) to message names defined under `[messages.*]`. Several keys
-(`initial_ids`, `mandatory_ids`) take a list and rotate through it.
+tones, timeout) to message names. `initial_ids` and `mandatory_ids` take a
+space-separated list and rotate through it. An empty value plays nothing.
 
-### `[messages.*]` — the actual audio content
+### `[messages]` — the actual audio content
 
-Each message is a named sequence of `cw` / `voice` / `tone` elements, mixed
-freely, referenced by name from `[events]` above:
+Each line names a message, made of `cw:`, `voice:`, and `tone:` parts:
 
-```toml
-[messages.default_cw]
-elements = [{type = "cw", text = "W1XYZ/R"}]
-
-[messages.default_voice]
-elements = [{type = "voice", clip = "THIS IS W ONE X Y Z REPEATER"}]
-
-[messages.yellow_jacket]
-elements = [
-  {type = "tone", freq1 = 330.0, freq2 = 0.0, ms = 50, amp = 0.5},
-  {type = "tone", freq1 = 495.0, freq2 = 0.0, ms = 50, amp = 0.5},
-  {type = "tone", freq1 = 660.0, freq2 = 0.0, ms = 50, amp = 0.5},
-]
+```ini
+[messages]
+my_voice = voice: THISIS {call} REPEATER
+my_cw    = cw: {call}/R
+my_tone  = tone: 330:50 495:50 660:50
+my_mix   = voice: THISIS {call} | tone: 880:100 | cw: {call}/R
 ```
 
-- A `voice` element's `clip` holds one or more clip names separated by
-  spaces, played back to back (clip names never contain spaces, so this is
-  unambiguous). `cw` `text` is *not* split this way — spaces there are real
-  Morse word gaps.
-- A word `"_"` inserts a pause instead of a clip, using `audio.voice_gap_ms`;
-  `"_400"` is an explicit 400 ms pause. Only recognized when `_` is followed
-  solely by digits or nothing, so a clip literally named `_TEEN` is
-  unaffected. For example, `clip = "THIS IS _ W ONE _400 REPEATING"` plays
-  "THIS IS", a default-length pause, "W ONE", a 400 ms pause, then
-  "REPEATING".
-- `tone` elements take `freq1`/`freq2` (a second frequency mixes in a dual
-  tone; 0 = unused), `ms` duration, and `amp` (0.0–1.0).
-- A message can hold up to 32 elements; a single `voice` element's word list
-  up to 32 words/pauses.
+- **`{call}`** is replaced by the top-level `callsign` setting, which holds only
+  the callsign (letters and digits). Add `/R`, `REPEATER`, or anything else in
+  the message itself. CW sends it as written; voice spells it out, so `W1XYZ`
+  plays the clips `W ONE X Y Z`.
+- **`voice:`** takes clip names separated by spaces, played back to back. `_`
+  inserts a pause of `audio.voice_gap_ms` and `_400` a 400 ms pause. Only `_`
+  followed solely by digits or nothing counts, so a clip named `_TEEN` is
+  unaffected.
+- **`cw:`** takes the text to send. Spaces are real Morse word gaps.
+- **`tone:`** takes notes played in order:
 
-`usrp-rc.toml.sample` ships with a full courtesy-tone catalog
-(`[messages.honk]`, `[messages.yellow_jacket]`, etc.) you can reference
-directly or use as templates.
+  | You write | You get |
+  |---|---|
+  | `660:50` | 660 Hz for 50 ms |
+  | `500+700:100` | 500 Hz and 700 Hz together for 100 ms |
+  | `_30` | 30 ms of silence |
+  | `1200:60@0.9` | this note at level 0.9 instead of `audio.tone_level` |
+
+- **`|`** joins parts into one message.
+- A message can hold up to 32 elements, where each note counts as one and each
+  `cw:` or `voice:` part as one. A `voice:` part holds up to 32 words and pauses.
+
+**Tone catalog**: [`tones.conf`](tones.conf) is installed with `usrp-rc` and its
+tones are always available by name, e.g. `ct_message = yellow_jacket`. It's a
+readable text file listing each tone's notes and what it sounds like. To make
+your own tone, add it under `[messages]` in your config; using a catalog name
+replaces that tone. Up to 64 messages are available, counting the catalog's 28.
 
 **Name length**: message names, clip names, and anywhere you reference a
-message name (`ct_message`, `initial_ids`, etc.) are capped at 31
-characters — they're short identifiers, not content, and longer values are
-silently truncated at load. This does not apply to CW `text`.
+message name (`ct_message`, `initial_ids`, etc.) are capped at 31 characters,
+and a longer value is a config error. This does not apply to `cw:` text.
 
-`access_mode` (top-level key, default `"cor"`) is accepted but `"cor_ctcss"`
+`access_mode` (top-level setting, default `cor`) is accepted but `cor_ctcss`
 has no functional effect in this build: the mmdvm link carries only
 start/end-of-transmission, so there's no independent CTCSS signal to gate
 on — CTCSS decode is MMDVM-Host's job (`[FM] CTCSSFrequency` / `AccessMode`).
@@ -213,7 +266,7 @@ It's present for schema completeness and possible future use.
 ## Running
 
 ```bash
-./build/usrp-rc usrp-rc.toml.sample
+./build/usrp-rc usrp-rc.conf.sample
 # or, once installed:
 sudo systemctl enable --now usrp-rc
 journalctl -u usrp-rc -f
@@ -229,8 +282,8 @@ needs any extra vocabulary tooling.
 files, not configuration) ready for your own clips — no need to create it or
 guess permissions. To add a clip (or replace a stock one), drop an 8 kHz
 mono 16-bit WAV file in, matching `vocab_8k/`'s naming convention (the WAV
-filename, minus `.wav`, is the clip name referenced from `voice` elements —
-see `[messages.*]` above). Files in `user_8k/` take priority over stock
+filename, minus `.wav`, is the clip name used in `voice:` messages —
+see `[messages]` above). Files in `user_8k/` take priority over stock
 clips of the same name, so you can override one word without touching the
 shipped set. See
 [user_8k/README.md](user_8k/README.md) for the same detail in one place.

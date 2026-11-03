@@ -15,7 +15,6 @@ LDFLAGS += -pie
 LDLIBS  += $(shell pkg-config --libs libsystemd opus) -lm -lpthread
 
 BUILDDIR  = build
-VENDORDIR = vendor/tomlc99
 
 SRCS = src/main.c \
        src/config.c \
@@ -30,8 +29,7 @@ SRCS = src/main.c \
        src/message.c \
        src/ste.c \
        src/port.c \
-       src/log.c \
-       $(VENDORDIR)/toml.c
+       src/log.c
 
 OBJS     = $(patsubst %.c,$(BUILDDIR)/%.o,$(SRCS))
 DEPFILES = $(OBJS:.o=.d)
@@ -47,8 +45,7 @@ HARNESS_SRCS = src/port.c \
                src/morse.c \
                src/voice_filter.c \
                src/message.c \
-               src/log.c \
-               $(VENDORDIR)/toml.c
+               src/log.c
 HARNESS_OBJS = $(patsubst %.c,$(BUILDDIR)/%.o,$(HARNESS_SRCS))
 HARNESS      = $(BUILDDIR)/tests/port_harness
 
@@ -66,15 +63,11 @@ $(TARGET): $(OBJS)
 
 $(BUILDDIR)/src/%.o: src/%.c
 	@mkdir -p $(@D)
-	$(CC) $(CFLAGS) -I$(VENDORDIR) -MMD -MP -c -o $@ $<
-
-$(BUILDDIR)/$(VENDORDIR)/%.o: $(VENDORDIR)/%.c
-	@mkdir -p $(@D)
-	$(CC) $(CFLAGS) -Wno-unused-result -MMD -MP -c -o $@ $<
+	$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
 
 $(BUILDDIR)/tests/%.o: tests/%.c
 	@mkdir -p $(@D)
-	$(CC) $(CFLAGS) -I$(VENDORDIR) -MMD -MP -c -o $@ $<
+	$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
 
 $(HARNESS): $(BUILDDIR)/tests/port_harness.o $(HARNESS_OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^ -lm
@@ -85,10 +78,20 @@ JITTER_TEST_OBJS = $(BUILDDIR)/src/jitter_buffer.o
 $(JITTER_TEST): $(BUILDDIR)/tests/jitter_buffer_test.o $(JITTER_TEST_OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^ -lpthread
 
-# Run from the repo root -- tests/harness.toml and vocab_8k/ are relative.
-check: $(HARNESS) $(JITTER_TEST)
+CONFIG_TEST = $(BUILDDIR)/tests/config_test
+CONFIG_TEST_OBJS = $(filter-out $(BUILDDIR)/src/port.o,$(HARNESS_OBJS))
+
+$(CONFIG_TEST): $(BUILDDIR)/tests/config_test.o $(CONFIG_TEST_OBJS)
+	$(CC) $(LDFLAGS) -o $@ $^ -lm
+
+# Run from the repo root -- tests/harness.conf, tones.conf and vocab_8k/ are relative.
+check: $(TARGET) $(HARNESS) $(JITTER_TEST) $(CONFIG_TEST)
 	./$(HARNESS)
 	./$(JITTER_TEST)
+	./$(CONFIG_TEST)
+	python3 tools/toml2conf.py tests/legacy.toml | diff - tests/legacy.conf
+	./$(TARGET) --check tests/legacy.conf
+	./$(TARGET) --check usrp-rc.conf.sample
 
 -include $(DEPFILES)
 -include $(BUILDDIR)/tests/port_harness.d
@@ -106,17 +109,25 @@ clean:
 
 install: $(TARGET)
 	install -Dm755 $(TARGET)                  $(DESTDIR)$(BINDIR)/usrp-rc
-	install -Dm644 usrp-rc.toml.sample         $(DESTDIR)$(SYSCONFDIR)/usrp-rc/usrp-rc.toml.sample
+	install -Dm644 usrp-rc.conf.sample         $(DESTDIR)$(SYSCONFDIR)/usrp-rc/usrp-rc.conf.sample
+	install -Dm644 tones.conf                  $(DESTDIR)$(DATADIR)/tones.conf
+	install -Dm755 tools/toml2conf.py          $(DESTDIR)$(DATADIR)/toml2conf.py
 	install -Dm644 systemd/usrp-rc.service     $(DESTDIR)$(UNITDIR)/usrp-rc.service
 	@mkdir -p $(DESTDIR)$(DATADIR)/vocab_8k
 	@cp -n vocab_8k/*.wav $(DESTDIR)$(DATADIR)/vocab_8k/ 2>/dev/null || true
 	install -Dm644 user_8k/README.md          $(DESTDIR)$(DATADIR)/user_8k/README.md
 	@if [ -z "$(DESTDIR)" ]; then \
-		if [ ! -f $(SYSCONFDIR)/usrp-rc/usrp-rc.toml ]; then \
-			cp $(SYSCONFDIR)/usrp-rc/usrp-rc.toml.sample $(SYSCONFDIR)/usrp-rc/usrp-rc.toml; \
-			echo "usrp-rc: installed default config at $(SYSCONFDIR)/usrp-rc/usrp-rc.toml"; \
+		if [ ! -f $(SYSCONFDIR)/usrp-rc/usrp-rc.conf ]; then \
+			if [ -f $(SYSCONFDIR)/usrp-rc/usrp-rc.toml ]; then \
+				python3 tools/toml2conf.py $(SYSCONFDIR)/usrp-rc/usrp-rc.toml $(SYSCONFDIR)/usrp-rc/usrp-rc.conf \
+					&& echo "usrp-rc: converted usrp-rc.toml to $(SYSCONFDIR)/usrp-rc/usrp-rc.conf -- run usrp-rc --check on it" \
+					|| echo "usrp-rc: could not convert usrp-rc.toml -- see tools/toml2conf.py"; \
+			else \
+				cp $(SYSCONFDIR)/usrp-rc/usrp-rc.conf.sample $(SYSCONFDIR)/usrp-rc/usrp-rc.conf; \
+				echo "usrp-rc: installed default config at $(SYSCONFDIR)/usrp-rc/usrp-rc.conf"; \
+			fi; \
 		else \
-			echo "usrp-rc: existing config preserved at $(SYSCONFDIR)/usrp-rc/usrp-rc.toml"; \
+			echo "usrp-rc: existing config preserved at $(SYSCONFDIR)/usrp-rc/usrp-rc.conf"; \
 		fi; \
 	fi
 
@@ -124,6 +135,7 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/usrp-rc
 	rm -f $(DESTDIR)$(UNITDIR)/usrp-rc.service
 	rm -rf $(DESTDIR)$(DATADIR)/vocab_8k
+	rm -f $(DESTDIR)$(DATADIR)/tones.conf $(DESTDIR)$(DATADIR)/toml2conf.py
 	rm -f $(DESTDIR)$(DATADIR)/user_8k/README.md
 	@echo "usrp-rc: config at $(SYSCONFDIR)/usrp-rc/ preserved — remove manually if desired"
 	@echo "usrp-rc: any of your own clips in $(DATADIR)/user_8k/ preserved — remove manually if desired"

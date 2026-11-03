@@ -8,7 +8,7 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/usrp-rc /etc/usrp-rc/usrp-rc.toml
+ExecStart=/usr/local/bin/usrp-rc /etc/usrp-rc/usrp-rc.conf
 Restart=on-failure
 RestartSec=5
 TimeoutStartSec=10

@@ -57,7 +57,7 @@ Developed on a Raspberry Pi 3B+ (similar architecture/OS to the production
 target, a NanoPi NEO, which can't run a remote VS Code session). Code is
 pushed to GitHub from this dev box and pulled/built on the NanoPi NEO —
 there's nothing Pi-specific in the source; it's plain C11 against
-`libopus`/`libsystemd`/vendored `tomlc99`.
+`libopus`/`libsystemd`.
 
 ## Regenerating `vocab_8k/` from source audio
 

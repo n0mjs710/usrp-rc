@@ -5,6 +5,7 @@
 #include "opus_codec.h"
 #include "jitter_buffer.h"
 #include "vocab.h"
+#include "message.h"
 #include "ste.h"
 #include "port.h"
 #include "util.h"
@@ -23,7 +24,7 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 
-#define DEFAULT_CONFIG "/etc/usrp-rc/usrp-rc.toml"
+#define DEFAULT_CONFIG "/etc/usrp-rc/usrp-rc.conf"
 #define MAX_EVENTS 8
 
 /* Not exposed in the TOML schema (see plan) — no-packet timeout on each
@@ -593,8 +594,17 @@ static void check_all_timers(app_t *a, uint64_t now)
 int main(int argc, char *argv[])
 {
     const char *config_path = DEFAULT_CONFIG;
-    if (argc > 1)
-        config_path = argv[1];
+    bool check_only = false;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--check") == 0) {
+            check_only = true;
+        } else if (argv[i][0] == '-') {
+            LOGE("usage: usrp-rc [--check] [config-file]\n");
+            return 2;
+        } else {
+            config_path = argv[i];
+        }
+    }
 
     /* app_t embeds config_t directly (messages[64] x elements[32] x
      * voice_words[32] adds up to several MB) -- heap-allocate it rather
@@ -606,9 +616,29 @@ int main(int argc, char *argv[])
     }
     a->link_sock = -1;
 
-    if (config_load(&a->cfg, config_path) != 0) {
-        LOGE("usrp-rc: failed to load config: %s\n", config_path);
+    /* Carry on past a bad config far enough to check message content too, so
+     * one run reports everything. Nothing below starts until all of it passes:
+     * better off the air than on it with a setting quietly ignored. */
+    int config_rc = config_load(&a->cfg, config_path);
+
+    const char *vocab_dirs[] = {
+        "user_8k", "vocab_8k",
+        "/usr/local/share/usrp-rc/user_8k", "/usr/local/share/usrp-rc/vocab_8k",
+    };
+    if (vocab_cache_create(&a->vocab, vocab_dirs, 4) != 0) {
+        LOGE("usrp-rc: failed to init vocab cache\n");
         return 1;
+    }
+
+    int content_errors = message_validate(&a->cfg, a->vocab);
+    if (config_rc != 0 || content_errors != 0) {
+        LOGE("usrp-rc: config errors in %s -- not starting\n", config_path);
+        return 1;
+    }
+
+    if (check_only) {
+        printf("usrp-rc: %s OK (%d messages)\n", config_path, a->cfg.nmessages);
+        return 0;
     }
 
     if (a->cfg.link.enabled) {
@@ -624,15 +654,6 @@ int main(int argc, char *argv[])
                a->cfg.mmdvm.rpt_address,   a->cfg.mmdvm.rpt_port);
     }
     printf("usrp-rc: %d messages loaded\n", a->cfg.nmessages);
-
-    const char *vocab_dirs[] = {
-        "user_8k", "vocab_8k",
-        "/usr/local/share/usrp-rc/user_8k", "/usr/local/share/usrp-rc/vocab_8k",
-    };
-    if (vocab_cache_create(&a->vocab, vocab_dirs, 4) != 0) {
-        LOGE("usrp-rc: failed to init vocab cache\n");
-        return 1;
-    }
 
     if (port_create(&a->port, &a->cfg, a->vocab) != 0) {
         LOGE("usrp-rc: failed to init port state machine\n");

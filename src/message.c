@@ -31,6 +31,35 @@ int message_needs_padding(const config_t *cfg, const char *name)
     return 0;
 }
 
+int message_validate(const config_t *cfg, vocab_cache_t *vocab)
+{
+    int errors = 0;
+    for (int i = 0; i < cfg->nmessages; i++) {
+        const config_message_t *m = &cfg->messages[i];
+        for (int j = 0; j < m->nelements; j++) {
+            const config_elem_t *e = &m->elements[j];
+            if (e->type == ELEM_CW) {
+                for (const char *p = e->cw_text; *p; p++) {
+                    if (!morse_has_code(*p)) {
+                        LOGE("config: line %d: messages.%s: no Morse code for '%c'\n", m->line, m->name, *p);
+                        errors++;
+                    }
+                }
+            } else if (e->type == ELEM_VOICE) {
+                for (int w = 0; w < e->n_voice_words; w++) {
+                    size_t n;
+                    if (!e->voice_words[w].is_gap && !vocab_get(vocab, e->voice_words[w].clip, &n)) {
+                        LOGE("config: line %d: messages.%s: no voice clip named '%s'\n",
+                             m->line, m->name, e->voice_words[w].clip);
+                        errors++;
+                    }
+                }
+            }
+        }
+    }
+    return errors;
+}
+
 rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
                                 const char *name, double morse_level_override)
 {
@@ -107,7 +136,8 @@ rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
         }
         case ELEM_TONE: {
             size_t n;
-            int16_t *samples = tone_render(e->freq1, e->freq2, e->ms, e->amp, &n);
+            double amp = e->amp >= 0.0 ? e->amp : cfg->audio.tone_level;
+            int16_t *samples = tone_render(e->freq1, e->freq2, e->ms, amp, &n);
             if (samples) {
                 sbuf_append(&buf, samples, n);
                 free(samples);

@@ -1,0 +1,63 @@
+# Fixture for tools/toml2conf.py; the expected result is tests/legacy.conf.
+access_mode = "cor"
+
+[log]
+level = "debug"
+
+[mmdvm]
+local_port = 4810
+rpt_port   = 3810
+
+[link]
+enabled     = true
+remote_host = "127.0.0.1"
+codec       = "opus"
+
+[audio]
+master_gain  = 0.75
+voice_filter = false
+
+[timers]
+hang = 2.5
+
+[events]
+startup_message = ""
+initial_ids     = ["site_voice", "site_cw"]
+mandatory_ids   = ["site_cw"]
+ct_message      = "yellow_jacket"
+ct_link_message = "my_tone"
+
+[messages.site_voice]
+elements = [{type = "voice", clip = "THISIS  _ W ONE _400 REPEATER"}]
+
+[messages.site_cw]
+elements = [{type = "cw", text = "W1XYZ/R DE W1XYZ"}]
+
+# Identical to the catalog, so it's dropped.
+[messages.yellow_jacket]
+elements = [
+  {type = "tone", freq1 = 330.0, freq2 = 0.0, ms = 50, amp = 0.5},
+  {type = "tone", freq1 = 495.0, freq2 = 0.0, ms = 50, amp = 0.5},
+  {type = "tone", freq1 = 660.0, freq2 = 0.0, ms = 50, amp = 0.5},
+]
+
+# Same name as a catalog tone but changed, so it's kept.
+[messages.honk]
+elements = [{type = "tone", freq1 = 500, freq2 = 800, ms = 100, amp = 0.5}]
+
+# Old per-element defaults (ms 80, amp 0.8), a silence, and the "ct" alias.
+[messages.my_tone]
+elements = [
+  {type = "ct", freq1 = 1000},
+  {type = "tone", freq1 = 0, freq2 = 0, ms = 30, amp = 0.0},
+  {type = "tone", freq1 = 800, ms = 40, amp = 0.5},
+]
+
+# Mixed elements.
+[messages.mixed]
+elements = [
+  {type = "voice", clip = "REPEATER"},
+  {type = "tone", freq1 = 700, ms = 50, amp = 0.5},
+  {type = "tone", freq1 = 900, ms = 50, amp = 0.5},
+  {type = "cw", text = "ID"},
+]

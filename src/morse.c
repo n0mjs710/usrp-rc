@@ -40,6 +40,11 @@ static const char *lookup(char ch)
     return NULL;
 }
 
+int morse_has_code(char ch)
+{
+    return ch == ' ' || lookup((char)toupper((unsigned char)ch)) != NULL;
+}
+
 static void sbuf_append_silence_s(sbuf_t *b, double seconds)
 {
     sbuf_append_silence(b, (size_t)(seconds * MORSE_SAMPLE_RATE));

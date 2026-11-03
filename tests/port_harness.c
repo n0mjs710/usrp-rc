@@ -9,7 +9,7 @@
  *
  * Not a general-purpose test framework -- just enough scaffolding to
  * script and assert on the specific scenarios this fix is meant to cover.
- * Run from the repo root (paths to tests/harness.toml and vocab_8k/ are
+ * Run from the repo root (paths to tests/harness.conf and vocab_8k/ are
  * relative); `make check` does this for you.
  */
 
@@ -519,8 +519,8 @@ int main(void)
     setvbuf(stdout, NULL, _IONBF, 0);
 
     config_t base;
-    if (config_load(&base, "tests/harness.toml") != 0) {
-        fprintf(stderr, "harness: failed to load tests/harness.toml -- run from the repo root\n");
+    if (config_load(&base, "tests/harness.conf") != 0) {
+        fprintf(stderr, "harness: failed to load tests/harness.conf -- run from the repo root\n");
         return 1;
     }
 

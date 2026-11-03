@@ -1,0 +1,104 @@
+# usrp-rc configuration. Copy to /etc/usrp-rc/usrp-rc.conf and edit for your site.
+#
+# Check your edits before restarting:  usrp-rc --check /etc/usrp-rc/usrp-rc.conf
+# usrp-rc will not start with config errors. Each one is reported by line number.
+#
+# Format: "key = value", no quotes. # starts a comment. Any setting you leave
+# out takes the default shown in the optional sections further down.
+
+# Your callsign, letters and digits only. {call} in a message is replaced by it:
+# sent as-is in CW, spelled out word by word in voice (W1XYZ = W ONE X Y Z).
+callsign = W1XYZ
+
+# cor or cor_ctcss. CTCSS decode is MMDVM-Host's job ([FM] CTCSSFrequency and
+# AccessMode), so cor_ctcss currently behaves the same as cor.
+#access_mode = cor
+
+[link]
+# Network USRP peer: rusrp, usrp-reflector, or ASL-compatible endpoint.
+# Set enabled = false for a standalone local repeater with no link socket at all.
+enabled     = true
+remote_host = 127.0.0.1
+remote_port = 41001
+local_port  = 34002
+codec       = pcm      # pcm or opus
+#bind_address  = 0.0.0.0
+#opus_bitrate  = 8000   # 4000 to 64000; used when codec = opus
+#opus_frame_ms = 60     # 20, 40, or 60; used when codec = opus
+
+[events]
+# Which message plays for each occasion. Empty = play nothing.
+# initial_ids and mandatory_ids rotate through a space-separated list (max 8).
+initial_ids     = default_voice
+mandatory_ids   = default_cw
+ct_message      = yellow_jacket
+ct_link_message = bumble_bee
+timeout_message = timeout_warn
+#startup_message        =
+#anxious_id             =
+#impolite_id            =
+#timeout_cancel_message =
+
+[messages]
+# Your own messages, by name, for use in [events] above.
+#
+#     name = voice: THISIS {call} REPEATER     voice clips from vocab_8k/ or user_8k/
+#                                              "_" pauses audio.voice_gap_ms, "_400" pauses 400 ms
+#     name = cw: {call}/R                      Morse; spaces are real word gaps
+#     name = tone: 660:50 495:50               FREQ:MS notes, played in order
+#     name = tone: 500+700:100                 two frequencies together
+#     name = tone: 1760:30 _30 1760:30         _MS is silence
+#     name = tone: 1200:60@0.9                 @LEVEL overrides audio.tone_level for one note
+#     name = voice: THISIS {call} | cw: {call} | joins parts into one message
+#
+# A ready-made tone catalog is always available by name -- see tones.conf, which
+# lists each tone with its notes and what it sounds like. Define a message here
+# with the same name to replace a catalog tone.
+default_voice = voice: THISIS {call} REPEATER
+default_cw    = cw: {call}/R
+
+# ── Optional: everything below shows the defaults ─────────────────────────
+#
+# Uncomment a section header along with the settings you want to change.
+
+#[log]
+#level = info          # error, warn, info, or debug
+
+#[mmdvm]
+# Loopback link to MMDVM-Host's native FM Network protocol. usrp-rc takes the
+# place of G4KLX's fmgateway here -- do NOT run fmgateway as well. Requires
+# [FM] LinkMode=1, and in MMDVM-Host.ini the ports are the reverse of these:
+#     [FM Network]
+#     Enable=1
+#     LocalPort=3810     <- must equal rpt_port
+#     GatewayPort=4810   <- must equal local_port
+#local_address = 127.0.0.1
+#local_port    = 4810
+#rpt_address   = 127.0.0.1
+#rpt_port      = 3810
+
+#[audio]
+# master_gain is a final multiplier on ALL generated controller audio: set it
+# once for your modulator's headroom, then balance sounds with the levels below.
+#master_gain          = 1.0
+#morse_wpm            = 20
+#morse_pitch          = 700
+#morse_level          = 0.9
+#impolite_morse_level = 0.3    # CW level when IDing over an active QSO (ducking)
+#voice_level          = 0.9
+#tone_level           = 0.5    # tones without their own @LEVEL
+#voice_gap_ms         = 150    # length of a bare "_" pause
+#voice_filter         = true   # band-limit voice clips to match MMDVM-Host's RX filter (300-2700 Hz)
+#ste_delay_ms         = 0      # squelch tail elimination delay (0 = off)
+#lead_trim_ms         = 0      # mute this much leading RX audio per transmission (0 = off)
+#pre_message_ms       = 0      # dead air after PTT-on before CW/voice starts
+#post_message_ms      = 0      # dead air after audio drains before PTT-off
+
+#[timers]
+# All in seconds.
+#hang        = 2.5     # PTT holdoff after the courtesy tone
+#ct_delay    = 0.5     # from RX loss to courtesy tone
+#kerchunk    = 0.5     # minimum COR hold to respond (anti-kerchunk)
+#timeout     = 180     # time-out timer (TOT) transmit cutoff
+#id_interval = 600     # mandatory ID interval (FCC: at most 10 minutes)
+#id_anxious  = 60      # sneak an anxious ID this far before the deadline
