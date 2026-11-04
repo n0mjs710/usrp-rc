@@ -48,6 +48,8 @@ void config_defaults(config_t *cfg)
     cfg->timers.timeout     = 180.0;
     cfg->timers.id_interval = 600.0;
     cfg->timers.id_anxious  = 60.0;
+    cfg->timers.tail_every  = 10;
+    cfg->timers.tail_after_hang = 0.0;
 
     /* Off unless asked for: it mutes repeat audio and drops the link, which an
      * existing site shouldn't start doing just by upgrading. */
@@ -163,6 +165,8 @@ static const field_t FIELDS[] = {
     DBL("timers", "timeout",     timers.timeout, 1, 3600),   /* 0 would time out instantly */
     DBL("timers", "id_interval", timers.id_interval, 1, 86400),
     DBL("timers", "id_anxious",  timers.id_anxious, 0, 3600),
+    INT("timers", "tail_every",  timers.tail_every, 0, 1000),
+    DBL("timers", "tail_after_hang", timers.tail_after_hang, 0, 86400),
 
     BOOL("dtmf", "enabled",       dtmf.enabled),
     INT("dtmf",  "min_tone_ms",   dtmf.min_tone_ms, 30, 1000),
@@ -183,9 +187,10 @@ static const field_t FIELDS[] = {
     NAMES("mandatory_ids", events.mandatory_ids, events.n_mandatory_ids),
     STR("events", "anxious_id",             events.anxious_id),
     STR("events", "impolite_id",            events.impolite_id),
-    STR("events", "ct_message",             events.ct_message),
+    STR("events", "ct_link_on_message",             events.ct_link_on_message),
     STR("events", "ct_link_message",        events.ct_link_message),
     STR("events", "ct_link_off_message",    events.ct_link_off_message),
+    STR("events", "tail_message",           events.tail_message),
     STR("events", "time_message",           events.time_message),
     STR("events", "link_on_message",        events.link_on_message),
     STR("events", "link_off_message",       events.link_off_message),
@@ -195,9 +200,10 @@ static const field_t FIELDS[] = {
 #define NFIELDS (sizeof(FIELDS) / sizeof(FIELDS[0]))
 
 #define MESSAGES_SECTION "messages"
+#define SCHEDULE_SECTION "schedule"
 
 static const char *const SECTIONS[] = {
-    "log", "mmdvm", "link", "audio", "timers", "dtmf", "events", MESSAGES_SECTION, NULL,
+    "log", "mmdvm", "link", "audio", "timers", "dtmf", "events", MESSAGES_SECTION, SCHEDULE_SECTION, NULL,
 };
 
 static const char *const ELEM_TYPES[] = {"cw", "voice", "tone", NULL};
@@ -291,6 +297,11 @@ static void err_unknown_setting(const char *section, const char *key)
 {
     char have[96];
     make_path(have, sizeof(have), section, key);
+
+    if (strcmp(section, "events") == 0 && strcmp(key, "ct_message") == 0) {
+        cfg_err("%s: renamed to events.ct_link_on_message (see UPGRADE.md)\n", have);
+        return;
+    }
 
     const field_t *hint = NULL;
     for (size_t i = 0; i < NFIELDS && !hint; i++)
@@ -588,7 +599,7 @@ static void read_settings(const entries_t *es, config_t *cfg)
 {
     for (int i = 0; i < es->n; i++) {
         const entry_t *e = &es->v[i];
-        if (strcmp(e->section, MESSAGES_SECTION) == 0)
+        if (strcmp(e->section, MESSAGES_SECTION) == 0 || strcmp(e->section, SCHEDULE_SECTION) == 0)
             continue;
         s_line = e->line;
 
@@ -1001,6 +1012,149 @@ static void load_tone_catalog(config_t *cfg)
     LOGW("config: tone catalog not found -- only tones in this config are available\n");
 }
 
+/* ── schedule ───────────────────────────────────────────────────────────── */
+
+static bool parse_days(const char *text, unsigned *days)
+{
+    static const char *const NAMES[] = {"sun", "mon", "tue", "wed", "thu", "fri", "sat"};
+    char copy[64];
+    snprintf(copy, sizeof(copy), "%s", text);
+    *days = 0;
+    char *save = NULL;
+    for (char *tok = strtok_r(copy, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
+        if (strcasecmp(tok, "daily") == 0) {
+            *days |= 0x7Fu;
+        } else if (strcasecmp(tok, "weekdays") == 0) {
+            *days |= 0x3Eu;
+        } else if (strcasecmp(tok, "weekends") == 0) {
+            *days |= 0x41u;
+        } else {
+            int i = 0;
+            while (i < 7 && strcasecmp(tok, NAMES[i]) != 0)
+                i++;
+            if (i == 7)
+                return false;
+            *days |= 1u << i;
+        }
+    }
+    return *days != 0;
+}
+
+/* HH:MM-HH:MM, on a 24-hour clock. */
+static bool parse_window(const char *text, int *start, int *end)
+{
+    int h1, m1, h2, m2, used = 0;
+    if (sscanf(text, "%d:%d-%d:%d%n", &h1, &m1, &h2, &m2, &used) != 4 || text[used])
+        return false;
+    if (h1 < 0 || h1 > 23 || h2 < 0 || h2 > 23 || m1 < 0 || m1 > 59 || m2 < 0 || m2 > 59)
+        return false;
+    *start = h1 * 60 + m1;
+    *end   = h2 * 60 + m2;
+    return true;
+}
+
+static void check_message_ref(const config_t *cfg, const char *path, const char *name);
+
+static void read_override(char *tok, const char *path, const config_t *cfg, config_schedule_t *out)
+{
+    char *eq = strchr(tok, '=');
+    if (!eq) {
+        cfg_err("%s: expected setting=value, got '%s'\n", path, tok);
+        return;
+    }
+    *eq = '\0';
+    const char *key = tok, *value = eq + 1;
+
+    const field_t *f = NULL;
+    for (size_t i = 0; i < NFIELDS && !f; i++)
+        if (strcmp(FIELDS[i].section, "events") == 0 && strcmp(FIELDS[i].key, key) == 0)
+            f = &FIELDS[i];
+    if (!f || strcmp(key, "startup_message") == 0) {
+        cfg_err("%s: '%s' can't be scheduled (only [events] settings can, except startup_message)\n", path, key);
+        return;
+    }
+    if (out->nsets == CFG_MAX_SCHEDULE_SETS) {
+        cfg_err("%s: more than %d settings\n", path, CFG_MAX_SCHEDULE_SETS);
+        return;
+    }
+
+    config_override_t *o = &out->sets[out->nsets++];
+    if (strlen(value) >= sizeof(o->value)) {
+        cfg_err("%s: value for %s is too long\n", path, key);
+        return;
+    }
+    strcpy(o->value, value);
+    o->offset = f->offset - offsetof(config_t, events);
+    o->size   = f->size;
+    o->count_offset = f->type == FT_NAME_LIST ? f->count_offset - offsetof(config_t, events) : 0;
+
+    /* Lists are comma-separated here, as spaces divide a schedule line's fields. */
+    char copy[CFG_STR];
+    strcpy(copy, value);
+    int count = 0;
+    char *save = NULL;
+    for (char *name = strtok_r(copy, ",", &save); name; name = strtok_r(NULL, ",", &save)) {
+        count++;
+        if (strlen(name) >= CFG_NAME_STR)
+            cfg_err("%s: '%s' is too long (max %d characters)\n", path, name, CFG_NAME_STR - 1);
+        check_message_ref(cfg, path, name);
+    }
+    int max = f->type == FT_NAME_LIST ? (int)(f->size / CFG_NAME_STR) : 1;
+    if (count > max)
+        cfg_err("%s: %s takes at most %d name(s)\n", path, key, max);
+}
+
+/* name = DAYS HH:MM-HH:MM setting=value [setting=value ...] */
+static void read_schedule(const entries_t *es, config_t *cfg)
+{
+    for (int i = 0; i < es->n; i++) {
+        const entry_t *e = &es->v[i];
+        if (strcmp(e->section, SCHEDULE_SECTION) != 0)
+            continue;
+        s_line = e->line;
+
+        char path[64];
+        snprintf(path, sizeof(path), "schedule.%s", e->key);
+        if (strlen(e->key) >= CFG_NAME_STR) {
+            cfg_err("%s: name is too long (max %d characters)\n", path, CFG_NAME_STR - 1);
+            continue;
+        }
+        if (cfg->nschedule == CFG_MAX_SCHEDULE) {
+            cfg_err("%s: too many schedule entries (max %d)\n", path, CFG_MAX_SCHEDULE);
+            continue;
+        }
+
+        config_schedule_t *out = &cfg->schedule[cfg->nschedule];
+        memset(out, 0, sizeof(*out));
+        strcpy(out->name, e->key);
+
+        char *copy = strdup(e->value);
+        char *save = NULL;
+        char *days = strtok_r(copy, " \t", &save);
+        char *window = days ? strtok_r(NULL, " \t", &save) : NULL;
+        if (!window) {
+            cfg_err("%s: expected DAYS HH:MM-HH:MM setting=value\n", path);
+            free(copy);
+            continue;
+        }
+        if (!parse_days(days, &out->days))
+            cfg_err("%s: '%s' is not valid days (use sun..sat, daily, weekdays or weekends, comma-separated)\n", path, days);
+        if (!parse_window(window, &out->start_min, &out->end_min))
+            cfg_err("%s: '%s' is not a valid time window (expected HH:MM-HH:MM, 24-hour)\n", path, window);
+        else if (out->start_min == out->end_min)
+            cfg_err("%s: window '%s' starts and ends at the same time\n", path, window);
+
+        for (char *tok = strtok_r(NULL, " \t", &save); tok; tok = strtok_r(NULL, " \t", &save))
+            read_override(tok, path, cfg, out);
+        if (out->nsets == 0)
+            cfg_err("%s: changes nothing (add at least one setting=value)\n", path);
+
+        cfg->nschedule++;
+        free(copy);
+    }
+    s_line = 0;
+}
+
 /* ── validation ─────────────────────────────────────────────────────────── */
 
 static void check_message_ref(const config_t *cfg, const char *path, const char *name)
@@ -1069,9 +1223,10 @@ static void validate(const entries_t *es, const config_t *cfg)
     CHECK_ONE("startup_message",        startup_message);
     CHECK_ONE("anxious_id",             anxious_id);
     CHECK_ONE("impolite_id",            impolite_id);
-    CHECK_ONE("ct_message",             ct_message);
+    CHECK_ONE("ct_link_on_message",             ct_link_on_message);
     CHECK_ONE("ct_link_message",        ct_link_message);
     CHECK_ONE("ct_link_off_message",    ct_link_off_message);
+    CHECK_ONE("tail_message",           tail_message);
     CHECK_ONE("time_message",           time_message);
     CHECK_ONE("link_on_message",        link_on_message);
     CHECK_ONE("link_off_message",       link_off_message);
@@ -1083,6 +1238,14 @@ static void validate(const entries_t *es, const config_t *cfg)
     if (ev->anxious_id[0] && cfg->timers.id_anxious >= cfg->timers.id_interval)
         cfg_err("timers.id_anxious (%g) must be less than timers.id_interval (%g)\n",
                 cfg->timers.id_anxious, cfg->timers.id_interval);
+
+    bool tail_used = ev->tail_message[0];
+    for (int i = 0; i < cfg->nschedule && !tail_used; i++)
+        for (int j = 0; j < cfg->schedule[i].nsets; j++)
+            if (cfg->schedule[i].sets[j].offset == offsetof(config_events_t, tail_message))
+                tail_used = true;
+    if (tail_used && cfg->timers.tail_every == 0 && cfg->timers.tail_after_hang == 0.0)
+        LOGW("config: a tail message is set, but timers.tail_every and timers.tail_after_hang are both 0, so it won't play\n");
 
     /* Not errors: a site may legitimately ID some other way. Misspelling the
      * key can't land here -- that's already an unknown-setting error. */
@@ -1121,6 +1284,7 @@ int config_load(config_t *cfg, const char *path)
     load_tone_catalog(cfg);
     load_builtin_messages(cfg);
     read_messages(&es, cfg, false);
+    read_schedule(&es, cfg);
 
     validate(&es, cfg);
     entries_free(&es);

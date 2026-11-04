@@ -91,7 +91,7 @@ remote_port = 41001
 [events]
 initial_ids     = my_voice
 mandatory_ids   = my_cw
-ct_message      = yellow_jacket
+ct_link_on_message      = yellow_jacket
 ct_link_message = bumble_bee
 timeout_message = timeout_warn
 
@@ -113,7 +113,7 @@ at once, with line numbers:
 
 ```text
 config: line 12: timers.hnag: unknown setting (did you mean timers.hang?)
-config: line 20: events.ct_message: no message named 'yelow_jacket' (did you mean 'yellow_jacket'?)
+config: line 20: events.ct_link_on_message: no message named 'yelow_jacket' (did you mean 'yellow_jacket'?)
 config: line 31: messages.my_voice: no voice clip named 'THSIS'
 ```
 
@@ -198,6 +198,15 @@ Mirrors standard analog repeater controller terminology: `hang`, `ct_delay`,
 `kerchunk` (anti-kerchunk COR hold), `timeout` (TOT), `id_interval`,
 `id_anxious`.
 
+`tail_every` and `tail_after_hang` set when `events.tail_message` plays. Either,
+both, or neither can be on:
+
+- `tail_every = 10` plays it on every 10th tail, just before the carrier drops.
+  A keyup cuts it off, and it plays again on the next tail.
+- `tail_after_hang = 300` keys up and plays it 300 seconds after the last tail,
+  once per quiet spell. This one transmits on its own, so a mandatory ID follows
+  within `id_interval`.
+
 ### `[dtmf]` — over-the-air commands
 
 Off unless you set `enabled = true`. DTMF is decoded from the repeater
@@ -226,7 +235,7 @@ and `link_off_code`. An empty value turns that command off.
 While the link is off, nothing is sent to it and anything received from it is
 ignored. It returns to `[link] start_on` (true by default) when `usrp-rc` restarts.
 To hear the difference on the air, set `ct_link_off_message` under `[events]`: local
-traffic gets that courtesy tone while the link is off, and `ct_message` while it's on.
+traffic gets that courtesy tone while the link is off, and `ct_link_on_message` while it's on.
 
 The time comes from the system clock and timezone, which are yours to keep right.
 
@@ -263,7 +272,7 @@ short.
 [events]
 initial_ids     = my_voice
 mandatory_ids   = my_cw
-ct_message      = yellow_jacket
+ct_link_on_message      = yellow_jacket
 ct_link_message = bumble_bee
 timeout_message = timeout_warn
 ```
@@ -271,6 +280,35 @@ timeout_message = timeout_warn
 Maps occasions (startup, initial/mandatory/anxious/impolite ID, courtesy
 tones, timeout, DTMF command replies) to message names. `initial_ids` and `mandatory_ids` take a
 space-separated list and rotate through it. An empty value plays nothing.
+
+### `[schedule]` — changing events by time and day
+
+```ini
+[messages]
+net_tonight = voice: NET TONIGHT AT SEVEN THIRTY
+net_ct      = cw: N
+
+[schedule]
+net_reminder = wed 07:00-19:25 tail_message=net_tonight
+net_running  = wed 19:30-20:30 ct_link_on_message=net_ct ct_link_off_message=net_ct
+```
+
+Each line is `name = DAYS HH:MM-HH:MM setting=value ...`, and any `[events]` setting
+except `startup_message` can be changed. While the window is open its settings are
+in force; when it closes they go back by themselves, so there is no second entry to
+write. A restart in the middle of a window picks it straight back up.
+
+- `DAYS` is `sun` to `sat`, `daily`, `weekdays` or `weekends`, comma-separated.
+- Times are 24-hour, from the system clock and timezone. The window includes its
+  start minute but not its end minute.
+- A window that ends before it starts runs past midnight, and belongs to the day it
+  started on: `fri 22:00-02:00` is still open at 01:00 on Saturday.
+- If windows overlap, the later line wins.
+- Lists like `mandatory_ids` are comma-separated here (`mandatory_ids=id1,id2`), and
+  an empty value turns a setting off (`tail_message=`).
+
+Changes take effect at the top of each minute, and `log.level = info` logs each window
+starting and ending.
 
 ### `[messages]` — the actual audio content
 
@@ -307,13 +345,13 @@ my_mix   = voice: THISIS {call} | tone: 880:100 | cw: {call}/R
   `cw:` or `voice:` part as one. A `voice:` part holds up to 32 words and pauses.
 
 **Tone catalog**: [`tones.conf`](tones.conf) is installed with `usrp-rc` and its
-tones are always available by name, e.g. `ct_message = yellow_jacket`. It's a
+tones are always available by name, e.g. `ct_link_on_message = yellow_jacket`. It's a
 readable text file listing each tone's notes and what it sounds like. To make
 your own tone, add it under `[messages]` in your config; using a catalog name
 replaces that tone. Up to 64 messages are available, counting the catalog's 28.
 
 **Name length**: message names, clip names, and anywhere you reference a
-message name (`ct_message`, `initial_ids`, etc.) are capped at 31 characters,
+message name (`ct_link_on_message`, `initial_ids`, etc.) are capped at 31 characters,
 and a longer value is a config error. This does not apply to `cw:` text.
 
 `access_mode` (top-level setting, default `cor`) is accepted but `cor_ctcss`
@@ -351,6 +389,10 @@ shipped set. See
 
 No CM119/ALSA/hidraw, no Unix socket monitoring API, no CTCSS encode or
 software decode, no IAX2, and exactly two fixed ports (no multi-port linking).
+
+## Upgrading
+
+See [UPGRADE.md](UPGRADE.md) for what changes between versions.
 
 ## Contributing / internals
 

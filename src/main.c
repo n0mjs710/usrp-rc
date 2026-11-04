@@ -9,6 +9,7 @@
 #include "ste.h"
 #include "port.h"
 #include "command.h"
+#include "schedule.h"
 #include "util.h"
 #include "log.h"
 
@@ -24,6 +25,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <time.h>
 
 #define DEFAULT_CONFIG "/etc/usrp-rc/usrp-rc.conf"
 #define MAX_EVENTS 8
@@ -62,6 +64,10 @@ typedef struct {
     int mmdvm_sock;
     int link_sock;
     int epfd;
+
+    config_events_t events;   /* the config's, as changed by any open schedule window */
+    bool     schedule_active[CFG_MAX_SCHEDULE];
+    uint64_t schedule_deadline;
 
     bool prev_mmdvm_keyup;
     bool prev_link_keyup;
@@ -613,12 +619,32 @@ static void handle_link(app_t *a)
     }
 }
 
+/* ── schedule ──────────────────────────────────────────────────────────── */
+
+/* Runs once a minute, on the minute. Works from the wall clock each time, so a clock
+ * step or a daylight saving change sorts itself out by the next run. */
+static void schedule_update(app_t *a, uint64_t now)
+{
+    time_t t = time(NULL);
+    struct tm when;
+    localtime_r(&t, &when);
+
+    bool active[CFG_MAX_SCHEDULE];
+    schedule_evaluate(&a->cfg, &when, &a->events, active);
+    for (int i = 0; i < a->cfg.nschedule; i++) {
+        if (active[i] != a->schedule_active[i])
+            LOGI("schedule: '%s' %s\n", a->cfg.schedule[i].name, active[i] ? "started" : "ended");
+        a->schedule_active[i] = active[i];
+    }
+    a->schedule_deadline = now + (uint64_t)(60 - when.tm_sec) * 1000;
+}
+
 /* ── timer aggregation ─────────────────────────────────────────────────── */
 
 static int next_timeout_ms(app_t *a, uint64_t now)
 {
     uint64_t min = 0;
-    uint64_t cand[6];
+    uint64_t cand[7];
     int nc = 0;
 
     uint64_t pd = port_next_deadline_ms(a->port);
@@ -628,6 +654,7 @@ static int next_timeout_ms(app_t *a, uint64_t now)
     if (a->prev_link_keyup && a->link_watchdog_deadline)   cand[nc++] = a->link_watchdog_deadline;
     if (a->heartbeat_deadline) cand[nc++] = a->heartbeat_deadline;
     if (a->fm_ping_deadline) cand[nc++] = a->fm_ping_deadline;
+    if (a->schedule_deadline) cand[nc++] = a->schedule_deadline;
 
     for (int i = 0; i < nc; i++)
         if (min == 0 || cand[i] < min) min = cand[i];
@@ -640,6 +667,9 @@ static int next_timeout_ms(app_t *a, uint64_t now)
 
 static void check_all_timers(app_t *a, uint64_t now)
 {
+    if (a->schedule_deadline && now >= a->schedule_deadline)
+        schedule_update(a, now);
+
     port_check_timers(a->port, now);
 
     if (a->pace_deadline && now >= a->pace_deadline)
@@ -818,6 +848,12 @@ int main(int argc, char *argv[])
     if (a->link_sock >= 0) {
         ev.data.fd = a->link_sock;
         epoll_ctl(a->epfd, EPOLL_CTL_ADD, a->link_sock, &ev);
+    }
+
+    /* Ahead of the startup message, so it already sees any open window. */
+    if (a->cfg.nschedule > 0) {
+        schedule_update(a, monotonic_ms());
+        port_set_events(a->port, &a->events);
     }
 
     port_start(a->port, monotonic_ms());

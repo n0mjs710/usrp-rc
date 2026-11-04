@@ -32,14 +32,15 @@ codec       = pcm      # pcm or opus
 # initial_ids and mandatory_ids rotate through a space-separated list (max 8).
 initial_ids     = default_voice
 mandatory_ids   = default_cw
-ct_message      = yellow_jacket
-ct_link_message = bumble_bee
+ct_link_on_message = yellow_jacket
+ct_link_message    = bumble_bee
 timeout_message = timeout_warn
 #startup_message        =
 #anxious_id             =
 #impolite_id            =
 #timeout_cancel_message =
-#ct_link_off_message    =               # local courtesy tone while the link is off; empty = ct_message
+#ct_link_off_message    =               # local courtesy tone while the link is off; empty = ct_link_on_message
+#tail_message           =               # see timers.tail_every; empty = none
 #time_message           = time_readback  # replies to DTMF commands; empty = no reply
 #link_on_message        = link_on_reply
 #link_off_message       = link_off_reply
@@ -64,6 +65,20 @@ timeout_message = timeout_warn
 # with the same name to replace a catalog tone.
 default_voice = voice: THISIS {call} REPEATER
 default_cw    = cw: {call}/R
+
+[schedule]
+# Change [events] settings during a time window. They change back by themselves when
+# the window closes, and a restart in the middle of one picks it back up.
+#
+#     name = DAYS HH:MM-HH:MM setting=value [setting=value ...]
+#
+# DAYS is sun..sat, daily, weekdays or weekends, comma-separated. Times are 24-hour on
+# the system clock. The window includes its start minute, not its end minute; one that
+# ends before it starts runs past midnight. If windows overlap, the later line wins. A
+# list like mandatory_ids is comma-separated here. An empty value turns a setting off.
+#
+#net_reminder = wed 07:00-19:25 tail_message=net_tonight
+#net_running  = wed 19:30-20:30 ct_link_on_message=net_ct ct_link_off_message=net_ct
 
 # ── Optional: everything below shows the defaults ─────────────────────────
 #
@@ -110,6 +125,8 @@ default_cw    = cw: {call}/R
 #timeout     = 180     # time-out timer (TOT) transmit cutoff
 #id_interval = 600     # mandatory ID interval (FCC: at most 10 minutes)
 #id_anxious  = 60      # sneak an anxious ID this far before the deadline
+#tail_every  = 10      # play events.tail_message every this many tails; 0 = off
+#tail_after_hang = 0   # ... or key up and play it this long after the last tail; 0 = off
 
 #[dtmf]
 # Over-the-air DTMF commands from the repeater receiver. Off by default.

@@ -11,7 +11,7 @@
 #define CFG_STR              128
 
 /* Short identifier strings: vocab clip names, message names, and message-
- * name references (ct_message, initial_ids, etc.). None of these are free
+ * name references (ct_link_on_message, initial_ids, etc.). None of these are free
  * text -- they're names you make up and refer back to -- so 32 bytes (31
  * usable characters) is deliberately tight to keep config_t's size down;
  * the longest real clip name in vocab_8k/ is 18 characters. Longer values
@@ -106,6 +106,8 @@ typedef struct {
 } config_audio_t;
 
 typedef struct {
+    int    tail_every;        /* play the tail message every this many tails; 0 = off */
+    double tail_after_hang;   /* ... or key up this long after the last tail; 0 = off */
     double hang;
     double ct_delay;
     double kerchunk;
@@ -141,9 +143,10 @@ typedef struct {
     int  n_mandatory_ids;
     char anxious_id[CFG_NAME_STR];
     char impolite_id[CFG_NAME_STR];
-    char ct_message[CFG_NAME_STR];
+    char ct_link_on_message[CFG_NAME_STR];
     char ct_link_message[CFG_NAME_STR];
     char ct_link_off_message[CFG_NAME_STR];   /* local traffic while the link is off */
+    char tail_message[CFG_NAME_STR];
     char time_message[CFG_NAME_STR];
     char link_on_message[CFG_NAME_STR];
     char link_off_message[CFG_NAME_STR];
@@ -160,6 +163,27 @@ typedef struct {
     char level[16];   /* "error", "warn", "info", or "debug" */
 } config_log_t;
 
+#define CFG_MAX_SCHEDULE      32
+#define CFG_MAX_SCHEDULE_SETS 8
+
+/* One setting changed for the length of a schedule window. Offsets are into
+ * config_events_t, so applying one needs nothing else from the config. */
+typedef struct {
+    size_t offset;
+    size_t size;
+    size_t count_offset;   /* for a list of names; 0 = a single name */
+    char   value[CFG_STR];
+} config_override_t;
+
+typedef struct {
+    char              name[CFG_NAME_STR];
+    unsigned          days;        /* bit 0 = Sunday, as struct tm's tm_wday */
+    int               start_min;   /* minutes past midnight */
+    int               end_min;     /* exclusive; below start_min = runs past midnight */
+    config_override_t sets[CFG_MAX_SCHEDULE_SETS];
+    int               nsets;
+} config_schedule_t;
+
 #define CFG_CALLSIGN_STR 16
 
 typedef struct {
@@ -175,6 +199,9 @@ typedef struct {
 
     config_message_t messages[CFG_MAX_MESSAGES];
     int               nmessages;
+
+    config_schedule_t schedule[CFG_MAX_SCHEDULE];
+    int               nschedule;
 } config_t;
 
 void config_defaults(config_t *cfg);

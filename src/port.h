@@ -43,6 +43,10 @@ void port_on_link_keyup(port_t *p, bool active, uint64_t now);
  * Dropped if the port is timed out. */
 void port_queue_reply(port_t *p, int16_t *samples, size_t n);
 
+/* Point the port at the events currently in force, which the schedule can change.
+ * Defaults to the config's. The caller keeps it alive and may update it in place. */
+void port_set_events(port_t *p, const config_events_t *events);
+
 /* Tell the port whether the link is on, which selects the local courtesy tone. */
 void port_set_link_up(port_t *p, bool up);
 

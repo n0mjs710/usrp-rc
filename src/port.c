@@ -32,6 +32,7 @@ typedef struct {
 
 struct port {
     const config_t *cfg;
+    const config_events_t *ev;   /* what plays for each event, right now */
     vocab_cache_t  *vocab;
 
     port_state_t  state;
@@ -77,6 +78,9 @@ struct port {
     port_cont_fn mix_on_drain;
 
     bool         link_up;
+
+    int          tails_since_message;
+    uint64_t     tail_idle_deadline;
 
     /* command reply waiting for the tail; malloc'd, NULL = none */
     int16_t     *reply;
@@ -209,7 +213,7 @@ static void schedule_id(port_t *p, uint64_t now)
     p->id_playing       = false;
 
     double lead = p->cfg->timers.id_anxious;
-    if (p->cfg->events.anxious_id[0] && lead > 0.0 && lead < p->cfg->timers.id_interval) {
+    if (p->ev->anxious_id[0] && lead > 0.0 && lead < p->cfg->timers.id_interval) {
         p->id_sub_deadline = now + (uint64_t)((p->cfg->timers.id_interval - lead) * 1000.0);
     }
 }
@@ -266,7 +270,7 @@ static void timeout_announce_after_drain(port_t *p, uint64_t now)
 
 static void do_timeout_announce(port_t *p, uint64_t now)
 {
-    const char *name = p->cfg->events.timeout_message;
+    const char *name = p->ev->timeout_message;
     if (name[0]) {
         rendered_audio_t r = message_render(p->cfg, p->vocab, name, -1.0);
         if (r.samples) {
@@ -292,7 +296,7 @@ static void do_timeout_recovery(port_t *p, uint64_t now)
     if (p->id_deadline == 0)
         p->initial_id_pending = true;
 
-    const char *name = p->cfg->events.timeout_cancel_message;
+    const char *name = p->ev->timeout_cancel_message;
     if (name[0]) {
         rendered_audio_t r = message_render(p->cfg, p->vocab, name, -1.0);
         if (r.samples) {
@@ -310,12 +314,12 @@ static void do_timeout_recovery(port_t *p, uint64_t now)
 
 static const char *courtesy_tone(const port_t *p)
 {
-    const config_events_t *ev = &p->cfg->events;
+    const config_events_t *ev = p->ev;
     if (p->last_source == SRC_LINK && ev->ct_link_message[0])
         return ev->ct_link_message;
     if (!p->link_up && ev->ct_link_off_message[0])
         return ev->ct_link_off_message;
-    return ev->ct_message;
+    return ev->ct_link_on_message;
 }
 
 static void impolite_id_after_mix(port_t *p, uint64_t now)
@@ -338,18 +342,18 @@ static void impolite_id_after_mix(port_t *p, uint64_t now)
 
 static void do_impolite_id(port_t *p, uint64_t now)
 {
-    const char *name = p->cfg->events.impolite_id;
+    const char *name = p->ev->impolite_id;
     char picked[CFG_NAME_STR] = {0};
 
     if (!name[0]) {
-        if (p->cfg->events.n_mandatory_ids == 0) {
+        if (p->ev->n_mandatory_ids == 0) {
             LOGW("port: no impolite or mandatory ID configured\n");
             schedule_id(p, now);
             return;
         }
-        int idx = p->id_rot_mandatory % p->cfg->events.n_mandatory_ids;
-        strncpy(picked, p->cfg->events.mandatory_ids[idx], sizeof(picked) - 1);
-        p->id_rot_mandatory = (idx + 1) % p->cfg->events.n_mandatory_ids;
+        int idx = p->id_rot_mandatory % p->ev->n_mandatory_ids;
+        strncpy(picked, p->ev->mandatory_ids[idx], sizeof(picked) - 1);
+        p->id_rot_mandatory = (idx + 1) % p->ev->n_mandatory_ids;
         name = picked;
     }
 
@@ -398,16 +402,16 @@ static void mandatory_id_after_drain(port_t *p, uint64_t now)
 
 static void mandatory_id_render_and_queue(port_t *p, uint64_t now)
 {
-    if (p->cfg->events.n_mandatory_ids == 0) {
+    if (p->ev->n_mandatory_ids == 0) {
         LOGW("port: no mandatory_ids configured\n");
         mandatory_id_finish(p, now);
         return;
     }
-    int idx = p->id_rot_mandatory % p->cfg->events.n_mandatory_ids;
-    const char *name = p->cfg->events.mandatory_ids[idx];
-    p->id_rot_mandatory = (idx + 1) % p->cfg->events.n_mandatory_ids;
+    int idx = p->id_rot_mandatory % p->ev->n_mandatory_ids;
+    const char *name = p->ev->mandatory_ids[idx];
+    p->id_rot_mandatory = (idx + 1) % p->ev->n_mandatory_ids;
 
-    LOGI("id: mandatory  '%s'  (%d/%d)\n", name, idx + 1, p->cfg->events.n_mandatory_ids);
+    LOGI("id: mandatory  '%s'  (%d/%d)\n", name, idx + 1, p->ev->n_mandatory_ids);
     p->voice_id_active = message_has_voice(p->cfg, name);
     p->id_playing = true;
     queue_message(p, name, -1.0);
@@ -424,13 +428,13 @@ static void do_mandatory_id(port_t *p, uint64_t now)
     p->job_was_ptt       = p->ptt;
     p->job_state_before  = p->state;
 
-    if (p->cfg->events.n_mandatory_ids == 0) {
+    if (p->ev->n_mandatory_ids == 0) {
         LOGW("port: no mandatory_ids configured\n");
         schedule_id(p, now);
         return;
     }
 
-    const char *peek = p->cfg->events.mandatory_ids[p->id_rot_mandatory % p->cfg->events.n_mandatory_ids];
+    const char *peek = p->ev->mandatory_ids[p->id_rot_mandatory % p->ev->n_mandatory_ids];
     p->job_post_pad_needed = !p->job_was_ptt && message_needs_padding(p->cfg, peek);
 
     if (!p->job_was_ptt) {
@@ -465,16 +469,16 @@ static void initial_id_after_drain(port_t *p, uint64_t now)
 
 static void initial_id_render_and_queue(port_t *p, uint64_t now)
 {
-    if (p->cfg->events.n_initial_ids == 0) {
+    if (p->ev->n_initial_ids == 0) {
         LOGW("port: no initial_ids configured\n");
         initial_id_after_drain(p, now);
         return;
     }
-    int idx = p->id_rot_initial % p->cfg->events.n_initial_ids;
-    const char *name = p->cfg->events.initial_ids[idx];
-    p->id_rot_initial = (idx + 1) % p->cfg->events.n_initial_ids;
+    int idx = p->id_rot_initial % p->ev->n_initial_ids;
+    const char *name = p->ev->initial_ids[idx];
+    p->id_rot_initial = (idx + 1) % p->ev->n_initial_ids;
 
-    LOGI("id: initial  '%s'  (%d/%d)\n", name, idx + 1, p->cfg->events.n_initial_ids);
+    LOGI("id: initial  '%s'  (%d/%d)\n", name, idx + 1, p->ev->n_initial_ids);
     p->voice_id_active = message_has_voice(p->cfg, name);
     p->id_playing = true;
     queue_message(p, name, -1.0);
@@ -509,7 +513,7 @@ static void anxious_id_finish(port_t *p, uint64_t now)
 
 static void anxious_id_render_and_queue(port_t *p, uint64_t now)
 {
-    const char *name = p->cfg->events.anxious_id;
+    const char *name = p->ev->anxious_id;
     if (name[0]) {
         LOGI("id: anxious  '%s'\n", name);
         p->voice_id_active = message_has_voice(p->cfg, name);
@@ -564,15 +568,15 @@ static void startup_after_id_drain(port_t *p, uint64_t now)
 
 static void startup_queue_id(port_t *p, uint64_t now)
 {
-    if (p->cfg->events.n_initial_ids == 0) {
+    if (p->ev->n_initial_ids == 0) {
         startup_after_id_drain(p, now);
         return;
     }
-    int idx = p->id_rot_initial % p->cfg->events.n_initial_ids;
-    const char *name = p->cfg->events.initial_ids[idx];
-    p->id_rot_initial = (idx + 1) % p->cfg->events.n_initial_ids;
+    int idx = p->id_rot_initial % p->ev->n_initial_ids;
+    const char *name = p->ev->initial_ids[idx];
+    p->id_rot_initial = (idx + 1) % p->ev->n_initial_ids;
 
-    LOGI("id: initial  '%s'  (%d/%d)\n", name, idx + 1, p->cfg->events.n_initial_ids);
+    LOGI("id: initial  '%s'  (%d/%d)\n", name, idx + 1, p->ev->n_initial_ids);
     p->voice_id_active = message_has_voice(p->cfg, name);
     p->id_playing = true;
     queue_message(p, name, -1.0);
@@ -586,7 +590,7 @@ static void startup_after_message_drain(port_t *p, uint64_t now)
 
 static void startup_render_message(port_t *p, uint64_t now)
 {
-    const char *name = p->cfg->events.startup_message;
+    const char *name = p->ev->startup_message;
     rendered_audio_t r = message_render(p->cfg, p->vocab, name, -1.0);
     if (r.samples) {
         ctrl_buf_queue(p, r.samples, r.n);
@@ -599,13 +603,13 @@ static void startup_render_message(port_t *p, uint64_t now)
 
 void port_start(port_t *p, uint64_t now)
 {
-    if (!p->cfg->events.startup_message[0]) {
+    if (!p->ev->startup_message[0]) {
         LOGI("port: no startup_message configured — starting quietly in IDLE\n");
         return;
     }
     set_ptt(p, true, now, "startup");
     int pre_ms = p->cfg->audio.pre_message_ms;
-    if (pre_ms > 0 && message_needs_padding(p->cfg, p->cfg->events.startup_message)) {
+    if (pre_ms > 0 && message_needs_padding(p->cfg, p->ev->startup_message)) {
         p->pad_deadline = now + (uint64_t)pre_ms;
         p->pad_cont     = startup_render_message;
         return;
@@ -666,12 +670,89 @@ static void on_ct_delay(port_t *p, uint64_t now)
         schedule_hang(p, now);
 }
 
+/* ── tail message ────────────────────────────────────────────────────────── */
+
+static void tail_finish(port_t *p, uint64_t now)
+{
+    if (cor_active(p))
+        return;
+    set_ptt(p, false, now, "tail-message-done");
+    if (p->state == PORT_TAIL) {
+        LOGI("state: TAIL -> IDLE  (tail message done)\n");
+        port_transition(p, PORT_IDLE, now);
+    }
+}
+
+static void tail_after_drain(port_t *p, uint64_t now)
+{
+    p->tails_since_message = 0;
+    int post_ms = p->cfg->audio.post_message_ms;
+    if (post_ms > 0 && message_needs_padding(p->cfg, p->ev->tail_message)) {
+        p->pad_deadline = now + (uint64_t)post_ms;
+        p->pad_cont     = tail_finish;
+        return;
+    }
+    tail_finish(p, now);
+}
+
+/* Returns false if there was nothing to play. */
+static bool tail_play(port_t *p)
+{
+    rendered_audio_t r = message_render(p->cfg, p->vocab, p->ev->tail_message, -1.0);
+    if (!r.samples)
+        return false;
+    LOGI("tail: '%s'\n", p->ev->tail_message);
+    ctrl_buf_queue(p, r.samples, r.n);
+    free(r.samples);
+    p->ctrl.on_drain = tail_after_drain;
+    return true;
+}
+
+static void tail_idle_play(port_t *p, uint64_t now)
+{
+    if (!tail_play(p))
+        tail_finish(p, now);
+}
+
+/* The time-based trigger keys up on its own, so unlike a tail it's a transmission
+ * that has to be identified. */
+static void on_tail_idle(port_t *p, uint64_t now)
+{
+    p->tail_idle_deadline = 0;
+    if (p->state != PORT_IDLE || p->ptt || cor_active(p) || !p->ev->tail_message[0])
+        return;
+
+    if (p->id_deadline == 0)
+        schedule_id(p, now);
+    p->tx_activity = true;
+
+    set_ptt(p, true, now, "tail-message");
+    int pre_ms = p->cfg->audio.pre_message_ms;
+    if (pre_ms > 0 && message_needs_padding(p->cfg, p->ev->tail_message)) {
+        p->pad_deadline = now + (uint64_t)pre_ms;
+        p->pad_cont     = tail_idle_play;
+        return;
+    }
+    tail_idle_play(p, now);
+}
+
 static void on_hang(port_t *p, uint64_t now)
 {
     p->hang_deadline = 0;
     if (cor_active(p))
         return;
     reply_discard(p);
+
+    if (p->ev->tail_message[0]) {
+        if (p->cfg->timers.tail_after_hang > 0.0)
+            p->tail_idle_deadline = now + (uint64_t)(p->cfg->timers.tail_after_hang * 1000.0);
+        /* A message cut off by a keyup leaves the count alone, so it plays again
+         * on the next tail rather than waiting out another full count. */
+        if (p->cfg->timers.tail_every > 0 &&
+            ++p->tails_since_message >= p->cfg->timers.tail_every && tail_play(p))
+            return;
+    }
+
     LOGI("state: TAIL -> IDLE  (hang expired)\n");
     set_ptt(p, false, now, "hang-expired");
     port_transition(p, PORT_IDLE, now);
@@ -711,6 +792,8 @@ static void cor_active_edge(port_t *p, port_source_t source, uint64_t now)
     p->cor_up_ms         = now;
     p->hang_deadline     = 0;
     p->ct_delay_deadline = 0;
+
+    p->tail_idle_deadline = 0;
 
     /* A keyup interrupts a reply that hasn't started; one already playing is
      * cut when the transition to ACTIVE clears the ctrl buffer. */
@@ -800,6 +883,11 @@ void port_queue_reply(port_t *p, int16_t *samples, size_t n)
     p->reply_len = n;
 }
 
+void port_set_events(port_t *p, const config_events_t *events)
+{
+    p->ev = events;
+}
+
 void port_set_link_up(port_t *p, bool up)
 {
     p->link_up = up;
@@ -811,7 +899,7 @@ uint64_t port_next_deadline_ms(const port_t *p)
 {
     uint64_t candidates[] = {
         p->ct_delay_deadline, p->hang_deadline, p->timeout_deadline,
-        p->id_sub_deadline, p->id_deadline, p->pad_deadline,
+        p->id_sub_deadline, p->id_deadline, p->pad_deadline, p->tail_idle_deadline,
     };
     uint64_t min = 0;
     for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
@@ -835,6 +923,8 @@ void port_check_timers(port_t *p, uint64_t now)
     }
     if (p->id_deadline && now >= p->id_deadline)
         on_id(p, now);
+    if (p->tail_idle_deadline && now >= p->tail_idle_deadline)
+        on_tail_idle(p, now);
     if (p->pad_deadline && now >= p->pad_deadline) {
         p->pad_deadline = 0;
         port_cont_fn cb = p->pad_cont;
@@ -898,6 +988,7 @@ int port_create(port_t **out, const config_t *cfg, vocab_cache_t *vocab)
     if (!p)
         return -1;
     p->cfg   = cfg;
+    p->ev    = &cfg->events;
     p->vocab = vocab;
     p->state = PORT_IDLE;
     p->last_source = SRC_LOCAL;

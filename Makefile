@@ -31,6 +31,7 @@ SRCS = src/main.c \
        src/port.c \
        src/dtmf.c \
        src/command.c \
+       src/schedule.c \
        src/log.c
 
 OBJS     = $(patsubst %.c,$(BUILDDIR)/%.o,$(SRCS))
@@ -47,6 +48,7 @@ HARNESS_SRCS = src/port.c \
                src/morse.c \
                src/voice_filter.c \
                src/message.c \
+               src/schedule.c \
                src/log.c
 HARNESS_OBJS = $(patsubst %.c,$(BUILDDIR)/%.o,$(HARNESS_SRCS))
 HARNESS      = $(BUILDDIR)/tests/port_harness
@@ -105,7 +107,7 @@ check: $(TARGET) $(HARNESS) $(JITTER_TEST) $(DTMF_TEST) $(CONFIG_TEST)
 	./$(TARGET) --check usrp-rc.conf.sample
 
 -include $(DEPFILES)
--include $(BUILDDIR)/tests/port_harness.d
+-include $(wildcard $(BUILDDIR)/tests/*.d)
 
 vocab:
 	@mkdir -p vocab_8k

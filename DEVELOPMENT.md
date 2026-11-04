@@ -67,6 +67,13 @@ The reference controllers are the ACC RC-96 (command structure and behavior) and
 the Arcom RC-210 (mute timer, tail message triggers). Their macro sets, patches,
 and multi-port routing are deliberately not the model here.
 
+## Schedule
+
+`src/schedule.c` is a pure function of the config and a time: it holds no state, so
+windows have no start or end events to miss. `main.c` re-evaluates it every minute
+into `app_t.events`, and `port.c` reads events through `p->ev`, which points there.
+Anything that changes by time should read `p->ev` rather than `cfg->events`.
+
 ## Target platform
 
 Developed on a Raspberry Pi 3B+ (similar architecture/OS to the production

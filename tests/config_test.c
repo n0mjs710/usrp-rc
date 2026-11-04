@@ -8,6 +8,7 @@
 #include "../src/message.h"
 #include "../src/vocab.h"
 #include "../src/log.h"
+#include "../src/schedule.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,10 +26,10 @@ typedef struct {
 static const test_case_t CASES[] = {
     {"minimal config",            BASE, NULL},
     {"integer accepted for float", BASE "[timers]\nhang = 9\n", NULL},
-    {"empty event = turned off",  BASE "[events]\nct_message =\n", NULL},
+    {"empty event = turned off",  BASE "[events]\nct_link_on_message =\n", NULL},
     {"comment after a value",     BASE "[timers]\nhang = 9   # seconds\n", NULL},
-    {"sections in any order",     "[messages]\nm = cw: ID\n[events]\nct_message = m\n" BASE, NULL},
-    {"catalog tone by name",      BASE "[events]\nct_message = yellow_jacket\n", NULL},
+    {"sections in any order",     "[messages]\nm = cw: ID\n[events]\nct_link_on_message = m\n" BASE, NULL},
+    {"catalog tone by name",      BASE "[events]\nct_link_on_message = yellow_jacket\n", NULL},
     {"silent tone",               BASE "[messages]\nm = tone: 0:30 _30\n", NULL},
     {"dual tone with level",      BASE "[messages]\nm = tone: 500+700:100@0.25\n", NULL},
 
@@ -39,7 +40,7 @@ static const test_case_t CASES[] = {
     {"no equals sign",      BASE "[timers]\nhang 9\n", "line 4: expected key = value: hang 9"},
     {"unterminated section", "[timers\nhang = 1.0\n", "line 1: expected [section]"},
     {"key set twice",       BASE "[timers]\nhang = 1.0\nhang = 2.0\n", "line 5: hang: already set on line 4"},
-    {"quoted value",        BASE "[events]\nct_message = \"honk\"\n", "line 4: ct_message: values don't take quotes"},
+    {"quoted value",        BASE "[events]\nct_link_on_message = \"honk\"\n", "line 4: ct_link_on_message: values don't take quotes"},
     {"old message section", BASE "[messages.a]\nelements = []\n", "old TOML layout"},
 
     {"text for number",     BASE "[timers]\nhang = fast\n", "timers.hang: 'fast' must be a number"},
@@ -80,11 +81,30 @@ static const test_case_t CASES[] = {
     {"dtmf codes can be off", BASE "[dtmf]\ntime_code =\nlink_on_code =\nlink_off_code =\n", NULL},
     {"ct dangling",         BASE "[events]\nct_link_off_message = nope\n", "events.ct_link_off_message: no message named 'nope'"},
 
+    {"old ct_message name", BASE "[events]\nct_message = honk\n", "events.ct_message: renamed to events.ct_link_on_message"},
+    {"tail settings",       BASE "[messages]\nm = cw: NET\n[events]\ntail_message = m\n[timers]\ntail_every = 5\ntail_after_hang = 300\n", NULL},
+    {"tail message dangling", BASE "[events]\ntail_message = nope\n", "events.tail_message: no message named 'nope'"},
+
+    {"schedule entry",      BASE "[messages]\nm = cw: NET\n[schedule]\nnet = wed 07:00-19:25 tail_message=m\n", NULL},
+    {"schedule day lists",  BASE "[messages]\nm = cw: NET\n[schedule]\na = mon,wed,fri 07:00-08:00 tail_message=m\nb = weekends 07:00-08:00 tail_message=m\nc = DAILY 07:00-08:00 tail_message=\n", NULL},
+    {"schedule overnight",  BASE "[messages]\nm = cw: NET\n[schedule]\na = fri 22:00-02:00 ct_link_on_message=m\n", NULL},
+    {"schedule list value", BASE "[messages]\nm = cw: A\nn = cw: B\n[schedule]\na = mon 01:00-02:00 mandatory_ids=m,n\n", NULL},
+    {"schedule bad day",    BASE "[schedule]\na = wednsday 07:00-08:00 ct_link_on_message=\n", "schedule.a: 'wednsday' is not valid days"},
+    {"schedule bad time",   BASE "[schedule]\na = wed 25:00-26:00 ct_link_on_message=\n", "schedule.a: '25:00-26:00' is not a valid time window"},
+    {"schedule empty window", BASE "[schedule]\na = wed 07:00-07:00 ct_link_on_message=\n", "starts and ends at the same time"},
+    {"schedule no settings", BASE "[schedule]\na = wed 07:00-08:00\n", "schedule.a: changes nothing"},
+    {"schedule too short",  BASE "[schedule]\na = wed\n", "schedule.a: expected DAYS HH:MM-HH:MM"},
+    {"schedule not a setting", BASE "[schedule]\na = wed 07:00-08:00 hang=3\n", "schedule.a: 'hang' can't be scheduled"},
+    {"schedule startup",    BASE "[schedule]\na = wed 07:00-08:00 startup_message=\n", "'startup_message' can't be scheduled"},
+    {"schedule no equals",  BASE "[schedule]\na = wed 07:00-08:00 tail_message\n", "expected setting=value"},
+    {"schedule dangling, with hint", BASE "[schedule]\na = wed 07:00-08:00 ct_link_on_message=yelow_jacket\n", "no message named 'yelow_jacket' (did you mean 'yellow_jacket'?)"},
+    {"schedule single takes one", BASE "[messages]\nm = cw: A\n[schedule]\na = mon 01:00-02:00 tail_message=m,m\n", "tail_message takes at most 1 name"},
+
     {"misspelled mandatory_ids", BASE "[events]\nmandatory_id = honk\n", "events.mandatory_id: unknown setting (did you mean events.mandatory_ids?)"},
     {"mandatory_ids dangling",   BASE "[events]\nmandatory_ids = nope\n", "line 4: events.mandatory_ids: no message named 'nope'"},
     {"too many ids",        BASE "[events]\ninitial_ids = honk honk honk honk honk honk honk honk honk\n", "events.initial_ids: has 9 entries (max 8)"},
-    {"event dangling, with hint", BASE "[events]\nct_message = yelow_jacket\n",
-                                  "line 4: events.ct_message: no message named 'yelow_jacket' (did you mean 'yellow_jacket'?)"},
+    {"event dangling, with hint", BASE "[events]\nct_link_on_message = yelow_jacket\n",
+                                  "line 4: events.ct_link_on_message: no message named 'yelow_jacket' (did you mean 'yellow_jacket'?)"},
 
     {"missing tone frequency", BASE "[messages]\na = tone: :100\n", "bad tone ':100'"},
     {"tone wrong separator", BASE "[messages]\na = tone: 660;50\n", "line 4: messages.a: bad tone '660;50'"},
@@ -194,11 +214,11 @@ int main(void)
     }
 
     printf("[2] one pass reports every problem, not just the first\n");
-    int rc = load_text(BASE "[timers]\nhnag = 1.0\ntimeout = 0.0\n[events]\nct_message = nope\n");
+    int rc = load_text(BASE "[timers]\nhnag = 1.0\ntimeout = 0.0\n[events]\nct_link_on_message = nope\n");
     check("load fails", rc != 0);
     check("reports the unknown key", strstr(s_log, "line 4: timers.hnag") != NULL);
     check("reports the bad range", strstr(s_log, "line 5: timers.timeout") != NULL);
-    check("reports the dangling reference", strstr(s_log, "line 7: events.ct_message") != NULL);
+    check("reports the dangling reference", strstr(s_log, "line 7: events.ct_link_on_message") != NULL);
 
     printf("[3] values land where they should\n");
     rc = load_text(BASE "[timers]\nhang = 9\n");
@@ -332,6 +352,64 @@ int main(void)
     check("valid content passes", message_validate(&s_cfg, vocab) == 0);
 
     vocab_cache_destroy(vocab);
+
+    printf("[8] schedule\n");
+    load_text(BASE "[messages]\nm = cw: A\nn = cw: B\nq = cw: C\n[events]\nct_link_on_message = m\nmandatory_ids = m\n"
+              "[schedule]\n"
+              "net = wed 07:00-19:25 tail_message=n ct_link_on_message=n\n"
+              "night = fri 22:00-02:00 ct_link_on_message=q mandatory_ids=n,q\n"
+              "later = wed 19:00-20:00 ct_link_on_message=q\n");
+    {
+        enum { SUN, MON, TUE, WED, THU, FRI, SAT };
+        struct tm t = {.tm_wday = WED, .tm_hour = 6, .tm_min = 59};
+        config_events_t ev;
+        bool active[CFG_MAX_SCHEDULE];
+
+        schedule_evaluate(&s_cfg, &t, &ev, active);
+        check("before the window, the config's events apply",
+              !active[0] && !ev.tail_message[0] && strcmp(ev.ct_link_on_message, "m") == 0);
+
+        t.tm_hour = 7; t.tm_min = 0;
+        schedule_evaluate(&s_cfg, &t, &ev, active);
+        check("the start minute is inside", active[0] && strcmp(ev.tail_message, "n") == 0
+              && strcmp(ev.ct_link_on_message, "n") == 0);
+
+        t.tm_hour = 19; t.tm_min = 10;
+        schedule_evaluate(&s_cfg, &t, &ev, active);
+        check("where windows overlap, the later entry wins",
+              active[0] && active[2] && strcmp(ev.ct_link_on_message, "q") == 0 && strcmp(ev.tail_message, "n") == 0);
+
+        t.tm_min = 25;
+        schedule_evaluate(&s_cfg, &t, &ev, active);
+        check("the end minute is outside", !active[0] && !ev.tail_message[0]);
+
+        t.tm_wday = THU; t.tm_hour = 12; t.tm_min = 0;
+        schedule_evaluate(&s_cfg, &t, &ev, active);
+        check("other days are untouched", !active[0] && !active[1] && strcmp(ev.ct_link_on_message, "m") == 0);
+
+        t.tm_wday = FRI; t.tm_hour = 23;
+        schedule_evaluate(&s_cfg, &t, &ev, active);
+        check("overnight: open late on its start day", active[1]);
+        check("a list setting replaces the rotation",
+              ev.n_mandatory_ids == 2 && strcmp(ev.mandatory_ids[1], "q") == 0);
+
+        t.tm_wday = SAT; t.tm_hour = 1; t.tm_min = 59;
+        schedule_evaluate(&s_cfg, &t, &ev, active);
+        check("overnight: still open early the next day", active[1]);
+        t.tm_hour = 2; t.tm_min = 0;
+        schedule_evaluate(&s_cfg, &t, &ev, active);
+        check("overnight: closed at the end", !active[1] && ev.n_mandatory_ids == 1);
+
+        t.tm_wday = FRI; t.tm_hour = 1;
+        schedule_evaluate(&s_cfg, &t, &ev, active);
+        check("overnight: not open early on its own start day", !active[1]);
+
+        t.tm_wday = SUN; t.tm_hour = 1;
+        load_text(BASE "[messages]\nm = cw: A\n[schedule]\nx = sat 23:00-01:30 tail_message=m\n");
+        schedule_evaluate(&s_cfg, &t, &ev, active);
+        check("overnight wraps Saturday into Sunday", active[0]);
+        (void)MON; (void)TUE;
+    }
 
     if (s_fail) {
         printf("\n==== %d check(s) FAILED ====\n", s_fail);
