@@ -49,7 +49,7 @@ void config_defaults(config_t *cfg)
     cfg->timers.id_interval = 600.0;
     cfg->timers.id_anxious  = 60.0;
     cfg->timers.tail_every  = 10;
-    cfg->timers.tail_after_hang = 0.0;
+    cfg->timers.tail_min_interval = 0.0;
 
     /* Off unless asked for: it mutes repeat audio and drops the link, which an
      * existing site shouldn't start doing just by upgrading. */
@@ -169,7 +169,7 @@ static const field_t FIELDS[] = {
     DBL("timers", "id_interval", timers.id_interval, 1, 86400),
     DBL("timers", "id_anxious",  timers.id_anxious, 0, 3600),
     INT("timers", "tail_every",  timers.tail_every, 0, 1000),
-    DBL("timers", "tail_after_hang", timers.tail_after_hang, 0, 86400),
+    DBL("timers", "tail_min_interval", timers.tail_min_interval, 0, 86400),
 
     BOOL("dtmf", "enabled",       dtmf.enabled),
     INT("dtmf",  "min_tone_ms",   dtmf.min_tone_ms, 30, 1000),
@@ -196,7 +196,7 @@ static const field_t FIELDS[] = {
     STR("events", "ct_link_on_message",             events.ct_link_on_message),
     STR("events", "ct_link_message",        events.ct_link_message),
     STR("events", "ct_link_off_message",    events.ct_link_off_message),
-    STR("events", "tail_message",           events.tail_message),
+    NAMES("tail_messages", events.tail_messages, events.n_tail_messages),
     STR("events", "time_message",           events.time_message),
     STR("events", "stats_message",          events.stats_message),
     STR("events", "link_on_message",        events.link_on_message),
@@ -307,6 +307,14 @@ static void err_unknown_setting(const char *section, const char *key)
 
     if (strcmp(section, "events") == 0 && strcmp(key, "ct_message") == 0) {
         cfg_err("%s: renamed to events.ct_link_on_message (see UPGRADE.md)\n", have);
+        return;
+    }
+    if (strcmp(section, "events") == 0 && strcmp(key, "tail_message") == 0) {
+        cfg_err("%s: renamed to events.tail_messages, a comma-separated list\n", have);
+        return;
+    }
+    if (strcmp(section, "timers") == 0 && strcmp(key, "tail_after_hang") == 0) {
+        cfg_err("%s: replaced by timers.tail_min_interval, which limits how often a tail message plays\n", have);
         return;
     }
 
@@ -1086,6 +1094,10 @@ static void read_override(char *tok, const char *path, const config_t *cfg, conf
         return;
     }
     *eq = '\0';
+    if (strcmp(tok, "tail_message") == 0) {
+        cfg_err("%s: tail_message is renamed to tail_messages, a comma-separated list\n", path);
+        return;
+    }
     const char *key = tok, *value = eq + 1;
 
     const field_t *f = NULL;
@@ -1249,7 +1261,7 @@ static void validate(const entries_t *es, const config_t *cfg)
     CHECK_ONE("ct_link_on_message",             ct_link_on_message);
     CHECK_ONE("ct_link_message",        ct_link_message);
     CHECK_ONE("ct_link_off_message",    ct_link_off_message);
-    CHECK_ONE("tail_message",           tail_message);
+    check_event(es, cfg, "tail_messages", ev->tail_messages, ev->n_tail_messages);
     CHECK_ONE("time_message",           time_message);
     CHECK_ONE("stats_message",          stats_message);
     CHECK_ONE("link_on_message",        link_on_message);
@@ -1263,13 +1275,13 @@ static void validate(const entries_t *es, const config_t *cfg)
         cfg_err("timers.id_anxious (%g) must be less than timers.id_interval (%g)\n",
                 cfg->timers.id_anxious, cfg->timers.id_interval);
 
-    bool tail_used = ev->tail_message[0];
+    bool tail_used = ev->n_tail_messages > 0;
     for (int i = 0; i < cfg->nschedule && !tail_used; i++)
         for (int j = 0; j < cfg->schedule[i].nsets; j++)
-            if (cfg->schedule[i].sets[j].offset == offsetof(config_events_t, tail_message))
+            if (cfg->schedule[i].sets[j].offset == offsetof(config_events_t, tail_messages))
                 tail_used = true;
-    if (tail_used && cfg->timers.tail_every == 0 && cfg->timers.tail_after_hang == 0.0)
-        LOGW("config: a tail message is set, but timers.tail_every and timers.tail_after_hang are both 0, so it won't play\n");
+    if (tail_used && cfg->timers.tail_every == 0)
+        LOGW("config: a tail message is set, but timers.tail_every is 0, so it won't play\n");
 
     /* Not errors: a site may legitimately ID some other way. Misspelling the
      * key can't land here -- that's already an unknown-setting error. */

@@ -113,7 +113,7 @@ typedef struct {
 
 typedef struct {
     int    tail_every;        /* play the tail message every this many tails; 0 = off */
-    double tail_after_hang;   /* ... or key up this long after the last tail; 0 = off */
+    double tail_min_interval; /* but at least this many seconds apart; 0 = no limit */
     double hang;
     double ct_delay;
     double kerchunk;
@@ -153,7 +153,8 @@ typedef struct {
     char ct_link_on_message[CFG_NAME_STR];
     char ct_link_message[CFG_NAME_STR];
     char ct_link_off_message[CFG_NAME_STR];   /* local traffic while the link is off */
-    char tail_message[CFG_NAME_STR];
+    char tail_messages[CFG_MAX_ID_ROTATION][CFG_NAME_STR];
+    int  n_tail_messages;
     char time_message[CFG_NAME_STR];
     char stats_message[CFG_NAME_STR];
     char link_on_message[CFG_NAME_STR];

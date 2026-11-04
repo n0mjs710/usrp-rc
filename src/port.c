@@ -80,7 +80,9 @@ struct port {
     bool         link_up;
 
     int          tails_since_message;
-    uint64_t     tail_idle_deadline;
+    uint64_t     tail_last_ms;
+    int          tail_rot;
+    char         tail_name[CFG_NAME_STR];
 
     /* command reply waiting for the tail; malloc'd, NULL = none */
     int16_t     *reply;
@@ -688,9 +690,8 @@ static void tail_finish(port_t *p, uint64_t now)
 
 static void tail_after_drain(port_t *p, uint64_t now)
 {
-    p->tails_since_message = 0;
     int post_ms = p->cfg->audio.post_message_ms;
-    if (post_ms > 0 && message_needs_padding(p->cfg, p->ev->tail_message)) {
+    if (post_ms > 0 && message_needs_padding(p->cfg, p->tail_name)) {
         p->pad_deadline = now + (uint64_t)post_ms;
         p->pad_cont     = tail_finish;
         return;
@@ -699,44 +700,22 @@ static void tail_after_drain(port_t *p, uint64_t now)
 }
 
 /* Returns false if there was nothing to play. */
-static bool tail_play(port_t *p)
+static bool tail_play(port_t *p, uint64_t now)
 {
-    rendered_audio_t r = message_render(p->cfg, p->vocab, p->ev->tail_message, -1.0);
+    int idx = p->tail_rot % p->ev->n_tail_messages;
+    /* A copy, as the schedule can change the list while this plays. */
+    snprintf(p->tail_name, sizeof(p->tail_name), "%s", p->ev->tail_messages[idx]);
+    rendered_audio_t r = message_render(p->cfg, p->vocab, p->tail_name, -1.0);
     if (!r.samples)
         return false;
-    LOGI("tail: '%s'\n", p->ev->tail_message);
+    p->tail_rot = (idx + 1) % p->ev->n_tail_messages;
+    LOGI("tail: '%s'\n", p->tail_name);
     ctrl_buf_queue(p, r.samples, r.n);
     free(r.samples);
     p->ctrl.on_drain = tail_after_drain;
+    p->tails_since_message = 0;
+    p->tail_last_ms = now;
     return true;
-}
-
-static void tail_idle_play(port_t *p, uint64_t now)
-{
-    if (!tail_play(p))
-        tail_finish(p, now);
-}
-
-/* The time-based trigger keys up on its own, so unlike a tail it's a transmission
- * that has to be identified. */
-static void on_tail_idle(port_t *p, uint64_t now)
-{
-    p->tail_idle_deadline = 0;
-    if (p->state != PORT_IDLE || p->ptt || cor_active(p) || !p->ev->tail_message[0])
-        return;
-
-    if (p->id_deadline == 0)
-        schedule_id(p, now);
-    p->tx_activity = true;
-
-    set_ptt(p, true, now, "tail-message");
-    int pre_ms = p->cfg->audio.pre_message_ms;
-    if (pre_ms > 0 && message_needs_padding(p->cfg, p->ev->tail_message)) {
-        p->pad_deadline = now + (uint64_t)pre_ms;
-        p->pad_cont     = tail_idle_play;
-        return;
-    }
-    tail_idle_play(p, now);
 }
 
 static void on_hang(port_t *p, uint64_t now)
@@ -746,13 +725,12 @@ static void on_hang(port_t *p, uint64_t now)
         return;
     reply_discard(p);
 
-    if (p->ev->tail_message[0]) {
-        if (p->cfg->timers.tail_after_hang > 0.0)
-            p->tail_idle_deadline = now + (uint64_t)(p->cfg->timers.tail_after_hang * 1000.0);
-        /* A message cut off by a keyup leaves the count alone, so it plays again
-         * on the next tail rather than waiting out another full count. */
-        if (p->cfg->timers.tail_every > 0 &&
-            ++p->tails_since_message >= p->cfg->timers.tail_every && tail_play(p))
+    /* Checked once, as each hang ends: enough tails and enough time since a message
+     * last started. A keyup over one doesn't undo that it played. */
+    if (p->ev->n_tail_messages > 0 && p->cfg->timers.tail_every > 0) {
+        uint64_t min_ms = (uint64_t)(p->cfg->timers.tail_min_interval * 1000.0);
+        bool too_soon = p->tail_last_ms && now - p->tail_last_ms < min_ms;
+        if (++p->tails_since_message >= p->cfg->timers.tail_every && !too_soon && tail_play(p, now))
             return;
     }
 
@@ -795,8 +773,6 @@ static void cor_active_edge(port_t *p, port_source_t source, uint64_t now)
     p->cor_up_ms         = now;
     p->hang_deadline     = 0;
     p->ct_delay_deadline = 0;
-
-    p->tail_idle_deadline = 0;
 
     /* A keyup interrupts a reply that hasn't started; one already playing is
      * cut when the transition to ACTIVE clears the ctrl buffer. */
@@ -904,7 +880,7 @@ uint64_t port_next_deadline_ms(const port_t *p)
 {
     uint64_t candidates[] = {
         p->ct_delay_deadline, p->hang_deadline, p->timeout_deadline,
-        p->id_sub_deadline, p->id_deadline, p->pad_deadline, p->tail_idle_deadline,
+        p->id_sub_deadline, p->id_deadline, p->pad_deadline,
     };
     uint64_t min = 0;
     for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
@@ -928,8 +904,6 @@ void port_check_timers(port_t *p, uint64_t now)
     }
     if (p->id_deadline && now >= p->id_deadline)
         on_id(p, now);
-    if (p->tail_idle_deadline && now >= p->tail_idle_deadline)
-        on_tail_idle(p, now);
     if (p->pad_deadline && now >= p->pad_deadline) {
         p->pad_deadline = 0;
         port_cont_fn cb = p->pad_cont;

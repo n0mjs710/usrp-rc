@@ -29,7 +29,7 @@ codec       = pcm      # pcm or opus
 
 [events]
 # Which message plays for each occasion. Empty = play nothing.
-# initial_ids and mandatory_ids rotate through a comma-separated list (max 8).
+# initial_ids, mandatory_ids and tail_messages rotate through a comma-separated list (max 8).
 initial_ids     = default_voice
 mandatory_ids   = default_cw
 ct_link_on_message = yellow_jacket
@@ -40,7 +40,7 @@ timeout_message = timeout_warn
 #impolite_id            =
 #timeout_cancel_message =
 #ct_link_off_message    =               # local courtesy tone while the link is off; empty = ct_link_on_message
-#tail_message           =               # see timers.tail_every; empty = none
+#tail_messages          =               # see timers.tail_every; empty = none
 #time_message           = time_readback  # replies to DTMF commands; empty = no reply
 #stats_message          = stats_readback
 #link_on_message        = link_on_reply
@@ -79,7 +79,7 @@ default_cw    = cw: {call}/R
 # ends before it starts runs past midnight. If windows overlap, the later line wins. A
 # list like mandatory_ids takes no spaces here. An empty value turns a setting off.
 #
-#net_reminder = wed 07:00-19:25 tail_message=net_tonight
+#net_reminder = wed 07:00-19:25 tail_messages=net_tonight
 #net_running  = wed 19:30-20:30 ct_link_on_message=net_ct ct_link_off_message=net_ct
 
 # ── Optional: everything below shows the defaults ─────────────────────────
@@ -127,8 +127,8 @@ default_cw    = cw: {call}/R
 #timeout     = 180     # time-out timer (TOT) transmit cutoff
 #id_interval = 600     # mandatory ID interval (FCC: at most 10 minutes)
 #id_anxious  = 60      # sneak an anxious ID this far before the deadline
-#tail_every  = 10      # play events.tail_message every this many tails; 0 = off
-#tail_after_hang = 0   # ... or key up and play it this long after the last tail; 0 = off
+#tail_every  = 10      # play events.tail_messages every this many tails; 0 = off
+#tail_min_interval = 0 # ... but at least this many seconds apart; 0 = no limit
 
 #[stats]
 # Where usage figures survive a restart. Empty = keep them in memory only.

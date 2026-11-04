@@ -639,7 +639,8 @@ static bool scenario_tail_message_count(config_t *base, vocab_cache_t *vocab)
     bool ok = true;
     config_t cfg = *base;
     cfg.timers.id_interval = 600.0;
-    snprintf(cfg.events.tail_message, sizeof(cfg.events.tail_message), "id_cw");
+    snprintf(cfg.events.tail_messages[0], CFG_NAME_STR, "id_cw");
+    cfg.events.n_tail_messages = 1;
     cfg.timers.tail_every = 3;
     port_t *p = fresh_port(&cfg, vocab);
     prime(p);                 /* tail 1 */
@@ -677,11 +678,11 @@ static bool scenario_tail_message_count(config_t *base, vocab_cache_t *vocab)
     key_local(p, false);
     wait_until_idle(p, 5000);
     log = cap_stop();
-    CHECK(count_occurrences(log, "tail: ") == 2, "a message cut off by a keyup plays again on the next tail");
+    CHECK(count_occurrences(log, "tail: ") == 1, "a message cut off by a keyup counts as played");
     free(log);
 
     /* Nothing to play: no counting, and the carrier drops normally. */
-    cfg.events.tail_message[0] = 0;
+    cfg.events.n_tail_messages = 0;
     cap_start();
     activity_pulse(p);
     log = cap_stop();
@@ -693,52 +694,102 @@ static bool scenario_tail_message_count(config_t *base, vocab_cache_t *vocab)
     return ok;
 }
 
-static bool scenario_tail_message_after_hang(config_t *base, vocab_cache_t *vocab)
+static bool scenario_tail_message_min_interval(config_t *base, vocab_cache_t *vocab)
 {
-    printf("\n[11] time-based tail message keys up after the last tail, once, and is identified\n");
+    printf("\n[11] tail_min_interval limits tail messages, and nothing keys up on its own\n");
     bool ok = true;
     config_t cfg = *base;
     cfg.timers.id_interval = 600.0;
-    snprintf(cfg.events.tail_message, sizeof(cfg.events.tail_message), "id_cw");
-    cfg.timers.tail_every = 0;
-    cfg.timers.tail_after_hang = 1.0;
+    snprintf(cfg.events.tail_messages[0], CFG_NAME_STR, "id_cw");
+    cfg.events.n_tail_messages = 1;
+    cfg.timers.tail_every = 1;
+    cfg.timers.tail_min_interval = 6.0;
     port_t *p = fresh_port(&cfg, vocab);
     prime(p);
 
-    cap_start();
-    bool played = wait_for_log(p, "tail: ", 1500);
-    CHECK(played, "played on its own after the wait");
-    CHECK(port_ptt(p), "keyed up to do it");
-    bool settled = wait_until_idle(p, 5000);
-    CHECK(settled, "released afterward");
-    wait_ms(p, 3000);
-    char *log = cap_stop();
-    CHECK(count_occurrences(log, "tail: ") == 1, "only once per quiet spell");
-    free(log);
+    /* prime() played one, so wait that out. */
+    wait_until_idle(p, 8000);
+    wait_ms(p, 6500);
 
-    /* A keyup during the wait cancels it, until that transmission's own tail. */
-    activity_pulse(p);
+    /* Cut off by a keyup: still played, so the interval runs from there. */
     cap_start();
-    wait_ms(p, 500);
-    key_local(p, true);
-    wait_ms(p, 1500);
-    char *log2 = cap_stop();
-    CHECK(count_occurrences(log2, "tail: ") == 0, "a keyup cancels the wait");
-    free(log2);
-    key_local(p, false);
-    wait_until_idle(p, 3000);
-
-    /* A keyup during the message cuts it. */
-    wait_ms(p, 1100);
-    CHECK(port_ptt(p), "plays again after that tail");
     key_local(p, true);
     wait_ms(p, 150);
     key_local(p, false);
-    bool back = wait_until_idle(p, 3000);
-    CHECK(back, "a keyup during it leaves the port working normally");
+    wait_for_log(p, "tail: ", 3000);
+    wait_ms(p, 60);
+    key_local(p, true);
+    wait_ms(p, 150);
+    key_local(p, false);
+    wait_until_idle(p, 5000);
+    char *log = cap_stop();
+    CHECK(count_occurrences(log, "tail: ") == 1, "a message cut off by a keyup counts as played");
+    free(log);
+
+    /* More tails too soon, with the count reached each time. */
+    cap_start();
+    activity_pulse(p);
+    activity_pulse(p);
+    log = cap_stop();
+    CHECK(count_occurrences(log, "tail: ") == 0, "none inside the interval, even with the count reached");
+    CHECK(count_occurrences(log, "hang expired") == 2 && !port_ptt(p), "ordinary tails instead");
+    free(log);
+
+    /* The FCC point: however long it's quiet and however overdue, no key-up. */
+    cap_start();
+    wait_ms(p, 6500);
+    log = cap_stop();
+    CHECK(!port_ptt(p) && count_occurrences(log, "tail: ") == 0, "never keys up on its own");
+    free(log);
+
+    cap_start();
+    activity_pulse(p);
+    log = cap_stop();
+    CHECK(count_occurrences(log, "tail: ") == 1, "plays once at the first hang end after the interval");
+    CHECK(!port_ptt(p), "PTT off afterward");
+    free(log);
+
+    cap_start();
+    activity_pulse(p);
+    log = cap_stop();
+    CHECK(count_occurrences(log, "tail: ") == 0, "the tails held back earlier don't add up to more plays");
+    free(log);
 
     port_destroy(p);
     printf(ok ? "[11] PASS\n" : "[11] FAIL\n");
+    return ok;
+}
+
+static bool scenario_tail_message_rotation(config_t *base, vocab_cache_t *vocab)
+{
+    printf("\n[13] tail messages rotate through their list\n");
+    bool ok = true;
+    config_t cfg = *base;
+    cfg.timers.id_interval = 600.0;
+    snprintf(cfg.events.tail_messages[0], CFG_NAME_STR, "id_cw");
+    snprintf(cfg.events.tail_messages[1], CFG_NAME_STR, "id_voice");
+    cfg.events.n_tail_messages = 2;
+    cfg.timers.tail_every = 1;
+    port_t *p = fresh_port(&cfg, vocab);
+
+    cap_start();
+    for (int i = 0; i < 3; i++) {
+        key_local(p, true);
+        wait_ms(p, 150);
+        key_local(p, false);
+        wait_for_log(p, "tail: ", 5000);
+        wait_until_idle(p, 15000);
+    }
+    char *log = cap_stop();
+    const char *first  = strstr(log, "tail: 'id_cw'");
+    const char *second = first ? strstr(first, "tail: 'id_voice'") : NULL;
+    const char *third  = second ? strstr(second, "tail: 'id_cw'") : NULL;
+    CHECK(third != NULL, "first, second, then back to the first");
+    CHECK(count_occurrences(log, "tail: ") == 3, "one per tail");
+    free(log);
+
+    port_destroy(p);
+    printf(ok ? "[13] PASS\n" : "[13] FAIL\n");
     return ok;
 }
 
@@ -823,8 +874,9 @@ int main(void)
         scenario_command_reply,
         scenario_link_state_courtesy_tone,
         scenario_tail_message_count,
-        scenario_tail_message_after_hang,
+        scenario_tail_message_min_interval,
         scenario_usage_counting,
+        scenario_tail_message_rotation,
     };
     int n = (int)(sizeof(scenarios) / sizeof(scenarios[0]));
 

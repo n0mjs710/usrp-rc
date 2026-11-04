@@ -35,7 +35,8 @@ details on each.
 | DTMF commands | `[dtmf]` `enabled = true` |
 | The link off at startup | `[link]` `start_on = false` |
 | A different courtesy tone while the link is off | `[events]` `ct_link_off_message` |
-| A tail message | `[events]` `tail_message` |
+| Tail messages, rotating through a list | `[events]` `tail_messages` |
+| A limit on how often it plays | `[timers]` `tail_min_interval` |
 | Settings that change by time and day | a `[schedule]` section |
 | Usage figures in a different place, or not on disk | `[stats]` `file` |
 

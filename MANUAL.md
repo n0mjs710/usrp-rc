@@ -110,7 +110,7 @@ key = value   # a comment can go after a value
 - Values don't take quotes.
 - Sections can be in any order.
 - **Leave a setting out to get its default.** Most sites need only a few lines.
-- An empty value (`tail_message =`) means "none" or "off".
+- An empty value (`tail_messages =`) means "none" or "off".
 - **Lists of choices use commas:** `mandatory_ids = id1,id2`.
 - **Sequences use spaces:** `voice: THISIS {call} REPEATER`.
 
@@ -319,7 +319,7 @@ link off shows the link's state to anyone listening.
 | `startup_message` | When `usrp-rc` starts |
 | `timeout_message` | When the time-out timer cuts off a transmission |
 | `timeout_cancel_message` | When that carrier finally drops and the repeater recovers |
-| `tail_message` | See [tail messages](#tail-messages) |
+| `tail_messages` | See [tail messages](#tail-messages) |
 | `time_message` | Reply to the time command. Default `time_readback`. |
 | `stats_message` | Reply to the usage command. Default `stats_readback`. |
 | `link_on_message` | Reply to link on. Default `link_on_reply`. |
@@ -335,13 +335,21 @@ stats_readback = voice: COUNT {keyups_week} _ MINUTES {minutes_week}
 
 ### Tail messages
 
-Set a message in `tail_message`, then choose when it plays. You can use either timer,
-or both:
+Set one or more messages in `tail_messages`, with commas between them. Each one that
+plays is the next in the list. It plays at the end of a hang, just before the transmitter
+drops, and never keys the transmitter on its own.
 
 | Setting | Behavior |
 | --- | --- |
-| `timers.tail_every = 10` | Plays on every 10th tail, just before the transmitter drops. If someone keys up over it, it plays again on the next tail. |
-| `timers.tail_after_hang = 300` | Keys up and plays it 300 seconds after the last tail, once per quiet spell. It transmits on its own, so a mandatory ID follows within `id_interval`. |
+| `timers.tail_every = 10` | At least 10 tails since it last played. `1` means every tail, and `0` turns tail messages off. |
+| `timers.tail_min_interval = 60` | At least 60 seconds since it last started. `0` means no limit. |
+
+Each time a hang ends, the message plays if both are met. Otherwise that tail ends
+normally. Nothing queues up, so it plays at most once per tail, however long it's been.
+If someone keys up over it, that still counts as played.
+
+For example, `tail_every = 1` with `tail_min_interval = 300` plays it at the end of a
+hang whenever at least five minutes have passed since it last started.
 
 `tail_every` is 10 by default, so a tail message plays without further setup.
 
@@ -356,7 +364,7 @@ net_tonight = voice: NET TONIGHT AT SEVEN THIRTY
 net_ct      = cw: N
 
 [schedule]
-net_reminder = wed 07:00-19:25 tail_message=net_tonight
+net_reminder = wed 07:00-19:25 tail_messages=net_tonight
 net_running  = wed 19:30-20:30 ct_link_on_message=net_ct ct_link_off_message=net_ct
 ```
 
@@ -373,7 +381,7 @@ The name is yours to choose and appears in the log.
 | Days | `sun` to `sat`, `daily`, `weekdays` or `weekends`. Combine with commas and no spaces: `mon,wed,fri`. |
 | Times | 24-hour, on the system clock and timezone. A window includes its start minute but not its end minute. |
 | Past midnight | A window that ends before it starts runs overnight and belongs to the day it started: `fri 22:00-02:00` is still open at 01:00 on Saturday. |
-| Settings | Any `[events]` setting except `startup_message`. An empty value turns it off: `tail_message=`. Lists take commas and no spaces: `mandatory_ids=id1,id2`. |
+| Settings | Any `[events]` setting except `startup_message`. An empty value turns it off: `tail_messages=`. Lists take commas and no spaces: `mandatory_ids=id1,id2`. |
 | Overlaps | The later line in the file wins. |
 | Limits | 32 windows, with up to 8 settings each. A single window can't run longer than 24 hours. |
 
@@ -523,8 +531,8 @@ The connection to MMDVM-Host on the same machine.
 | `timeout` | `180` | 1-3600 | Time-out timer. Resets at the courtesy tone. |
 | `id_interval` | `600` | 1-86400 | ID timer. A warning is logged above the FCC's 10 minutes. |
 | `id_anxious` | `60` | 0-3600 | Anxious ID window before the timer runs out. Must be less than `id_interval`. |
-| `tail_every` | `10` | 0-1000 | Play `tail_message` every this many tails; 0 is off |
-| `tail_after_hang` | `0` | 0-86400 | Key up and play `tail_message` this long after the last tail; 0 is off |
+| `tail_every` | `10` | 0-1000 | Play `tail_messages` every this many tails; 0 is off |
+| `tail_min_interval` | `0` | 0-86400 | Play `tail_messages` no more often than this many seconds; 0 is no limit |
 
 ## `[audio]`
 
@@ -574,7 +582,7 @@ Levels above 1.0 are allowed but can clip.
 ## `[events]`, `[messages]` and `[schedule]`
 
 See [Events](#events), [Messages](#messages) and [The schedule](#the-schedule). Up to 8
-names can go in `initial_ids` or `mandatory_ids`.
+names can go in `initial_ids`, `mandatory_ids` or `tail_messages`.
 
 ---
 
@@ -611,7 +619,7 @@ ct_link_message     = bumble_bee
 weekend_time = voice: F_GOOD {greeting} _ F_THE F_TIME F_IS {time} {ampm}
 
 [schedule]
-weekend_tail = weekends 08:00-20:00 tail_message=weekend_time
+weekend_tail = weekends 08:00-20:00 tail_messages=weekend_time
 ```
 
 **Say the week's usage instead of the day's on command `38`**
@@ -625,13 +633,13 @@ stats_readback = voice: COUNT {keyups_week} _ MINUTES {minutes_week}
 
 ```ini
 [events]
-tail_message = my_tail
+tail_messages = my_tail
 
 [messages]
 my_tail = voice: WELCOME TO {call}
 
 [schedule]
-quiet_nights = daily 22:00-06:00 tail_message=
+quiet_nights = daily 22:00-06:00 tail_messages=
 ```
 
 **Change the courtesy tone and ID during a net**
@@ -665,7 +673,7 @@ start_on    = false
 | `events.ct_message: renamed` | Change it to `ct_link_on_message`. |
 | `needs commas between names` | Change `id1 id2` to `id1,id2`. |
 | `a variable needs the voice clip` | That clip is missing. Run `sudo make install` to restore stock clips. |
-| A tail message never plays | Look for the warning about `tail_every` and `tail_after_hang` both being 0. With a high `tail_every`, a quiet repeater may just not have reached the count. |
+| A tail message never plays | Look for the warning about `tail_every` being 0. Otherwise, a quiet repeater may not have reached the `tail_every` count, or `tail_min_interval` may be holding it back. |
 | A window opens at the wrong time | Check the Pi's clock and timezone with `timedatectl`. |
 | Usage figures reset on restart | Look for `stats: can't save` in the log. Check that `/var/local/usrp-rc` exists and the service file is current, then run `sudo systemctl daemon-reload`. |
 | Audio from the link is missing | Check whether the link was turned off with `73`, or whether `start_on = false` is set. |

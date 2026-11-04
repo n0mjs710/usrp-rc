@@ -201,14 +201,16 @@ Mirrors standard analog repeater controller terminology: `hang`, `ct_delay`,
 `kerchunk` (anti-kerchunk COR hold), `timeout` (TOT), `id_interval`,
 `id_anxious`.
 
-`tail_every` and `tail_after_hang` set when `events.tail_message` plays. Either,
-both, or neither can be on:
+`tail_every` and `tail_min_interval` set when `events.tail_messages` plays, always at
+the end of a hang. It never keys the transmitter on its own:
 
 - `tail_every = 10` plays it on every 10th tail, just before the carrier drops.
-  A keyup cuts it off, and it plays again on the next tail.
-- `tail_after_hang = 300` keys up and plays it 300 seconds after the last tail,
-  once per quiet spell. This one transmits on its own, so a mandatory ID follows
-  within `id_interval`.
+  A keyup cuts it off, and that still counts as played.
+- `tail_min_interval = 60` plays it no more often than every 60 seconds, however
+  often the count comes up.
+
+Each time a hang ends, the message plays if both are met, counted from when it last
+started. Otherwise that tail ends normally. Nothing queues up.
 
 ### `[dtmf]` — over-the-air commands
 
@@ -282,7 +284,7 @@ timeout_message = timeout_warn
 ```
 
 Maps occasions (startup, initial/mandatory/anxious/impolite ID, courtesy
-tones, timeout, DTMF command replies) to message names. `initial_ids` and `mandatory_ids` take a
+tones, timeout, DTMF command replies) to message names. `initial_ids`, `mandatory_ids` and `tail_messages` take a
 comma-separated list and rotate through it. An empty value plays nothing.
 
 ### `[stats]` — usage figures
@@ -307,7 +309,7 @@ net_tonight = voice: NET TONIGHT AT SEVEN THIRTY
 net_ct      = cw: N
 
 [schedule]
-net_reminder = wed 07:00-19:25 tail_message=net_tonight
+net_reminder = wed 07:00-19:25 tail_messages=net_tonight
 net_running  = wed 19:30-20:30 ct_link_on_message=net_ct ct_link_off_message=net_ct
 ```
 
@@ -323,7 +325,7 @@ write. A restart in the middle of a window picks it straight back up.
   started on: `fri 22:00-02:00` is still open at 01:00 on Saturday.
 - If windows overlap, the later line wins.
 - Lists like `mandatory_ids` take no spaces here (`mandatory_ids=id1,id2`), and
-  an empty value turns a setting off (`tail_message=`).
+  an empty value turns a setting off (`tail_messages=`).
 
 Changes take effect at the top of each minute, and `log.level = info` logs each window
 starting and ending.
