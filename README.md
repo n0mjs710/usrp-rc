@@ -269,7 +269,8 @@ A sequence is discarded if a tone is held past `max_tone_ms`, if digits are more
 than `interdigit_ms` apart (only what came before the gap is lost), or if the
 transmission continues more than `end_of_tx_ms` after the last digit. If voice
 ever sets off false digits, `min_tone_ms` is the first setting to raise. At
-`log.level = info` each digit is logged; `debug` also logs tones that were too
+`log.level = info` the log shows when a sequence starts and how it ended; `debug` also
+logs each digit and tones that were too
 short.
 
 ### `[events]` — which message plays for each occasion

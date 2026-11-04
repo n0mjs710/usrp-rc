@@ -53,7 +53,7 @@ static bool evaluate(command_session_t *s, command_t *out)
     if (s->ndigits == 0)
         return false;
     if (s->overflowed) {
-        LOGI("dtmf: sequence too long -- ignored\n");
+        LOGI("dtmf: '%s...': ABANDONED more than %d digits\n", s->digits, COMMAND_MAX_DIGITS);
         clear_digits(s);
         return false;
     }
@@ -73,11 +73,11 @@ static bool evaluate(command_session_t *s, command_t *out)
             continue;
         bool needs_link = CODES[i].type == COMMAND_LINK_ON || CODES[i].type == COMMAND_LINK_OFF;
         if (needs_link && !s->cfg->link.enabled) {
-            LOGI("dtmf: %s ignored -- no link configured\n", CODES[i].name);
+            LOGI("dtmf: '%s': ERROR command = %s, link is not configured\n", s->digits, CODES[i].name);
             clear_digits(s);
             return false;
         }
-        LOGI("dtmf: %s\n", CODES[i].name);
+        LOGI("dtmf: '%s': ACCEPTED command = %s\n", s->digits, CODES[i].name);
         out->type = CODES[i].type;
         out->digits[0] = '\0';
         clear_digits(s);
@@ -90,12 +90,12 @@ static bool evaluate(command_session_t *s, command_t *out)
     if (plen && strncmp(s->digits, prefix, plen) == 0 && s->digits[plen]) {
         out->type = COMMAND_PAD_TEST;
         snprintf(out->digits, sizeof(out->digits), "%s", s->digits + plen);
-        LOGI("dtmf: pad test  digits=%s\n", out->digits);
+        LOGI("dtmf: '%s': ACCEPTED command = DTMF test + %s\n", s->digits, out->digits);
         clear_digits(s);
         return true;
     }
 
-    LOGI("dtmf: no command matches '%s'\n", s->digits);
+    LOGI("dtmf: '%s': ERROR no command matched\n", s->digits);
     clear_digits(s);
     return false;
 }
@@ -104,7 +104,8 @@ static void on_digit(command_session_t *s, char digit, bool *terminated)
 {
     if (digit == '#') {
         /* ACC's cancel: forget everything entered so far this transmission. */
-        LOGI("dtmf: '#' cancels '%s'\n", s->digits);
+        if (s->ndigits > 0)
+            LOGI("dtmf: '%s#': ABANDONED user terminated\n", s->digits);
         clear_digits(s);
         return;
     }
@@ -115,9 +116,12 @@ static void on_digit(command_session_t *s, char digit, bool *terminated)
     }
 
     if (s->ndigits > 0 && s->now_ms - s->last_digit_ms > s->cfg->dtmf.interdigit_ms) {
-        LOGI("dtmf: interdigit time exceeded -- discarding '%s'\n", s->digits);
+        LOGI("dtmf: '%s': ABANDONED inter-digit timer exceeded\n", s->digits);
         clear_digits(s);
     }
+
+    if (s->ndigits == 0)
+        LOGI("dtmf: sequence started with '%c'\n", digit);
 
     s->last_digit_ms = s->now_ms;
     if (s->ndigits < COMMAND_MAX_DIGITS) {
@@ -138,11 +142,11 @@ bool command_session_frame(command_session_t *s, const int16_t frame[160], comma
 
     for (int i = 0; i < n; i++) {
         if (events[i].type == DTMF_TONE_ON) {
-            LOGI("dtmf: digit '%c'\n", events[i].digit);
+            LOGD("dtmf: digit '%c'\n", events[i].digit);
             if (!s->muted) {
                 s->muted = true;
                 s->beep_pos = 0;
-                LOGI("dtmf: muting repeat audio\n");
+                LOGD("dtmf: muting repeat audio\n");
             }
             if (!s->link_cut) {
                 s->link_cut = true;
@@ -162,15 +166,14 @@ bool command_session_frame(command_session_t *s, const int16_t frame[160], comma
         s->last_tone_ms = s->now_ms;
 
     if (held > s->cfg->dtmf.max_tone_ms && !s->tone_rejected) {
-        LOGI("dtmf: tone held over %d ms -- discarding '%s'\n",
-             s->cfg->dtmf.max_tone_ms, s->digits);
+        LOGI("dtmf: '%s': ABANDONED tone timer exceeded\n", s->digits);
         s->tone_rejected = true;
         clear_digits(s);
     }
 
     if (s->muted && held == 0 && s->now_ms - s->last_tone_ms >= s->cfg->dtmf.mute_hang_ms) {
         s->muted = false;
-        LOGI("dtmf: unmuting repeat audio\n");
+        LOGD("dtmf: unmuting repeat audio\n");
     }
 
     return terminated && evaluate(s, out);
@@ -184,7 +187,7 @@ bool command_session_end_of_tx(command_session_t *s, command_t *out)
         if (s->now_ms - s->last_digit_ms > s->cfg->dtmf.end_of_tx_ms) {
             /* ACC's defense against voice falsing: a real command ends with the
              * transmission, it isn't followed by a speech. */
-            LOGI("dtmf: too long from last digit to unkey -- discarding '%s'\n", s->digits);
+            LOGI("dtmf: '%s': ABANDONED end-of-transmission timer exceeded\n", s->digits);
             clear_digits(s);
         } else {
             have = evaluate(s, out);

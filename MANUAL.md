@@ -456,7 +456,23 @@ mode.
 | The first-tone blip bothers you | Set `audio.ste_delay_ms` to about 60 or more, which delays all repeated and link audio by that much |
 | The beeping goes on too long | Lower `mute_hang_ms`, keeping it longer than `ste_delay_ms` and shorter than `interdigit_ms` |
 
-At `log.level = info`, each digit is logged. `debug` also logs tones that were too short.
+At `log.level = info`, the log shows when a sequence starts and how it ended:
+
+```text
+dtmf: sequence started with '3'
+dtmf: '38': ACCEPTED command = usage
+```
+
+The last line starts with one of three words:
+
+| Word | Meaning | Example |
+| --- | --- | --- |
+| `ACCEPTED` | The command ran | `'5123': ACCEPTED command = DTMF test + 123` |
+| `ERROR` | The entry finished but can't run | `'99': ERROR no command matched` |
+| `ABANDONED` | The entry was cut short | `'12#': ABANDONED user terminated` |
+
+An abandoned entry also says which timer ran out, if one did. `debug` also logs each digit
+and tones that were too short.
 
 ## Usage figures
 
@@ -674,9 +690,9 @@ start_on    = false
 | Symptom | Likely cause |
 | --- | --- |
 | No response to DTMF | `[dtmf] enabled = true` is missing. The default is off. |
-| Digits aren't logged | Check for `dtmf: digit` in the log with `log.level = info`. If there's nothing, lower `min_tone_ms` and try `debug` to see short tones. |
-| Digits are logged, but no reply | Look for `dtmf: no command matches` in the log, or check whether that reply is set empty in `[events]`. |
-| `72` or `73` does nothing | Look for `ignored -- no link configured`, which means `link.enabled = false`. |
+| No DTMF in the log | Look for `dtmf: sequence started` with `log.level = info`. If there's nothing, lower `min_tone_ms` and try `debug` to see short tones. |
+| A sequence starts, but no reply | Read the `dtmf:` line that ends it, which says what matched or why it was abandoned. If a command matched, check whether its reply is set empty in `[events]`. |
+| `72` or `73` does nothing | Look for `link is not configured`, which means `link.enabled = false`. |
 | `usrp-rc` won't start | Run `--check` and work from the first error down. |
 | `events.ct_message: renamed` | Change it to `ct_link_on_message`. |
 | `needs commas between names` | Change `id1 id2` to `id1,id2`. |
