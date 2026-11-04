@@ -24,6 +24,12 @@ int message_needs_padding(const config_t *cfg, const char *name);
 rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
                                 const char *name, double morse_level_override);
 
+/* Render voice clips by name, for replies built at run time rather than defined
+ * in the config. A clip that doesn't exist is logged and skipped. Caller must
+ * free(result.samples). */
+rendered_audio_t message_render_clips(const config_t *cfg, vocab_cache_t *vocab,
+                                      const char *const *clips, int nclips);
+
 /* Check every message's content against what's actually available: voice
  * clips exist in the vocab cache, CW text is all sendable. Logs each problem
  * and returns how many there were. Separate from config_load because the

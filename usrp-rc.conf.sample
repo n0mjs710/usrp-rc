@@ -102,3 +102,16 @@ default_cw    = cw: {call}/R
 #timeout     = 180     # time-out timer (TOT) transmit cutoff
 #id_interval = 600     # mandatory ID interval (FCC: at most 10 minutes)
 #id_anxious  = 60      # sneak an anxious ID this far before the deadline
+
+#[dtmf]
+# Over-the-air DTMF commands from the repeater receiver. Off by default.
+#enabled         = false
+#min_tone_ms     = 40     # a tone must hold this long to count as a digit
+#max_tone_ms     = 5000   # a tone held longer discards the sequence
+#interdigit_ms   = 4000   # a longer gap between digits discards what came before
+#end_of_tx_ms    = 8000   # a longer gap from last digit to unkey discards the sequence
+#mute_hang_ms    = 2000   # repeat audio stays muted this long after the last tone
+#beep_hz         = 440    # plays during the mute; level is audio.tone_level
+#beep_on_ms      = 100
+#beep_off_ms     = 900
+#pad_test_prefix = 5      # pad test: prefix, then digits to read back. Empty = off.

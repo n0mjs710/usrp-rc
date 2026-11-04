@@ -60,6 +60,43 @@ int message_validate(const config_t *cfg, vocab_cache_t *vocab)
     return errors;
 }
 
+static void append_clip(const config_t *cfg, vocab_cache_t *vocab, const char *clip, sbuf_t *buf)
+{
+    size_t n;
+    const int16_t *cached = vocab_get(vocab, clip, &n);
+    if (!cached) {
+        LOGE("message: voice clip '%s' not found\n", clip);
+        return;
+    }
+    if (!cfg->audio.voice_filter) {
+        sbuf_append_scaled(buf, cached, n, cfg->audio.voice_level);
+        return;
+    }
+    /* Filter a copy -- `cached` is owned by the vocab cache and
+     * reused for every future play of this clip. */
+    int16_t *filtered = malloc(n * sizeof(int16_t));
+    if (!filtered) {
+        sbuf_append_scaled(buf, cached, n, cfg->audio.voice_level);
+        return;
+    }
+    memcpy(filtered, cached, n * sizeof(int16_t));
+    voice_filter_apply(filtered, n);
+    sbuf_append_scaled(buf, filtered, n, cfg->audio.voice_level);
+    free(filtered);
+}
+
+rendered_audio_t message_render_clips(const config_t *cfg, vocab_cache_t *vocab,
+                                      const char *const *clips, int nclips)
+{
+    sbuf_t buf = {0};
+    for (int i = 0; i < nclips; i++)
+        append_clip(cfg, vocab, clips[i], &buf);
+    sbuf_scale(&buf, cfg->audio.master_gain);
+
+    rendered_audio_t result = {.samples = buf.data, .n = buf.len};
+    return result;
+}
+
 rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
                                 const char *name, double morse_level_override)
 {
@@ -110,27 +147,7 @@ rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
                     sbuf_append_silence(&buf, (size_t)((double)ms / 1000.0 * TONE_SAMPLE_RATE));
                     continue;
                 }
-                size_t n;
-                const int16_t *cached = vocab_get(vocab, word->clip, &n);
-                if (!cached) {
-                    LOGE("message: voice clip '%s' not found\n", word->clip);
-                    continue;
-                }
-                if (!cfg->audio.voice_filter) {
-                    sbuf_append_scaled(&buf, cached, n, cfg->audio.voice_level);
-                    continue;
-                }
-                /* Filter a copy -- `cached` is owned by the vocab cache and
-                 * reused for every future play of this clip. */
-                int16_t *filtered = malloc(n * sizeof(int16_t));
-                if (!filtered) {
-                    sbuf_append_scaled(&buf, cached, n, cfg->audio.voice_level);
-                    continue;
-                }
-                memcpy(filtered, cached, n * sizeof(int16_t));
-                voice_filter_apply(filtered, n);
-                sbuf_append_scaled(&buf, filtered, n, cfg->audio.voice_level);
-                free(filtered);
+                append_clip(cfg, vocab, word->clip, &buf);
             }
             break;
         }

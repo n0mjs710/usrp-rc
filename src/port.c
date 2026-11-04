@@ -76,6 +76,10 @@ struct port {
     size_t       mix_pos;
     port_cont_fn mix_on_drain;
 
+    /* command reply waiting for the tail; malloc'd, NULL = none */
+    int16_t     *reply;
+    size_t       reply_len;
+
     /* single-slot job context for standalone (was_ptt==false) transmissions */
     int          job_epoch;
     port_state_t job_state_before;
@@ -174,6 +178,13 @@ static void queue_message(port_t *p, const char *name, double morse_level_overri
         ctrl_buf_queue(p, r.samples, r.n);
         free(r.samples);
     }
+}
+
+static void reply_discard(port_t *p)
+{
+    free(p->reply);
+    p->reply     = NULL;
+    p->reply_len = 0;
 }
 
 static void schedule_hang(port_t *p, uint64_t now)
@@ -301,6 +312,10 @@ static void impolite_id_after_mix(port_t *p, uint64_t now)
     p->tx_activity         = false;
     schedule_id(p, now);
     if (p->state == PORT_TAIL && !cor_active(p)) {
+        if (p->reply) {
+            schedule_ct_delay(p, now);   /* the reply goes first, as on any other tail */
+            return;
+        }
         queue_message(p, p->cfg->events.ct_message, -1.0);
         if (ctrl_buf_playing(p))
             p->ctrl.on_drain = ct_after_drain;
@@ -597,6 +612,13 @@ static void ct_after_drain(port_t *p, uint64_t now)
         schedule_hang(p, now);
 }
 
+/* Same pause before the CT as follows any other message. */
+static void reply_after_drain(port_t *p, uint64_t now)
+{
+    if (p->state == PORT_TAIL && !cor_active(p))
+        schedule_ct_delay(p, now);
+}
+
 static void on_ct_delay(port_t *p, uint64_t now)
 {
     p->ct_delay_deadline = 0;
@@ -606,6 +628,13 @@ static void on_ct_delay(port_t *p, uint64_t now)
         return;   /* a frozen CW ID (or other leftover) is still draining;
                    * its own natural-completion path re-arms ct_delay once
                    * it finishes */
+
+    if (p->reply) {
+        ctrl_buf_queue(p, p->reply, p->reply_len);
+        reply_discard(p);
+        p->ctrl.on_drain = reply_after_drain;
+        return;
+    }
 
     if (p->anxious_id_armed) {
         p->anxious_id_armed = false;
@@ -633,6 +662,7 @@ static void on_hang(port_t *p, uint64_t now)
     p->hang_deadline = 0;
     if (cor_active(p))
         return;
+    reply_discard(p);
     LOGI("state: TAIL -> IDLE  (hang expired)\n");
     set_ptt(p, false, now, "hang-expired");
     port_transition(p, PORT_IDLE, now);
@@ -644,6 +674,7 @@ static void on_timeout(port_t *p, uint64_t now)
     LOGW("state: -> TIMEOUT  (tx time exceeded)\n");
     port_transition(p, PORT_TIMEOUT, now);
     ctrl_buf_clear(p);
+    reply_discard(p);
     do_timeout_announce(p, now);
 }
 
@@ -672,6 +703,10 @@ static void cor_active_edge(port_t *p, port_source_t source, uint64_t now)
     p->hang_deadline     = 0;
     p->ct_delay_deadline = 0;
 
+    /* A keyup interrupts a reply that hasn't started; one already playing is
+     * cut when the transition to ACTIVE clears the ctrl buffer. */
+    reply_discard(p);
+
     const char *src = source == SRC_LOCAL ? "local" : "link";
     const char *action = source == SRC_LOCAL
         ? (p->cfg->link.enabled ? "repeat + link-fwd" : "repeat")
@@ -691,7 +726,8 @@ static void cor_idle_edge(port_t *p, port_source_t source, uint64_t now)
     LOGI("cor: IDLE  source=%s  held=%.1fs\n", src, duration_s);
 
     if (p->state == PORT_ACTIVE || p->state == PORT_TAIL) {
-        if (p->state == PORT_ACTIVE && duration_s < p->cfg->timers.kerchunk) {
+        /* A valid command is never a kerchunk, however quickly it was entered. */
+        if (p->state == PORT_ACTIVE && duration_s < p->cfg->timers.kerchunk && !p->reply) {
             LOGD("cor: kerchunk (%.1fs < %.1fs)  — ignored\n",
                     duration_s, p->cfg->timers.kerchunk);
             p->timeout_deadline    = 0;
@@ -742,6 +778,17 @@ void port_on_link_keyup(port_t *p, bool active, uint64_t now)
         if (new_combined) cor_active_edge(p, SRC_LINK, now);
         else              cor_idle_edge(p, SRC_LINK, now);
     }
+}
+
+void port_queue_reply(port_t *p, int16_t *samples, size_t n)
+{
+    reply_discard(p);
+    if (p->state == PORT_TIMEOUT || !samples || n == 0) {
+        free(samples);
+        return;
+    }
+    p->reply     = samples;
+    p->reply_len = n;
 }
 
 /* ── timer aggregation ─────────────────────────────────────────────────── */
@@ -856,5 +903,6 @@ void port_destroy(port_t *p)
         return;
     free(p->ctrl.buf.data);
     free(p->mix_buf);
+    free(p->reply);
     free(p);
 }

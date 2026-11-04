@@ -512,6 +512,90 @@ static bool scenario_impolite_resets_tx_activity(config_t *base, vocab_cache_t *
     return ok;
 }
 
+static bool scenario_command_reply(config_t *base, vocab_cache_t *vocab)
+{
+    printf("\n[8] command reply plays in the tail ahead of the CT, and a keyup interrupts it\n");
+    bool ok = true;
+    config_t cfg = *base;
+    port_t *p = fresh_port(&cfg, vocab);
+    prime(p);
+
+    /* A reply is 200 ms of steady non-zero samples, easy to tell from the 60 ms CT. */
+    const size_t REPLY_SAMPLES = 1600;
+    int16_t *reply = malloc(REPLY_SAMPLES * sizeof(int16_t));
+    for (size_t i = 0; i < REPLY_SAMPLES; i++) reply[i] = 1000;
+
+    key_local(p, true);
+    wait_ms(p, 150);
+    port_queue_reply(p, reply, REPLY_SAMPLES);
+    key_local(p, false);
+
+    int first_run = 0, runs = 0, run_ms = 0;
+    bool prev = false;
+    for (int t = 0; t < 1500; t += TICK_MS) {
+        bool cur = tick(p);
+        if (cur) run_ms += TICK_MS;
+        if (cur && !prev) runs++;
+        if (!cur && prev && first_run == 0) first_run = run_ms;
+        prev = cur;
+    }
+    CHECK(first_run >= 180 && first_run <= 240, "reply played first, in full (first run %d ms)", first_run);
+    CHECK(runs == 2, "the courtesy tone still followed it (%d bursts)", runs);
+    CHECK(!port_ptt(p), "PTT released afterward");
+
+    /* Interrupted before it starts. */
+    reply = malloc(REPLY_SAMPLES * sizeof(int16_t));
+    for (size_t i = 0; i < REPLY_SAMPLES; i++) reply[i] = 1000;
+    key_local(p, true);
+    wait_ms(p, 150);
+    port_queue_reply(p, reply, REPLY_SAMPLES);
+    key_local(p, false);
+    wait_ms(p, 60);          /* still inside ct_delay */
+    key_local(p, true);
+    wait_ms(p, 150);
+    key_local(p, false);
+    run_ms = 0;
+    for (int t = 0; t < 1000; t += TICK_MS)
+        if (tick(p)) run_ms += TICK_MS;
+    CHECK(run_ms <= 80, "keyup before it started dropped the reply (%d ms of audio after)", run_ms);
+
+    /* Interrupted while playing. */
+    reply = malloc(REPLY_SAMPLES * sizeof(int16_t));
+    for (size_t i = 0; i < REPLY_SAMPLES; i++) reply[i] = 1000;
+    key_local(p, true);
+    wait_ms(p, 150);
+    port_queue_reply(p, reply, REPLY_SAMPLES);
+    key_local(p, false);
+    wait_ms(p, 260);         /* 60 ms into the reply */
+    key_local(p, true);
+    wait_ms(p, 150);
+    key_local(p, false);
+    run_ms = 0;
+    for (int t = 0; t < 1000; t += TICK_MS)
+        if (tick(p)) run_ms += TICK_MS;
+    CHECK(run_ms <= 80, "keyup during it cut the reply (%d ms of audio after)", run_ms);
+
+    /* A quick command isn't a kerchunk. */
+    reply = malloc(REPLY_SAMPLES * sizeof(int16_t));
+    for (size_t i = 0; i < REPLY_SAMPLES; i++) reply[i] = 1000;
+    cap_start();
+    key_local(p, true);
+    wait_ms(p, 40);          /* under the 100 ms threshold */
+    port_queue_reply(p, reply, REPLY_SAMPLES);
+    key_local(p, false);
+    run_ms = 0;
+    for (int t = 0; t < 1000; t += TICK_MS)
+        if (tick(p)) run_ms += TICK_MS;
+    char *log = cap_stop();
+    CHECK(count_occurrences(log, "cor: kerchunk") == 0, "not treated as a kerchunk");
+    CHECK(run_ms >= 180, "the reply still played (%d ms of audio)", run_ms);
+    free(log);
+
+    port_destroy(p);
+    printf(ok ? "[8] PASS\n" : "[8] FAIL\n");
+    return ok;
+}
+
 /* ── driver ───────────────────────────────────────────────────────────── */
 
 int main(void)
@@ -540,6 +624,7 @@ int main(void)
         scenario_kerchunk_ignored,
         scenario_timeout_recovery,
         scenario_impolite_resets_tx_activity,
+        scenario_command_reply,
     };
     int n = (int)(sizeof(scenarios) / sizeof(scenarios[0]));
 

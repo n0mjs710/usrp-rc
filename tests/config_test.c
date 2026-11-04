@@ -62,6 +62,14 @@ static const test_case_t CASES[] = {
     {"missing remote_host", "[link]\nenabled = true\n", "link.remote_host is required"},
     {"bad opus frame",      "[link]\nremote_host = x\ncodec = opus\nopus_frame_ms = 30\n", "link.opus_frame_ms must be"},
 
+    {"dtmf settings",       BASE "[dtmf]\nenabled = true\nmin_tone_ms = 50\npad_test_prefix = 85\n", NULL},
+    {"dtmf prefix can be off", BASE "[dtmf]\npad_test_prefix =\n", NULL},
+    {"dtmf prefix uses #",  BASE "[dtmf]\npad_test_prefix = 8#\n", "dtmf.pad_test_prefix: '8#' can only use"},
+    {"dtmf prefix too long", BASE "[dtmf]\npad_test_prefix = 12345678\n", "dtmf.pad_test_prefix: is too long"},
+    {"dtmf min tone range", BASE "[dtmf]\nmin_tone_ms = 5\n", "dtmf.min_tone_ms: 5 is out of range"},
+    {"dtmf mute hang vs interdigit", BASE "[dtmf]\nmute_hang_ms = 4000\ninterdigit_ms = 4000\n",
+                            "dtmf.mute_hang_ms (4000) must be less than dtmf.interdigit_ms (4000)"},
+
     {"misspelled mandatory_ids", BASE "[events]\nmandatory_id = honk\n", "events.mandatory_id: unknown setting (did you mean events.mandatory_ids?)"},
     {"mandatory_ids dangling",   BASE "[events]\nmandatory_ids = nope\n", "line 4: events.mandatory_ids: no message named 'nope'"},
     {"too many ids",        BASE "[events]\ninitial_ids = honk honk honk honk honk honk honk honk honk\n", "events.initial_ids: has 9 entries (max 8)"},

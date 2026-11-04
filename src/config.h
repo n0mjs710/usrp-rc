@@ -105,6 +105,22 @@ typedef struct {
     double id_anxious;
 } config_timers_t;
 
+/* Enough for ACC's longest command prefix (7 digits). */
+#define CFG_DTMF_PREFIX_STR 8
+
+typedef struct {
+    bool enabled;
+    int  min_tone_ms;     /* a tone must hold this long to count as a digit */
+    int  max_tone_ms;     /* a tone held longer than this discards the sequence */
+    int  interdigit_ms;   /* a longer gap between digits discards what came before */
+    int  end_of_tx_ms;    /* a longer gap from last digit to unkey discards the sequence */
+    int  mute_hang_ms;    /* repeat audio stays muted this long after the last tone */
+    int  beep_hz;
+    int  beep_on_ms;
+    int  beep_off_ms;
+    char pad_test_prefix[CFG_DTMF_PREFIX_STR];   /* empty = pad test off */
+} config_dtmf_t;
+
 typedef struct {
     char startup_message[CFG_NAME_STR];
     char initial_ids[CFG_MAX_ID_ROTATION][CFG_NAME_STR];
@@ -137,6 +153,7 @@ typedef struct {
     config_audio_t   audio;
     config_timers_t  timers;
     config_events_t  events;
+    config_dtmf_t    dtmf;
     access_mode_t    access_mode;
     config_log_t     log;
 

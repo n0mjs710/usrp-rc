@@ -48,6 +48,19 @@ void config_defaults(config_t *cfg)
     cfg->timers.id_interval = 600.0;
     cfg->timers.id_anxious  = 60.0;
 
+    /* Off unless asked for: it mutes repeat audio and drops the link, which an
+     * existing site shouldn't start doing just by upgrading. */
+    cfg->dtmf.enabled       = false;
+    cfg->dtmf.min_tone_ms   = 40;
+    cfg->dtmf.max_tone_ms   = 5000;
+    cfg->dtmf.interdigit_ms = 4000;
+    cfg->dtmf.end_of_tx_ms  = 8000;
+    cfg->dtmf.mute_hang_ms  = 2000;
+    cfg->dtmf.beep_hz       = 440;
+    cfg->dtmf.beep_on_ms    = 100;
+    cfg->dtmf.beep_off_ms   = 900;
+    strncpy(cfg->dtmf.pad_test_prefix, "5", sizeof(cfg->dtmf.pad_test_prefix) - 1);
+
     cfg->access_mode = ACCESS_COR;
 
     strncpy(cfg->log.level, "info", sizeof(cfg->log.level) - 1);
@@ -140,6 +153,17 @@ static const field_t FIELDS[] = {
     DBL("timers", "id_interval", timers.id_interval, 1, 86400),
     DBL("timers", "id_anxious",  timers.id_anxious, 0, 3600),
 
+    BOOL("dtmf", "enabled",       dtmf.enabled),
+    INT("dtmf",  "min_tone_ms",   dtmf.min_tone_ms, 30, 1000),
+    INT("dtmf",  "max_tone_ms",   dtmf.max_tone_ms, 100, 60000),
+    INT("dtmf",  "interdigit_ms", dtmf.interdigit_ms, 100, 60000),
+    INT("dtmf",  "end_of_tx_ms",  dtmf.end_of_tx_ms, 100, 600000),
+    INT("dtmf",  "mute_hang_ms",  dtmf.mute_hang_ms, 0, 60000),
+    INT("dtmf",  "beep_hz",       dtmf.beep_hz, 100, 3400),
+    INT("dtmf",  "beep_on_ms",    dtmf.beep_on_ms, 0, 10000),
+    INT("dtmf",  "beep_off_ms",   dtmf.beep_off_ms, 0, 10000),
+    STR("dtmf",  "pad_test_prefix", dtmf.pad_test_prefix),
+
     STR("events", "startup_message",        events.startup_message),
     NAMES("initial_ids",   events.initial_ids,   events.n_initial_ids),
     NAMES("mandatory_ids", events.mandatory_ids, events.n_mandatory_ids),
@@ -155,7 +179,7 @@ static const field_t FIELDS[] = {
 #define MESSAGES_SECTION "messages"
 
 static const char *const SECTIONS[] = {
-    "log", "mmdvm", "link", "audio", "timers", "events", MESSAGES_SECTION, NULL,
+    "log", "mmdvm", "link", "audio", "timers", "dtmf", "events", MESSAGES_SECTION, NULL,
 };
 
 static const char *const ELEM_TYPES[] = {"cw", "voice", "tone", NULL};
@@ -965,6 +989,14 @@ static void validate(const entries_t *es, const config_t *cfg)
             && cfg->link.opus_frame_ms != 40 && cfg->link.opus_frame_ms != 60)
             cfg_err("link.opus_frame_ms must be 20, 40, or 60\n");
     }
+
+    /* # and D are the cancel and enter keys, so a prefix could never be typed. */
+    const char *prefix = cfg->dtmf.pad_test_prefix;
+    if (prefix[strspn(prefix, "0123456789*ABC")])
+        cfg_err("dtmf.pad_test_prefix: '%s' can only use 0-9, *, A, B and C\n", prefix);
+    if (cfg->dtmf.mute_hang_ms >= cfg->dtmf.interdigit_ms)
+        cfg_err("dtmf.mute_hang_ms (%d) must be less than dtmf.interdigit_ms (%d)\n",
+                cfg->dtmf.mute_hang_ms, cfg->dtmf.interdigit_ms);
 
     CHECK_ONE("startup_message",        startup_message);
     CHECK_ONE("anxious_id",             anxious_id);

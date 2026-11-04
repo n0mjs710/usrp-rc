@@ -8,6 +8,7 @@
 #include "message.h"
 #include "ste.h"
 #include "port.h"
+#include "command.h"
 #include "util.h"
 #include "log.h"
 
@@ -54,6 +55,7 @@ typedef struct {
     vocab_cache_t  *vocab;
     port_t         *port;
     ste_t          *ste;
+    command_session_t *cmd;   /* NULL = dtmf.enabled is false */
     jitter_buffer_t *jb;
     opus_codec_t   *opus;   /* NULL in PCM mode */
 
@@ -67,6 +69,7 @@ typedef struct {
     /* No mmdvm-side sequence counter: MMDVM-Host's FM protocol has no
      * sequence field. Only the link (still USRP) needs one. */
     uint32_t link_tx_seq;
+    bool     link_tx_ended;   /* a DTMF command took the link down this transmission */
 
     uint64_t mmdvm_watchdog_deadline;
     uint64_t link_watchdog_deadline;
@@ -313,21 +316,51 @@ static void mmdvm_key_edge(app_t *a, uint64_t now)
     port_on_mmdvm_keyup(a->port, true, now);
 }
 
+/* End this transmission's uplink: pad out any partial Opus frame and unkey. */
+static void link_tx_end(app_t *a)
+{
+    if (a->link_tx_ended)
+        return;
+    a->link_tx_ended = true;
+    if (a->link_sock < 0)
+        return;
+    if (a->cfg.link.codec == LINK_CODEC_OPUS && a->opus_accum_n > 0) {
+        int frame_samples = opus_codec_frame_samples(a->opus);
+        memset(a->opus_accum + a->opus_accum_n, 0,
+               (size_t)(frame_samples - a->opus_accum_n) * sizeof(int16_t));
+        a->opus_accum_n = frame_samples;
+        flush_opus_uplink(a);
+    }
+    send_link_key(a, false);
+    LOGI("link: UNKEY -> peer\n");
+}
+
+static void run_command(app_t *a, const command_t *c)
+{
+    switch (c->type) {
+    case COMMAND_PAD_TEST: {
+        const char *clips[COMMAND_MAX_DIGITS];
+        int n = 0;
+        for (const char *d = c->digits; *d; d++)
+            clips[n++] = command_digit_clip(*d);
+        rendered_audio_t r = message_render_clips(&a->cfg, a->vocab, clips, n);
+        port_queue_reply(a->port, r.samples, r.n);
+        break;
+    }
+    }
+}
+
 static void mmdvm_unkey_edge(app_t *a, uint64_t now)
 {
     ste_reset(a->ste);
-    if (a->link_sock >= 0) {
-        if (a->cfg.link.codec == LINK_CODEC_OPUS && a->opus_accum_n > 0) {
-            int frame_samples = opus_codec_frame_samples(a->opus);
-            memset(a->opus_accum + a->opus_accum_n, 0,
-                   (size_t)(frame_samples - a->opus_accum_n) * sizeof(int16_t));
-            a->opus_accum_n = frame_samples;
-            flush_opus_uplink(a);
-        }
-    }
-    send_link_key(a, false);
-    if (a->link_sock >= 0)
-        LOGI("link: UNKEY -> peer\n");
+    link_tx_end(a);
+    a->link_tx_ended = false;
+
+    /* Before the port sees the unkey, so a reply is in place when the tail starts. */
+    command_t c;
+    if (a->cmd && command_session_end_of_tx(a->cmd, &c))
+        run_command(a, &c);
+
     port_on_mmdvm_keyup(a->port, false, now);
 }
 
@@ -349,6 +382,17 @@ static void mmdvm_rx_frame(app_t *a, const int16_t frame_in[160], uint64_t now)
     if (!port_mmdvm_gate_open(a->port))
         return;
 
+    /* Ahead of the delay line, so with STE on the mute beats the tone out. */
+    bool muted = false;
+    if (a->cmd) {
+        command_t c;
+        if (command_session_frame(a->cmd, frame_in, &c))
+            run_command(a, &c);
+        muted = command_session_muted(a->cmd);
+        if (command_session_link_cut(a->cmd))
+            link_tx_end(a);
+    }
+
     /* STE delay line, shared by both destinations: real audio once the
      * buffer has filled, silence (not silence-by-omission) until then,
      * so both flows key up immediately but with a gapless, delayed
@@ -359,12 +403,15 @@ static void mmdvm_rx_frame(app_t *a, const int16_t frame_in[160], uint64_t now)
 
     /* Flow 1: local repeat, mmdvm RX -> mmdvm TX (+ impolite-ID mix). */
     int16_t frame[160];
-    memcpy(frame, ste_out, sizeof(frame));
+    if (muted)
+        command_session_fill_mute(a->cmd, frame);
+    else
+        memcpy(frame, ste_out, sizeof(frame));
     port_mix_apply(a->port, frame, now);
     send_mmdvm_voice(a, frame, true);
 
     /* Flow 2: mmdvm RX -> link TX. */
-    if (a->link_sock >= 0)
+    if (a->link_sock >= 0 && !a->link_tx_ended)
         send_link_voice(a, ste_out);
 }
 
@@ -666,6 +713,11 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    if (a->cfg.dtmf.enabled && command_session_create(&a->cmd, &a->cfg) != 0) {
+        LOGE("usrp-rc: failed to init DTMF control\n");
+        return 1;
+    }
+
     if (a->cfg.link.enabled) {
         if (jitter_buffer_create(&a->jb, JITTER_PREFILL_DEFAULT) != 0) {
             LOGE("usrp-rc: failed to init jitter buffer\n");
@@ -756,6 +808,7 @@ int main(int argc, char *argv[])
     if (a->opus) opus_codec_destroy(a->opus);
     jitter_buffer_destroy(a->jb);
     ste_destroy(a->ste);
+    command_session_destroy(a->cmd);
     port_destroy(a->port);
     vocab_cache_destroy(a->vocab);
     free(a);

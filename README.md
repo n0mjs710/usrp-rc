@@ -198,6 +198,52 @@ Mirrors standard analog repeater controller terminology: `hang`, `ct_delay`,
 `kerchunk` (anti-kerchunk COR hold), `timeout` (TOT), `id_interval`,
 `id_anxious`.
 
+### `[dtmf]` — over-the-air commands
+
+Off unless you set `enabled = true`. DTMF is decoded from the repeater
+receiver only; tones from the link are not decoded.
+
+```ini
+[dtmf]
+enabled         = true
+pad_test_prefix = 5
+```
+
+Commands follow the three-tier structure of ACC controllers: user commands,
+control operator commands behind a prefix, and programming behind an unlock.
+Only the user tier has commands so far. Programming is done in this file.
+
+| Command | Enter | Result |
+| --- | --- | --- |
+| Pad test | prefix, then digits | reads the digits back (`*` is spoken "Sierra") |
+
+Enter a command in one transmission, then unkey. Over the air:
+
+- `D` evaluates what you've entered without waiting for the unkey, for when a
+  carrier won't drop.
+- `#` cancels what you've entered so far, and you can carry on with a new command.
+
+While you enter digits:
+
+- The first valid tone mutes repeat audio, replacing it with a beep (100 ms on,
+  900 ms off by default). The mute releases `mute_hang_ms` after the last tone,
+  and a later tone starts it again. With `audio.ste_delay_ms` at 0, the start of
+  the first tone is repeated before it can be muted. A delay of about 60 ms or
+  more hides it, as long as `mute_hang_ms` is longer than the delay.
+- The first valid tone also ends the transmission on the link, and the link stays
+  down until you unkey, so neither the digits nor anything you say afterward goes
+  out over the network. Audio from before the first tone has already gone.
+
+A reply plays in the tail, ahead of the courtesy tone, and keying up interrupts
+it. Commands aren't accepted during a timeout lockout.
+
+A sequence is discarded if a tone is held past `max_tone_ms`, if digits are more
+than `interdigit_ms` apart (only what came before the gap is lost), or if the
+transmission continues more than `end_of_tx_ms` after the last digit. If voice
+ever sets off false digits, `min_tone_ms` is the first setting to raise. At
+`log.level = info` each digit is logged; `debug` also logs tones that were too
+short.
+
 ### `[events]` — which message plays for each occasion
 
 ```ini
@@ -290,9 +336,8 @@ shipped set. See
 
 ## Not implemented (by design, v1)
 
-No CM119/ALSA/hidraw, no Unix socket monitoring API, no DTMF decode or
-remote control, no CTCSS encode or software decode, no IAX2, and exactly
-two fixed ports (no multi-port linking).
+No CM119/ALSA/hidraw, no Unix socket monitoring API, no CTCSS encode or
+software decode, no IAX2, and exactly two fixed ports (no multi-port linking).
 
 ## Contributing / internals
 

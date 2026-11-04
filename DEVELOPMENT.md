@@ -51,6 +51,22 @@ either protocol: the MMDVM-Host↔modem serial link is 12-bit (packed two
 samples per three bytes) and band-limited to 300–2700 Hz, so there is no
 audio-quality headroom to be won on the mmdvm side by changing framing.
 
+## DTMF control
+
+`src/dtmf.c` finds tones and `src/command.c` turns them into commands, mutes and
+link cuts. Neither has a clock of its own: both count the 20 ms audio frames they
+are fed, so `tests/dtmf_test.c` runs them on synthesized audio with no sockets.
+That test also feeds the whole of `vocab_8k/` through the decoder as a
+false-detection check on real speech.
+
+The detector taps received audio ahead of the STE delay in `mmdvm_rx_frame()`.
+Replies go through `port_queue_reply()` and play from the courtesy tone delay,
+the same slot the anxious ID uses.
+
+The reference controllers are the ACC RC-96 (command structure and behavior) and
+the Arcom RC-210 (mute timer, tail message triggers). Their macro sets, patches,
+and multi-port routing are deliberately not the model here.
+
 ## Target platform
 
 Developed on a Raspberry Pi 3B+ (similar architecture/OS to the production
