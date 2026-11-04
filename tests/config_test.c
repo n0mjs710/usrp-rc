@@ -105,7 +105,8 @@ static const test_case_t CASES[] = {
 
     {"misspelled mandatory_ids", BASE "[events]\nmandatory_id = honk\n", "events.mandatory_id: unknown setting (did you mean events.mandatory_ids?)"},
     {"mandatory_ids dangling",   BASE "[events]\nmandatory_ids = nope\n", "line 4: events.mandatory_ids: no message named 'nope'"},
-    {"too many ids",        BASE "[events]\ninitial_ids = honk honk honk honk honk honk honk honk honk\n", "events.initial_ids: has 9 entries (max 8)"},
+    {"list without commas", BASE "[events]\ninitial_ids = honk honk\n", "events.initial_ids: 'honk honk' needs commas"},
+    {"too many ids",        BASE "[events]\ninitial_ids = honk,honk,honk,honk,honk,honk,honk,honk,honk\n", "events.initial_ids: has 9 entries (max 8)"},
     {"event dangling, with hint", BASE "[events]\nct_link_on_message = yelow_jacket\n",
                                   "line 4: events.ct_link_on_message: no message named 'yelow_jacket' (did you mean 'yellow_jacket'?)"},
 
@@ -230,8 +231,8 @@ int main(void)
     check("mmdvm ports default to the MMDVM-Host pairing",
           s_cfg.mmdvm.local_port == 4810 && s_cfg.mmdvm.rpt_port == 3810);
 
-    rc = load_text(BASE "[events]\nmandatory_ids = a b\n[messages]\na = cw: ID\nb = cw: ID\n");
-    check("name list splits on spaces", rc == 0 && s_cfg.events.n_mandatory_ids == 2
+    rc = load_text(BASE "[events]\nmandatory_ids = a, b\n[messages]\na = cw: ID\nb = cw: ID\n");
+    check("name list splits on commas", rc == 0 && s_cfg.events.n_mandatory_ids == 2
           && strcmp(s_cfg.events.mandatory_ids[1], "b") == 0);
 
     rc = load_text(BASE "[messages]\nm = tone: 500+700:100 _30 1200:60@0.9\n");

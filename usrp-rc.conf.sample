@@ -29,7 +29,7 @@ codec       = pcm      # pcm or opus
 
 [events]
 # Which message plays for each occasion. Empty = play nothing.
-# initial_ids and mandatory_ids rotate through a space-separated list (max 8).
+# initial_ids and mandatory_ids rotate through a comma-separated list (max 8).
 initial_ids     = default_voice
 mandatory_ids   = default_cw
 ct_link_on_message = yellow_jacket
@@ -77,7 +77,7 @@ default_cw    = cw: {call}/R
 # DAYS is sun..sat, daily, weekdays or weekends, comma-separated. Times are 24-hour on
 # the system clock. The window includes its start minute, not its end minute; one that
 # ends before it starts runs past midnight. If windows overlap, the later line wins. A
-# list like mandatory_ids is comma-separated here. An empty value turns a setting off.
+# list like mandatory_ids takes no spaces here. An empty value turns a setting off.
 #
 #net_reminder = wed 07:00-19:25 tail_message=net_tonight
 #net_running  = wed 19:30-20:30 ct_link_on_message=net_ct ct_link_off_message=net_ct

@@ -94,7 +94,7 @@ typedef enum {
     FT_BOOL,
     FT_PORT,
     FT_ENUM,      /* index into choices[] stored as the enum */
-    FT_NAME_LIST, /* space-separated message names; count stored at count_offset */
+    FT_NAME_LIST, /* comma-separated message names; count stored at count_offset */
 } field_type_t;
 
 typedef struct {
@@ -526,7 +526,16 @@ static void read_name_list(const char *value, const char *path, const field_t *f
     char *copy = strdup(value);
     char *save = NULL;
     int count = 0, seen = 0;
-    for (char *tok = strtok_r(copy, " \t", &save); tok; tok = strtok_r(NULL, " \t", &save)) {
+    for (char *tok = strtok_r(copy, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
+        tok += strspn(tok, " \t");
+        size_t len = strcspn(tok, " \t");
+        if (tok[len + strspn(tok + len, " \t")]) {
+            cfg_err("%s: '%s' needs commas between names\n", path, tok);
+            continue;
+        }
+        tok[len] = '\0';
+        if (!len)
+            continue;
         seen++;
         if (strlen(tok) >= CFG_NAME_STR)
             cfg_err("%s: '%s' is too long (max %d characters)\n", path, tok, CFG_NAME_STR - 1);
@@ -1102,7 +1111,6 @@ static void read_override(char *tok, const char *path, const config_t *cfg, conf
     o->size   = f->size;
     o->count_offset = f->type == FT_NAME_LIST ? f->count_offset - offsetof(config_t, events) : 0;
 
-    /* Lists are comma-separated here, as spaces divide a schedule line's fields. */
     char copy[CFG_STR];
     strcpy(copy, value);
     int count = 0;

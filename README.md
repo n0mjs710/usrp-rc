@@ -76,6 +76,9 @@ sudo make install
 
 ## Configuration
 
+See [MANUAL.md](MANUAL.md) for the full user manual, including DTMF commands and a
+reference to every setting.
+
 Copy `usrp-rc.conf.sample` to `/etc/usrp-rc/usrp-rc.conf` (or pass a path on
 the command line) and edit for your site. The format is plain `key = value`
 lines under `[section]` headers, with no quotes, and `#` starts a comment. Any
@@ -280,7 +283,7 @@ timeout_message = timeout_warn
 
 Maps occasions (startup, initial/mandatory/anxious/impolite ID, courtesy
 tones, timeout, DTMF command replies) to message names. `initial_ids` and `mandatory_ids` take a
-space-separated list and rotate through it. An empty value plays nothing.
+comma-separated list and rotate through it. An empty value plays nothing.
 
 ### `[stats]` — usage figures
 
@@ -319,7 +322,7 @@ write. A restart in the middle of a window picks it straight back up.
 - A window that ends before it starts runs past midnight, and belongs to the day it
   started on: `fri 22:00-02:00` is still open at 01:00 on Saturday.
 - If windows overlap, the later line wins.
-- Lists like `mandatory_ids` are comma-separated here (`mandatory_ids=id1,id2`), and
+- Lists like `mandatory_ids` take no spaces here (`mandatory_ids=id1,id2`), and
   an empty value turns a setting off (`tail_message=`).
 
 Changes take effect at the top of each minute, and `log.level = info` logs each window

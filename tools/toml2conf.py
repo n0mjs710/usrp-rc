@@ -38,7 +38,7 @@ def scalar(value):
     if isinstance(value, float):
         return num(value)
     if isinstance(value, list):
-        return " ".join(scalar(v) for v in value)
+        return ",".join(scalar(v) for v in value)
     return str(value)
 
 
