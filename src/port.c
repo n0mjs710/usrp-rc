@@ -405,18 +405,30 @@ static void mandatory_id_after_drain(port_t *p, uint64_t now)
     mandatory_id_after_post_pad(p, now);
 }
 
+/* What the ID timer plays with nobody talking. With no mandatory ID, impolite_id stands
+ * in, because the station still has to identify. NULL if there's nothing at all. */
+static const char *mandatory_id_next(const port_t *p)
+{
+    if (p->ev->n_mandatory_ids > 0)
+        return p->ev->mandatory_ids[p->id_rot_mandatory % p->ev->n_mandatory_ids];
+    return p->ev->impolite_id[0] ? p->ev->impolite_id : NULL;
+}
+
 static void mandatory_id_render_and_queue(port_t *p, uint64_t now)
 {
-    if (p->ev->n_mandatory_ids == 0) {
-        LOGW("port: no mandatory_ids configured\n");
+    const char *name = mandatory_id_next(p);
+    if (!name) {
+        LOGW("port: NO ID SENT: no mandatory_ids or impolite_id configured\n");
         mandatory_id_finish(p, now);
         return;
     }
-    int idx = p->id_rot_mandatory % p->ev->n_mandatory_ids;
-    const char *name = p->ev->mandatory_ids[idx];
-    p->id_rot_mandatory = (idx + 1) % p->ev->n_mandatory_ids;
-
-    LOGI("id: mandatory  '%s'  (%d/%d)\n", name, idx + 1, p->ev->n_mandatory_ids);
+    if (p->ev->n_mandatory_ids > 0) {
+        int idx = p->id_rot_mandatory % p->ev->n_mandatory_ids;
+        p->id_rot_mandatory = (idx + 1) % p->ev->n_mandatory_ids;
+        LOGI("id: mandatory  '%s'  (%d/%d)\n", name, idx + 1, p->ev->n_mandatory_ids);
+    } else {
+        LOGI("id: mandatory  '%s'  (impolite_id, as there's no mandatory ID)\n", name);
+    }
     p->voice_id_active = message_has_voice(p->cfg, name);
     p->id_playing = true;
     queue_message(p, name, -1.0);
@@ -433,13 +445,13 @@ static void do_mandatory_id(port_t *p, uint64_t now)
     p->job_was_ptt       = p->ptt;
     p->job_state_before  = p->state;
 
-    if (p->ev->n_mandatory_ids == 0) {
-        LOGW("port: no mandatory_ids configured\n");
+    const char *peek = mandatory_id_next(p);
+    if (!peek) {
+        LOGW("port: NO ID SENT: no mandatory_ids or impolite_id configured\n");
         schedule_id(p, now);
         return;
     }
 
-    const char *peek = p->ev->mandatory_ids[p->id_rot_mandatory % p->ev->n_mandatory_ids];
     p->job_post_pad_needed = !p->job_was_ptt && message_needs_padding(p->cfg, peek);
 
     if (!p->job_was_ptt) {

@@ -109,6 +109,12 @@ static const test_case_t CASES[] = {
     {"schedule dec-8x", BASE "[messages]\nm = cw: A\n[schedule]\na = dec-8x 19:00-21:00 tail_messages=m\n", "'dec-8x' is not valid days"},
     {"schedule last-fri", BASE "[messages]\nm = cw: A\n[schedule]\na = last-fri 19:00-21:00 tail_messages=m\n", "'last-fri' is not valid days"},
     {"schedule too many rules", BASE "[messages]\nm = cw: A\n[schedule]\na = 1st,2nd,3rd,4th,5th,6th,7th,8th,9th 19:00-21:00 tail_messages=m\n", "'1st,2nd,3rd,4th,5th,6th,7th,8th,9th' is not valid days"},
+    {"schedule += and -=", BASE "[messages]\nm = cw: A\nn = cw: B\n[schedule]\na = mon 01:00-02:00 tail_messages+=m,n mandatory_ids-=m\n", NULL},
+    {"schedule += on one message", BASE "[messages]\nm = cw: A\n[schedule]\na = mon 01:00-02:00 ct_link_on_message+=m\n", "ct_link_on_message takes one message, so it can't use += or -="},
+    {"schedule -= on one message", BASE "[messages]\nm = cw: A\n[schedule]\na = mon 01:00-02:00 ct_link_on_message-=m\n", "ct_link_on_message takes one message, so it can't use += or -="},
+    {"schedule += empty", BASE "[schedule]\na = mon 01:00-02:00 tail_messages+=\n", "tail_messages+= needs at least one message"},
+    {"schedule -= empty", BASE "[schedule]\na = mon 01:00-02:00 mandatory_ids-=\n", "mandatory_ids-= needs at least one message"},
+    {"schedule += dangling", BASE "[schedule]\na = mon 01:00-02:00 tail_messages+=nope\n", "no message named 'nope'"},
     {"schedule list value", BASE "[messages]\nm = cw: A\nn = cw: B\n[schedule]\na = mon 01:00-02:00 mandatory_ids=m,n\n", NULL},
     {"schedule bad day",    BASE "[schedule]\na = wednsday 07:00-08:00 ct_link_on_message=\n", "schedule.a: 'wednsday' is not valid days"},
     {"schedule bad time",   BASE "[schedule]\na = wed 25:00-26:00 ct_link_on_message=\n", "schedule.a: '25:00-26:00' is not a valid time window"},
@@ -469,6 +475,69 @@ int main(void)
         schedule_evaluate(&s_cfg, &t, &ev, active);
         check("overnight wraps Saturday into Sunday", active[0]);
         (void)MON; (void)TUE;
+    }
+
+    /* += and -=: every window here opens on Wednesday at 12:00, and they apply in file order. */
+    {
+        struct tm t = {.tm_wday = 3, .tm_hour = 12, .tm_min = 0};
+        config_events_t ev;
+        bool active[CFG_MAX_SCHEDULE];
+        #define M "[messages]\na = cw: A\nb = cw: B\nc = cw: C\nd = cw: D\ne = cw: E\nf = cw: F\ng = cw: G\nh = cw: H\ni = cw: I\n"
+
+        load_text(BASE M "[events]\ntail_messages = a\n[schedule]\nx = wed 00:00-23:59 tail_messages+=b\ny = wed 00:00-23:59 tail_messages+=c\n");
+        schedule_evaluate(&s_cfg, &t, &ev, active);
+        check("+= builds on [events] and on earlier windows",
+              ev.n_tail_messages == 3 && strcmp(ev.tail_messages[0], "a") == 0 && strcmp(ev.tail_messages[1], "b") == 0 && strcmp(ev.tail_messages[2], "c") == 0);
+        check("the config's own list is untouched", s_cfg.events.n_tail_messages == 1);
+
+        load_text(BASE M "[schedule]\nx = wed 00:00-23:59 tail_messages+=b\ny = 2nd-wed 00:00-23:59 tail_messages+=c\n");
+        t.tm_year = 2026 - 1900; t.tm_mon = 10; t.tm_mday = 11;
+        schedule_evaluate(&s_cfg, &t, &ev, active);
+        check("your Wednesday case: the 2nd Wednesday gets both", ev.n_tail_messages == 2);
+        t.tm_mday = 4;
+        schedule_evaluate(&s_cfg, &t, &ev, active);
+        check("any other Wednesday gets the weekly one", ev.n_tail_messages == 1 && strcmp(ev.tail_messages[0], "b") == 0);
+
+        load_text(BASE M "[events]\ntail_messages = a\n[schedule]\nx = wed 00:00-23:59 tail_messages+=a\n");
+        schedule_evaluate(&s_cfg, &t, &ev, active);
+        check("+= doesn't add a name already there", ev.n_tail_messages == 1);
+
+        load_text(BASE M "[events]\ntail_messages = a,b,c\n[schedule]\nx = wed 00:00-23:59 tail_messages-=b\n");
+        schedule_evaluate(&s_cfg, &t, &ev, active);
+        check("-= removes a name and keeps the order",
+              ev.n_tail_messages == 2 && strcmp(ev.tail_messages[0], "a") == 0 && strcmp(ev.tail_messages[1], "c") == 0);
+
+        load_text(BASE M "[events]\ntail_messages = a,b\n[schedule]\nx = wed 00:00-23:59 tail_messages-=c\n");
+        schedule_evaluate(&s_cfg, &t, &ev, active);
+        check("-= of a name not in the list changes nothing", ev.n_tail_messages == 2);
+
+        load_text(BASE M "[events]\ntail_messages = a,b\n[schedule]\nx = wed 00:00-23:59 tail_messages-=a,b\n");
+        schedule_evaluate(&s_cfg, &t, &ev, active);
+        check("-= can empty an ordinary list", ev.n_tail_messages == 0);
+
+        load_text(BASE M "[events]\nmandatory_ids = a,b\n[schedule]\nx = wed 00:00-23:59 mandatory_ids-=a\n");
+        schedule_evaluate(&s_cfg, &t, &ev, active);
+        check("-= takes one ID out of the rotation",
+              ev.n_mandatory_ids == 1 && strcmp(ev.mandatory_ids[0], "b") == 0);
+
+        load_text(BASE M "[events]\nmandatory_ids = a,b\n[schedule]\nx = wed 00:00-23:59 mandatory_ids-=a,b\n");
+        schedule_evaluate(&s_cfg, &t, &ev, active);
+        check("-= can't remove the last mandatory ID",
+              ev.n_mandatory_ids == 1 && strcmp(ev.mandatory_ids[0], "b") == 0);
+
+        load_text(BASE M "[events]\ntail_messages = a,b,c,d,e,f,g,h\n[schedule]\nx = wed 00:00-23:59 tail_messages+=i\n");
+        schedule_evaluate(&s_cfg, &t, &ev, active);
+        check("+= stops at the list's limit", ev.n_tail_messages == 8 && strcmp(ev.tail_messages[7], "h") == 0);
+
+        load_text(BASE M "[events]\ntail_messages = a\n[schedule]\nx = wed 00:00-23:59 tail_messages+=b\ny = wed 00:00-23:59 tail_messages=c\n");
+        schedule_evaluate(&s_cfg, &t, &ev, active);
+        check("a later = replaces what += built", ev.n_tail_messages == 1 && strcmp(ev.tail_messages[0], "c") == 0);
+
+        t.tm_wday = 4;
+        load_text(BASE M "[events]\ntail_messages = a\n[schedule]\nx = wed 00:00-23:59 tail_messages+=b\n");
+        schedule_evaluate(&s_cfg, &t, &ev, active);
+        check("a closed window changes nothing", ev.n_tail_messages == 1);
+        #undef M
     }
 
     /* Rules against a real calendar. timegm and gmtime_r supply the dates, so this

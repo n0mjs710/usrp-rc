@@ -308,6 +308,11 @@ leave it empty to play nothing.
 If nothing has been transmitted since the last ID, no new ID plays until someone uses the
 repeater again.
 
+**ID safety net:** the station has to identify, so if `mandatory_ids` is ever empty when the
+timer runs out, `impolite_id` plays in its place, and the repeater keys up to send it if
+needed. This protects you from a config mistake. It isn't a way to set up IDs, so keep
+`mandatory_ids` filled in. `--check` warns if it's empty.
+
 If someone keys up during a voice ID, the ID stops and the impolite ID plays instead. A
 CW ID carries on underneath.
 
@@ -391,8 +396,8 @@ The name is yours to choose and appears in the log.
 | Days | See below. Combine with commas and no spaces: `mon,wed,fri` or `1st-tue,3rd-tue`. |
 | Times | 24-hour, on the system clock and timezone. A window includes its start minute but not its end minute. |
 | Past midnight | A window that ends before it starts runs overnight and belongs to the day it started: `fri 22:00-02:00` is still open at 01:00 on Saturday. |
-| Settings | Any `[events]` setting except `startup_message`. An empty value turns it off: `tail_messages=`. Lists take commas and no spaces: `mandatory_ids=id1,id2`. |
-| Overlaps | The later line in the file wins. |
+| Settings | Any `[events]` setting except `startup_message`. An empty value turns it off: `tail_messages=`. Lists take commas and no spaces: `mandatory_ids=id1,id2`. Lists can also use `+=` and `-=`, described below. |
+| Overlaps | Settings apply in file order, so the later line wins. |
 | Limits | 32 windows, with up to 8 settings each. A single window can't run longer than 24 hours. |
 
 **Days can be set by the week or by the calendar:**
@@ -416,6 +421,57 @@ meeting needs updating each year.
 
 Windows take effect at the top of each minute. A restart in the middle of a window picks
 it straight back up, because the schedule works from the clock and saves nothing.
+
+**Changing a list:** `initial_ids`, `mandatory_ids` and `tail_messages` can be changed three
+ways. Each open window applies in file order, starting from the list in `[events]`.
+
+| You write | It does |
+| --- | --- |
+| `tail_messages=a,b` | Replaces the list |
+| `tail_messages+=a` | Adds to the list, unless the name is already there |
+| `tail_messages-=a` | Removes from the list, if the name is there |
+
+Use `+=` and `-=` where windows can overlap, so they don't cancel each other out:
+
+```ini
+[messages]
+net_tonight  = voice: NET TONIGHT AT SEVEN THIRTY
+club_meeting = voice: CLUB MEETING TONIGHT
+ident_cw     = cw: {call}/R
+ident_voice  = voice: THISIS {call} REPEATER
+
+[events]
+mandatory_ids = ident_cw,ident_voice
+
+[schedule]
+weekly   = wed 07:00-19:25 tail_messages+=net_tonight
+meeting  = 2nd-wed 07:00-19:25 tail_messages+=club_meeting
+voice_id = weekends 00:00-23:59 mandatory_ids-=ident_cw
+```
+
+On the 2nd Wednesday, the tail messages rotate through both. On other Wednesdays, only
+`net_tonight` plays. Lists can hold up to 8 names, and `--check` warns if `+=` could go past
+that, since any extras are left out.
+
+**`-=` can't remove your last mandatory ID.** If it would, one ID stays in the rotation, and
+`--check` warns you. Setting `mandatory_ids=` empty leaves only the
+[ID safety net](#ids), and `--check` warns about that too. With `impolite_id` empty as well,
+no ID goes out, and the log says `NO ID SENT`.
+
+**Line order matters with `=`.** A general line after a specific one overrides it. In this
+order, `weekly` replaces `meeting` every time, so `meeting` never takes effect:
+
+```ini
+[messages]
+meeting_ct = cw: M
+weekly_ct  = cw: W
+
+[schedule]
+meeting = 2nd-wed 19:00-21:00 ct_link_on_message=meeting_ct
+weekly  = wed 19:00-21:00 ct_link_on_message=weekly_ct
+```
+
+Put the most specific line last.
 
 **The clock is yours to keep right.** `usrp-rc` trusts the system clock and timezone.
 

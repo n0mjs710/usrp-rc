@@ -81,6 +81,13 @@ default_cw    = cw: {call}/R
 # ends before it starts runs past midnight. If windows overlap, the later line wins. A
 # list like mandatory_ids takes no spaces here. An empty value turns a setting off.
 #
+# On a list, = replaces it, += adds to it and -= removes from it, working from [events]
+# down the file. Use += and -= where windows can overlap, so they don't cancel each other:
+#
+#     weekly  = wed 07:00-19:25 tail_messages+=net_tonight
+#     meeting = 2nd-wed 07:00-19:25 tail_messages+=club_meeting
+#     no_cw   = sat,sun 00:00-23:59 mandatory_ids-=default_cw
+#
 #net_reminder = wed 07:00-19:25 tail_messages=net_tonight
 #net_running  = wed 19:30-20:30 ct_link_on_message=net_ct ct_link_off_message=net_ct
 

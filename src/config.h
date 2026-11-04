@@ -182,10 +182,13 @@ typedef struct {
 
 /* One setting changed for the length of a schedule window. Offsets are into
  * config_events_t, so applying one needs nothing else from the config. */
+typedef enum { OVERRIDE_SET, OVERRIDE_ADD, OVERRIDE_REMOVE } override_op_t;
+
 typedef struct {
     size_t offset;
     size_t size;
     size_t count_offset;   /* for a list of names; 0 = a single name */
+    override_op_t op;      /* add and remove only apply to a list */
     char   value[CFG_STR];
 } config_override_t;
 

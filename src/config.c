@@ -1176,6 +1176,11 @@ static void read_override(char *tok, const char *path, const config_t *cfg, conf
         return;
     }
     *eq = '\0';
+    override_op_t op = OVERRIDE_SET;
+    if (eq > tok && (eq[-1] == '+' || eq[-1] == '-')) {
+        op = eq[-1] == '+' ? OVERRIDE_ADD : OVERRIDE_REMOVE;
+        eq[-1] = '\0';
+    }
     if (strcmp(tok, "tail_message") == 0) {
         cfg_err("%s: tail_message is renamed to tail_messages, a comma-separated list\n", path);
         return;
@@ -1190,6 +1195,14 @@ static void read_override(char *tok, const char *path, const config_t *cfg, conf
         cfg_err("%s: '%s' can't be scheduled (only [events] settings can, except startup_message)\n", path, key);
         return;
     }
+    if (op != OVERRIDE_SET && f->type != FT_NAME_LIST) {
+        cfg_err("%s: %s takes one message, so it can't use += or -=\n", path, key);
+        return;
+    }
+    if (op != OVERRIDE_SET && !value[0]) {
+        cfg_err("%s: %s%s= needs at least one message\n", path, key, op == OVERRIDE_ADD ? "+" : "-");
+        return;
+    }
     if (out->nsets == CFG_MAX_SCHEDULE_SETS) {
         cfg_err("%s: more than %d settings\n", path, CFG_MAX_SCHEDULE_SETS);
         return;
@@ -1201,6 +1214,7 @@ static void read_override(char *tok, const char *path, const config_t *cfg, conf
         return;
     }
     strcpy(o->value, value);
+    o->op     = op;
     o->offset = f->offset - offsetof(config_t, events);
     o->size   = f->size;
     o->count_offset = f->type == FT_NAME_LIST ? f->count_offset - offsetof(config_t, events) : 0;
@@ -1306,6 +1320,66 @@ static void check_event(const entries_t *es, const config_t *cfg, const char *ke
 #define CHECK_ONE(key, member) \
     check_event(es, cfg, key, (const char (*)[CFG_NAME_STR])ev->member, 1)
 
+static int count_names(const char *value)
+{
+    int count = 0;
+    char copy[CFG_STR];
+    snprintf(copy, sizeof(copy), "%s", value);
+    char *save = NULL;
+    for (char *n = strtok_r(copy, ",", &save); n; n = strtok_r(NULL, ",", &save))
+        count++;
+    return count;
+}
+
+/* Which windows overlap depends on the clock, so these are warnings about what could
+ * happen. At run time, a list simply stops growing at its limit, and the last
+ * mandatory ID stays. */
+static void check_schedule_lists(const config_t *cfg)
+{
+    const config_events_t *ev = &cfg->events;
+    static const struct { const char *key; size_t offset; size_t count_offset; } LISTS[] = {
+        {"initial_ids",   offsetof(config_events_t, initial_ids),   offsetof(config_events_t, n_initial_ids)},
+        {"mandatory_ids", offsetof(config_events_t, mandatory_ids), offsetof(config_events_t, n_mandatory_ids)},
+        {"tail_messages", offsetof(config_events_t, tail_messages), offsetof(config_events_t, n_tail_messages)},
+    };
+    for (size_t l = 0; l < sizeof(LISTS) / sizeof(LISTS[0]); l++) {
+        int most = *(const int *)((const char *)ev + LISTS[l].count_offset);
+        for (int i = 0; i < cfg->nschedule; i++)
+            for (int j = 0; j < cfg->schedule[i].nsets; j++) {
+                const config_override_t *o = &cfg->schedule[i].sets[j];
+                if (o->offset == LISTS[l].offset && o->op == OVERRIDE_ADD)
+                    most += count_names(o->value);
+            }
+        if (most > CFG_MAX_ID_ROTATION)
+            LOGW("config: schedule: += could put more than %d names in %s; any past that are left out\n",
+                 CFG_MAX_ID_ROTATION, LISTS[l].key);
+    }
+
+    for (int i = 0; i < cfg->nschedule; i++)
+        for (int j = 0; j < cfg->schedule[i].nsets; j++) {
+            const config_override_t *o = &cfg->schedule[i].sets[j];
+            if (o->offset != offsetof(config_events_t, mandatory_ids))
+                continue;
+            if (o->op == OVERRIDE_SET && !o->value[0])
+                LOGW("config: schedule.%s: mandatory_ids= leaves no mandatory ID during this window; IDs fall back to impolite_id\n",
+                     cfg->schedule[i].name);
+            if (o->op != OVERRIDE_REMOVE)
+                continue;
+            int kept = 0;
+            for (int n = 0; n < ev->n_mandatory_ids; n++) {
+                char list[CFG_STR + 2];
+                char want[CFG_NAME_STR + 2];
+                snprintf(list, sizeof(list), ",%s,", o->value);
+                snprintf(want, sizeof(want), ",%s,", ev->mandatory_ids[n]);
+                if (!strstr(list, want))
+                    kept++;
+            }
+            if (ev->n_mandatory_ids > 0 && kept == 0)
+                LOGW("config: schedule.%s: mandatory_ids-= would remove every ID; the last one stays\n",
+                     cfg->schedule[i].name);
+        }
+}
+
 static void validate(const entries_t *es, const config_t *cfg)
 {
     const config_events_t *ev = &cfg->events;
@@ -1358,6 +1432,8 @@ static void validate(const entries_t *es, const config_t *cfg)
         cfg_err("timers.id_anxious (%g) must be less than timers.id_interval (%g)\n",
                 cfg->timers.id_anxious, cfg->timers.id_interval);
 
+    check_schedule_lists(cfg);
+
     bool tail_used = ev->n_tail_messages > 0;
     for (int i = 0; i < cfg->nschedule && !tail_used; i++)
         for (int j = 0; j < cfg->schedule[i].nsets; j++)
@@ -1369,7 +1445,9 @@ static void validate(const entries_t *es, const config_t *cfg)
     /* Not errors: a site may legitimately ID some other way. Misspelling the
      * key can't land here -- that's already an unknown-setting error. */
     if (ev->n_mandatory_ids == 0)
-        LOGW("config: events.mandatory_ids is empty -- this controller will not transmit an ID\n");
+        LOGW(ev->impolite_id[0]
+             ? "config: events.mandatory_ids is empty -- IDs will use events.impolite_id\n"
+             : "config: events.mandatory_ids and events.impolite_id are empty -- this controller will not transmit an ID\n");
     if (cfg->timers.id_interval > 600.0)
         LOGW("config: timers.id_interval is %g s, longer than the FCC 10-minute limit\n",
              cfg->timers.id_interval);

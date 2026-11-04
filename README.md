@@ -329,6 +329,8 @@ write. A restart in the middle of a window picks it straight back up.
 - If windows overlap, the later line wins.
 - Lists like `mandatory_ids` take no spaces here (`mandatory_ids=id1,id2`), and
   an empty value turns a setting off (`tail_messages=`).
+- On a list, `=` replaces it, `+=` adds to it and `-=` removes from it, working from
+  `[events]` down the file. `-=` can't remove the last mandatory ID.
 
 Changes take effect at the top of each minute, and `log.level = info` logs each window
 starting and ending.

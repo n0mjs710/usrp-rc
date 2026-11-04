@@ -71,6 +71,14 @@ bool schedule_entry_active(const config_schedule_t *entry, const struct tm *when
         || (now < entry->end_min && day_matches(entry, day_before(today)));
 }
 
+static int name_position(char (*names)[CFG_NAME_STR], int count, const char *name)
+{
+    for (int i = 0; i < count; i++)
+        if (strcmp(names[i], name) == 0)
+            return i;
+    return -1;
+}
+
 static void apply(config_events_t *ev, const config_override_t *o)
 {
     char *dst = (char *)ev + o->offset;
@@ -81,13 +89,28 @@ static void apply(config_events_t *ev, const config_override_t *o)
     }
 
     char (*names)[CFG_NAME_STR] = (char (*)[CFG_NAME_STR])dst;
-    int max = (int)(o->size / CFG_NAME_STR), count = 0;
+    int *count = (int *)((char *)ev + o->count_offset);
+    int max = (int)(o->size / CFG_NAME_STR);
+    /* The ID is a legal requirement: a window can't remove the last one by accident. */
+    int min = dst == (char *)ev->mandatory_ids ? 1 : 0;
+
+    if (o->op == OVERRIDE_SET)
+        *count = 0;
+
     char copy[sizeof(o->value)];
     strcpy(copy, o->value);
     char *save = NULL;
-    for (char *n = strtok_r(copy, ",", &save); n && count < max; n = strtok_r(NULL, ",", &save))
-        snprintf(names[count++], CFG_NAME_STR, "%s", n);
-    *(int *)((char *)ev + o->count_offset) = count;
+    for (char *n = strtok_r(copy, ",", &save); n; n = strtok_r(NULL, ",", &save)) {
+        int at = name_position(names, *count, n);
+        if (o->op == OVERRIDE_REMOVE) {
+            if (at >= 0 && *count > min) {
+                memmove(names[at], names[at + 1], (size_t)(*count - at - 1) * CFG_NAME_STR);
+                (*count)--;
+            }
+        } else if (*count < max && (o->op == OVERRIDE_SET || at < 0)) {
+            snprintf(names[(*count)++], CFG_NAME_STR, "%s", n);
+        }
+    }
 }
 
 void schedule_evaluate(const config_t *cfg, const struct tm *when,
