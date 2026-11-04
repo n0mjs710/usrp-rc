@@ -223,6 +223,15 @@ lists the clips that come with `usrp-rc`.
 `/usr/local/share/usrp-rc/user_8k/`. The filename without `.wav` is the clip name. A clip
 there replaces a stock clip with the same name.
 
+`usrp-rc` applies no further equalization to your recordings; it only scales them by
+`audio.voice_level` and `audio.master_gain`.
+
+Don't normalize clips to full scale. A recording peaking near 0 dBFS will be noticeably
+hotter than repeat audio, which sits well below full scale. MMDVM-Host's pre-emphasis also
+boosts high frequencies on the way to the transmitter, and a full-scale recording leaves
+no room for that. Leave generous headroom, start around -10 dBFS, and adjust by ear or on
+a deviation meter.
+
 ### CW
 
 The text to send, where spaces are real Morse word gaps. `{call}` sends your callsign,
