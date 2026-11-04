@@ -319,7 +319,9 @@ except `startup_message` can be changed. While the window is open its settings a
 in force; when it closes they go back by themselves, so there is no second entry to
 write. A restart in the middle of a window picks it straight back up.
 
-- `DAYS` is `sun` to `sat`, `daily`, `weekdays` or `weekends`, comma-separated.
+- `DAYS` is `sun` to `sat`, `daily`, `weekdays` or `weekends`, or by the calendar: `2nd-tue`
+  (`1st` to `5th`), `15th`, `last-day` or `dec-8`, which repeats every year. Comma-separated.
+  A day that doesn't occur in a given month just doesn't match.
 - Times are 24-hour, from the system clock and timezone. The window includes its
   start minute but not its end minute.
 - A window that ends before it starts runs past midnight, and belongs to the day it

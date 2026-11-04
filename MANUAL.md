@@ -388,12 +388,31 @@ The name is yours to choose and appears in the log.
 
 | Part | Rule |
 | --- | --- |
-| Days | `sun` to `sat`, `daily`, `weekdays` or `weekends`. Combine with commas and no spaces: `mon,wed,fri`. |
+| Days | See below. Combine with commas and no spaces: `mon,wed,fri` or `1st-tue,3rd-tue`. |
 | Times | 24-hour, on the system clock and timezone. A window includes its start minute but not its end minute. |
 | Past midnight | A window that ends before it starts runs overnight and belongs to the day it started: `fri 22:00-02:00` is still open at 01:00 on Saturday. |
 | Settings | Any `[events]` setting except `startup_message`. An empty value turns it off: `tail_messages=`. Lists take commas and no spaces: `mandatory_ids=id1,id2`. |
 | Overlaps | The later line in the file wins. |
 | Limits | 32 windows, with up to 8 settings each. A single window can't run longer than 24 hours. |
+
+**Days can be set by the week or by the calendar:**
+
+| You write | It matches |
+| --- | --- |
+| `sun` to `sat` | That day every week |
+| `daily`, `weekdays`, `weekends` | Those days every week |
+| `2nd-tue` | The 2nd Tuesday of each month. `1st` to `5th` work with any day. |
+| `15th` | The 15th of each month |
+| `last-day` | The last day of each month, whatever its length |
+| `dec-8` | December 8 every year |
+
+A day that doesn't occur in a given month just doesn't match, so `5th-tue` skips months
+with four Tuesdays, and `31st` skips shorter months. `feb-29` plays in leap years. Up to 8
+calendar days can go in one window. `--check` rejects days that can't exist, like `6th-tue`
+or `feb-30`.
+
+A date repeats every year on whatever day of the week it lands on, so `dec-8` for a Tuesday
+meeting needs updating each year.
 
 Windows take effect at the top of each minute. A restart in the middle of a window picks
 it straight back up, because the schedule works from the clock and saves nothing.
@@ -410,7 +429,8 @@ schedule: 'net_reminder' ended
 ```
 
 **Not yet possible:** `[timers]` and `[link]` settings can't be scheduled, so a window
-can't turn the link on or off. A change also can't stay in place with no end time.
+can't turn the link on or off. A change also can't stay in place with no end time. There's also no "last Friday" or
+one-time date.
 
 ## The link
 

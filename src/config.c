@@ -1048,30 +1048,109 @@ static void load_tone_catalog(config_t *cfg)
 
 /* ── schedule ───────────────────────────────────────────────────────────── */
 
-static bool parse_days(const char *text, unsigned *days)
+static const char *ordinal_suffix(int n)
 {
-    static const char *const NAMES[] = {"sun", "mon", "tue", "wed", "thu", "fri", "sat"};
-    char copy[64];
-    snprintf(copy, sizeof(copy), "%s", text);
-    *days = 0;
-    char *save = NULL;
-    for (char *tok = strtok_r(copy, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
-        if (strcasecmp(tok, "daily") == 0) {
-            *days |= 0x7Fu;
-        } else if (strcasecmp(tok, "weekdays") == 0) {
-            *days |= 0x3Eu;
-        } else if (strcasecmp(tok, "weekends") == 0) {
-            *days |= 0x41u;
-        } else {
-            int i = 0;
-            while (i < 7 && strcasecmp(tok, NAMES[i]) != 0)
-                i++;
-            if (i == 7)
-                return false;
-            *days |= 1u << i;
+    if (n >= 11 && n <= 13)
+        return "th";
+    switch (n % 10) {
+    case 1:  return "st";
+    case 2:  return "nd";
+    case 3:  return "rd";
+    default: return "th";
+    }
+}
+
+/* "15th", with the suffix that number really takes. Returns the number and sets
+ * *rest to what follows it, or returns 0. */
+static int parse_ordinal(const char *tok, const char **rest)
+{
+    int n = 0, i = 0;
+    while (tok[i] >= '0' && tok[i] <= '9' && i < 3)
+        n = n * 10 + (tok[i++] - '0');
+    if (i == 0 || tok[0] == '0' || strncasecmp(tok + i, ordinal_suffix(n), 2) != 0)
+        return 0;
+    *rest = tok + i + 2;
+    return n;
+}
+
+static int name_index(const char *const *names, int n, const char *text)
+{
+    for (int i = 0; i < n; i++)
+        if (strcasecmp(text, names[i]) == 0)
+            return i;
+    return -1;
+}
+
+static bool parse_day_rule(const char *tok, config_day_rule_t *rule)
+{
+    static const char *const WEEKDAYS[] = {"sun", "mon", "tue", "wed", "thu", "fri", "sat"};
+    static const char *const MONTHS[] = {"jan", "feb", "mar", "apr", "may", "jun",
+                                         "jul", "aug", "sep", "oct", "nov", "dec"};
+    /* February allows the 29th, which matches in leap years. */
+    static const int MONTH_DAYS[] = {31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+
+    if (strcasecmp(tok, "last-day") == 0) {
+        rule->type = DAY_RULE_LAST_DAY;
+        return true;
+    }
+
+    const char *rest;
+    int n = parse_ordinal(tok, &rest);
+    if (n > 0) {
+        if (!rest[0] && n <= 31) {
+            *rule = (config_day_rule_t){DAY_RULE_MONTH_DAY, n, 0};
+            return true;
+        }
+        int wday = rest[0] == '-' ? name_index(WEEKDAYS, 7, rest + 1) : -1;
+        if (wday >= 0 && n <= 5) {
+            *rule = (config_day_rule_t){DAY_RULE_NTH_WEEKDAY, n, wday};
+            return true;
+        }
+        return false;
+    }
+
+    const char *dash = strchr(tok, '-');
+    if (dash && dash - tok == 3) {
+        char month[4];
+        memcpy(month, tok, 3);
+        month[3] = '\0';
+        int mon = name_index(MONTHS, 12, month);
+        char *end;
+        long day = strtol(dash + 1, &end, 10);
+        if (mon >= 0 && dash[1] >= '1' && dash[1] <= '9' && !*end && day <= MONTH_DAYS[mon]) {
+            *rule = (config_day_rule_t){DAY_RULE_DATE, mon, (int)day};
+            return true;
         }
     }
-    return *days != 0;
+    return false;
+}
+
+static bool parse_days(const char *text, config_schedule_t *out)
+{
+    static const char *const NAMES[] = {"sun", "mon", "tue", "wed", "thu", "fri", "sat"};
+    char copy[CFG_STR];
+    if (snprintf(copy, sizeof(copy), "%s", text) >= (int)sizeof(copy))
+        return false;
+    out->days = 0;
+    out->nrules = 0;
+    char *save = NULL;
+    for (char *tok = strtok_r(copy, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
+        int wday = name_index(NAMES, 7, tok);
+        if (strcasecmp(tok, "daily") == 0) {
+            out->days |= 0x7Fu;
+        } else if (strcasecmp(tok, "weekdays") == 0) {
+            out->days |= 0x3Eu;
+        } else if (strcasecmp(tok, "weekends") == 0) {
+            out->days |= 0x41u;
+        } else if (wday >= 0) {
+            out->days |= 1u << wday;
+        } else {
+            if (out->nrules == CFG_MAX_DAY_RULES || !parse_day_rule(tok, &out->rules[out->nrules]))
+                return false;
+            out->nrules++;
+        }
+    }
+    return out->days != 0 || out->nrules > 0;
 }
 
 /* HH:MM-HH:MM, on a 24-hour clock. */
@@ -1174,8 +1253,9 @@ static void read_schedule(const entries_t *es, config_t *cfg)
             free(copy);
             continue;
         }
-        if (!parse_days(days, &out->days))
-            cfg_err("%s: '%s' is not valid days (use sun..sat, daily, weekdays or weekends, comma-separated)\n", path, days);
+        if (!parse_days(days, out))
+            cfg_err("%s: '%s' is not valid days (use sun..sat, daily, weekdays, weekends, 2nd-tue, 15th, last-day or dec-8, comma-separated; at most %d of the last four kinds)\n",
+                    path, days, CFG_MAX_DAY_RULES);
         if (!parse_window(window, &out->start_min, &out->end_min))
             cfg_err("%s: '%s' is not a valid time window (expected HH:MM-HH:MM, 24-hour)\n", path, window);
         else if (out->start_min == out->end_min)

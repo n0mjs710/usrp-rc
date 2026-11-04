@@ -178,6 +178,7 @@ typedef struct {
 
 #define CFG_MAX_SCHEDULE      32
 #define CFG_MAX_SCHEDULE_SETS 8
+#define CFG_MAX_DAY_RULES     8
 
 /* One setting changed for the length of a schedule window. Offsets are into
  * config_events_t, so applying one needs nothing else from the config. */
@@ -188,9 +189,25 @@ typedef struct {
     char   value[CFG_STR];
 } config_override_t;
 
+/* A day that isn't simply a day of the week. A rule that a given month or year has
+ * no match for, like a 5th Tuesday, just doesn't match. */
+typedef enum {
+    DAY_RULE_NTH_WEEKDAY,   /* "2nd-tue": a = 1-5, b = tm_wday */
+    DAY_RULE_MONTH_DAY,     /* "15th": a = day of the month */
+    DAY_RULE_LAST_DAY,      /* "last-day" */
+    DAY_RULE_DATE,          /* "dec-8": a = tm_mon, b = day of the month; every year */
+} day_rule_type_t;
+
+typedef struct {
+    day_rule_type_t type;
+    int             a, b;
+} config_day_rule_t;
+
 typedef struct {
     char              name[CFG_NAME_STR];
     unsigned          days;        /* bit 0 = Sunday, as struct tm's tm_wday */
+    config_day_rule_t rules[CFG_MAX_DAY_RULES];
+    int               nrules;
     int               start_min;   /* minutes past midnight */
     int               end_min;     /* exclusive; below start_min = runs past midnight */
     config_override_t sets[CFG_MAX_SCHEDULE_SETS];

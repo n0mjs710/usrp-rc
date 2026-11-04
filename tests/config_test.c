@@ -96,6 +96,19 @@ static const test_case_t CASES[] = {
     {"schedule entry",      BASE "[messages]\nm = cw: NET\n[schedule]\nnet = wed 07:00-19:25 tail_messages=m\n", NULL},
     {"schedule day lists",  BASE "[messages]\nm = cw: NET\n[schedule]\na = mon,wed,fri 07:00-08:00 tail_messages=m\nb = weekends 07:00-08:00 tail_messages=m\nc = DAILY 07:00-08:00 tail_messages=\n", NULL},
     {"schedule overnight",  BASE "[messages]\nm = cw: NET\n[schedule]\na = fri 22:00-02:00 ct_link_on_message=m\n", NULL},
+    {"schedule date rules", BASE "[messages]\nm = cw: A\n[schedule]\na = 2nd-tue,5th-sun,15th,31st,last-day,dec-8,feb-29,JUL-4 19:00-21:00 tail_messages=m\nb = mon,1st-fri 19:00-21:00 tail_messages=m\n", NULL},
+    {"schedule 6th weekday", BASE "[messages]\nm = cw: A\n[schedule]\na = 6th-tue 19:00-21:00 tail_messages=m\n", "'6th-tue' is not valid days"},
+    {"schedule 32nd", BASE "[messages]\nm = cw: A\n[schedule]\na = 32nd 19:00-21:00 tail_messages=m\n", "'32nd' is not valid days"},
+    {"schedule wrong suffix", BASE "[messages]\nm = cw: A\n[schedule]\na = 2th-tue 19:00-21:00 tail_messages=m\n", "'2th-tue' is not valid days"},
+    {"schedule 11st", BASE "[messages]\nm = cw: A\n[schedule]\na = 11st 19:00-21:00 tail_messages=m\n", "'11st' is not valid days"},
+    {"schedule 0th", BASE "[messages]\nm = cw: A\n[schedule]\na = 0th 19:00-21:00 tail_messages=m\n", "'0th' is not valid days"},
+    {"schedule bare number", BASE "[messages]\nm = cw: A\n[schedule]\na = 15 19:00-21:00 tail_messages=m\n", "'15' is not valid days"},
+    {"schedule feb-30", BASE "[messages]\nm = cw: A\n[schedule]\na = feb-30 19:00-21:00 tail_messages=m\n", "'feb-30' is not valid days"},
+    {"schedule apr-31", BASE "[messages]\nm = cw: A\n[schedule]\na = apr-31 19:00-21:00 tail_messages=m\n", "'apr-31' is not valid days"},
+    {"schedule dec-0", BASE "[messages]\nm = cw: A\n[schedule]\na = dec-0 19:00-21:00 tail_messages=m\n", "'dec-0' is not valid days"},
+    {"schedule dec-8x", BASE "[messages]\nm = cw: A\n[schedule]\na = dec-8x 19:00-21:00 tail_messages=m\n", "'dec-8x' is not valid days"},
+    {"schedule last-fri", BASE "[messages]\nm = cw: A\n[schedule]\na = last-fri 19:00-21:00 tail_messages=m\n", "'last-fri' is not valid days"},
+    {"schedule too many rules", BASE "[messages]\nm = cw: A\n[schedule]\na = 1st,2nd,3rd,4th,5th,6th,7th,8th,9th 19:00-21:00 tail_messages=m\n", "'1st,2nd,3rd,4th,5th,6th,7th,8th,9th' is not valid days"},
     {"schedule list value", BASE "[messages]\nm = cw: A\nn = cw: B\n[schedule]\na = mon 01:00-02:00 mandatory_ids=m,n\n", NULL},
     {"schedule bad day",    BASE "[schedule]\na = wednsday 07:00-08:00 ct_link_on_message=\n", "schedule.a: 'wednsday' is not valid days"},
     {"schedule bad time",   BASE "[schedule]\na = wed 25:00-26:00 ct_link_on_message=\n", "schedule.a: '25:00-26:00' is not a valid time window"},
@@ -456,6 +469,60 @@ int main(void)
         schedule_evaluate(&s_cfg, &t, &ev, active);
         check("overnight wraps Saturday into Sunday", active[0]);
         (void)MON; (void)TUE;
+    }
+
+    /* Rules against a real calendar. timegm and gmtime_r supply the dates, so this
+     * doesn't share any arithmetic with what it's checking. */
+    {
+        load_text(BASE "[messages]\nm = cw: A\n[schedule]\n"
+                  "nth = 2nd-tue 19:00-21:00 tail_messages=m\n"
+                  "fifth = 5th-tue 19:00-21:00 tail_messages=m\n"
+                  "mid = 15th 19:00-21:00 tail_messages=m\n"
+                  "d31 = 31st 19:00-21:00 tail_messages=m\n"
+                  "last = last-day 19:00-21:00 tail_messages=m\n"
+                  "date = dec-8 19:00-21:00 tail_messages=m\n"
+                  "leap = feb-29 19:00-21:00 tail_messages=m\n"
+                  "late = last-day 22:00-02:00 tail_messages=m\n");
+        enum { NTH, FIFTH, MID, D31, LAST, DATE, LEAP, LATE };
+        int hits[8] = {0}, bad_nth = 0, bad_last = 0, bad_late = 0;
+        config_events_t ev;
+        bool active[CFG_MAX_SCHEDULE];
+        struct tm start = {.tm_year = 2024 - 1900, .tm_mon = 0, .tm_mday = 1};
+        time_t t = timegm(&start);
+        for (; ; t += 86400) {
+            struct tm d, next;
+            gmtime_r(&t, &d);
+            if (d.tm_year == 2029 - 1900)
+                break;
+            time_t tn = t + 86400;
+            gmtime_r(&tn, &next);
+            d.tm_hour = 20;
+            d.tm_min = 0;
+            schedule_evaluate(&s_cfg, &d, &ev, active);
+            for (int i = NTH; i <= LEAP; i++)
+                hits[i] += active[i];
+            if (active[NTH] != (d.tm_wday == 2 && d.tm_mday >= 8 && d.tm_mday <= 14))
+                bad_nth++;
+            if (active[LAST] != (next.tm_mday == 1))
+                bad_last++;
+            /* 01:00 on the 1st belongs to the night before; 01:00 on any other day doesn't. */
+            d.tm_hour = 1;
+            schedule_evaluate(&s_cfg, &d, &ev, active);
+            if (active[LATE] != (d.tm_mday == 1))
+                bad_late++;
+            d.tm_hour = 2;
+            schedule_evaluate(&s_cfg, &d, &ev, active);
+            if (active[LATE])
+                bad_late++;
+        }
+        check("2nd-tue: only those days, 60 in 5 years", bad_nth == 0 && hits[NTH] == 60);
+        check("5th-tue: only in months that have one", hits[FIFTH] == 21);
+        check("15th: every month", hits[MID] == 60);
+        check("31st: 7 months a year", hits[D31] == 35);
+        check("last-day: every month, on the right day", bad_last == 0 && hits[LAST] == 60);
+        check("dec-8: once a year", hits[DATE] == 5);
+        check("feb-29: 2024 and 2028 only", hits[LEAP] == 2);
+        check("last-day overnight carries into the 1st", bad_late == 0);
     }
 
     if (s_fail) {

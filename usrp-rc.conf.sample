@@ -74,7 +74,9 @@ default_cw    = cw: {call}/R
 #
 #     name = DAYS HH:MM-HH:MM setting=value [setting=value ...]
 #
-# DAYS is sun..sat, daily, weekdays or weekends, comma-separated. Times are 24-hour on
+# DAYS is sun..sat, daily, weekdays or weekends, or by the calendar: 2nd-tue (1st to 5th),
+# 15th, last-day or dec-8, which repeats every year. Comma-separated, no spaces. A day that
+# doesn't occur in a given month just doesn't match. Times are 24-hour on
 # the system clock. The window includes its start minute, not its end minute; one that
 # ends before it starts runs past midnight. If windows overlap, the later line wins. A
 # list like mandatory_ids takes no spaces here. An empty value turns a setting off.
