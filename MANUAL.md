@@ -760,7 +760,7 @@ set `timers.ct_delay = 0.64`.
 # Appendix B: Voice clips
 
 These 623 clips come with `usrp-rc`, in `/usr/local/share/usrp-rc/vocab_8k/`. Clip
-names are case-sensitive.
+names aren't case-sensitive: `repeater` and `REPEATER` are the same clip.
 
 - **`F_` clips** are the female voice used by the time variables.
 - **Clips starting with `_`** are word endings, such as `_S` and `_TEEN`. They're treated as
