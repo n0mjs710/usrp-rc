@@ -772,6 +772,7 @@ static voice_var_t voice_var(const char *tok)
     if (strcmp(tok, "{greeting}") == 0) return VOICE_VAR_GREETING;
     if (strcmp(tok, "{day}") == 0)      return VOICE_VAR_DAY;
     if (strcmp(tok, "{date}") == 0)     return VOICE_VAR_DATE;
+    if (strcmp(tok, "{year}") == 0)     return VOICE_VAR_YEAR;
     if (strcmp(tok, "{keyups_day}") == 0)   return VOICE_VAR_KEYUPS_DAY;
     if (strcmp(tok, "{keyups_week}") == 0)  return VOICE_VAR_KEYUPS_WEEK;
     if (strcmp(tok, "{minutes_day}") == 0)  return VOICE_VAR_MINUTES_DAY;

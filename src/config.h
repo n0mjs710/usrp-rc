@@ -36,6 +36,7 @@ typedef enum {
     VOICE_VAR_GREETING,   /* {greeting}: morning, afternoon or evening */
     VOICE_VAR_DAY,        /* {day}: day of the week */
     VOICE_VAR_DATE,       /* {date}: month and day */
+    VOICE_VAR_YEAR,       /* {year}: as a whole number, "two thousand twenty six" */
     VOICE_VAR_KEYUPS_DAY,    /* {keyups_day}: key-ups in the last 24 hours */
     VOICE_VAR_KEYUPS_WEEK,   /* {keyups_week}: ... in the last 7 days */
     VOICE_VAR_MINUTES_DAY,   /* {minutes_day}: minutes of traffic in the last 24 hours */

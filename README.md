@@ -345,7 +345,7 @@ my_mix   = voice: THISIS {call} | tone: 880:100 | cw: {call}/R
 
 - **Variables** are spoken as of when the message plays, each as its own word in a
   `voice:` part: `{time}`, `{ampm}`, `{greeting}` (morning, afternoon or evening),
-  `{day}`, `{date}` (month and day), `{keyups_day}`, `{keyups_week}`, `{minutes_day}`
+  `{day}`, `{date}` (month and day), `{year}`, `{keyups_day}`, `{keyups_week}`, `{minutes_day}`
   and `{minutes_week}`. Time and greeting use the female `F_` clips; the rest use the
   standard ones. `usrp-rc --check` confirms every clip they need exists.
 - **`{call}`** is replaced by the top-level `callsign` setting, which holds only

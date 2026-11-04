@@ -116,6 +116,9 @@ int message_var_clips(voice_var_t var, const struct tm *when, const message_stat
         out[n++] = MONTHS[when->tm_mon];
         n += number_clips(when->tm_mday, out + n);
         break;
+    case VOICE_VAR_YEAR:
+        n = number_clips(when->tm_year + 1900L, out);
+        break;
     case VOICE_VAR_KEYUPS_DAY:
         n = number_clips(stats->keyups_day, out);
         break;
@@ -141,7 +144,7 @@ static int validate_var(const config_message_t *m, voice_var_t var, vocab_cache_
      * word a number can use: past 1,099 they only repeat. */
     for (int i = 0; i < 1100; i++) {
         struct tm when = {.tm_hour = i % 24, .tm_min = i % 60, .tm_wday = i % 7,
-                          .tm_mon = i % 12, .tm_mday = i % 31 + 1};
+                          .tm_mon = i % 12, .tm_mday = i % 31 + 1, .tm_year = i - 1900};
         message_stats_t stats = {i, i, i, i};
         const char *clips[MESSAGE_VAR_MAX_CLIPS];
         int n = message_var_clips(var, &when, &stats, clips);

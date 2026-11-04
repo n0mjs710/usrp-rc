@@ -75,7 +75,7 @@ static const test_case_t CASES[] = {
     {"voice variables",     BASE "[messages]\na = voice: F_THE F_TIME F_IS {time} {ampm} _ {greeting}\n", NULL},
     {"replacing a built-in reply", BASE "[messages]\nlink_on_reply = cw: LINK\n", NULL},
     {"silencing a reply",   BASE "[events]\nlink_off_message =\n", NULL},
-    {"date and usage variables", BASE "[messages]\na = voice: {day} {date} {keyups_day} {keyups_week} {minutes_day} {minutes_week}\n", NULL},
+    {"date and usage variables", BASE "[messages]\na = voice: {day} {date} {year} {keyups_day} {keyups_week} {minutes_day} {minutes_week}\n", NULL},
     {"stats file setting",  BASE "[stats]\nfile = /tmp/x\n", NULL},
     {"stats file off",      BASE "[stats]\nfile =\n", NULL},
     {"variable in cw",      "callsign = W1XYZ\n" BASE "[messages]\na = cw: {time}\n", "only {call} works in cw"},
@@ -389,6 +389,10 @@ int main(void)
         check("{date}", message_var_clips(VOICE_VAR_DATE, &when, &stats, clips) == 3
               && strcmp(clips[0], "NOVEMBER") == 0 && strcmp(clips[1], "TWENTY") == 0
               && strcmp(clips[2], "FOUR") == 0);
+        struct tm year = {.tm_year = 2026 - 1900};
+        check("{year}", message_var_clips(VOICE_VAR_YEAR, &year, &stats, clips) == 4
+              && strcmp(clips[0], "TWO") == 0 && strcmp(clips[1], "THOUSAND") == 0
+              && strcmp(clips[2], "TWENTY") == 0 && strcmp(clips[3], "SIX") == 0);
     }
 
     load_text(BASE "[messages]\na = voice: REPEATER | cw: W1XYZ/R\n");

@@ -51,7 +51,7 @@ timeout_message = timeout_warn
 #
 # {call} works in voice and cw. Voice messages can also use these, each as its own
 # word, spoken as of when the message plays: {time}, {ampm}, {greeting}, {day}, {date},
-# {keyups_day}, {keyups_week}, {minutes_day}, {minutes_week}.
+# {year}, {keyups_day}, {keyups_week}, {minutes_day}, {minutes_week}.
 #
 #     name = voice: THISIS {call} REPEATER     voice clips from vocab_8k/ or user_8k/
 #                                              "_" pauses audio.voice_gap_ms, "_400" pauses 400 ms

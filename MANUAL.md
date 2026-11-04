@@ -264,6 +264,7 @@ These are worked out each time the message plays. Each one has to be its own wor
 | `{greeting}` | "morning" before 12:00, "afternoon" before 18:00, then "evening" |
 | `{day}` | The day of the week |
 | `{date}` | The month and day |
+| `{year}` | The year, as a whole number: "two thousand twenty six" |
 | `{keyups_day}` | Key-ups in the last 24 hours |
 | `{keyups_week}` | Key-ups in the last 7 days |
 | `{minutes_day}` | Minutes of traffic in the last 24 hours |
