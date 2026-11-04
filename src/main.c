@@ -179,7 +179,8 @@ static int make_udp_socket(const char *bind_addr, uint16_t bind_port,
  * marker from a gateway, so "we stopped sending" and "we stalled" are the
  * same event to the modem. This instrumentation stays until the latency
  * work is done. */
-#define MMDVM_VOICE_GAP_WARN_MS   35U   /* nominal cadence is 20ms */
+#define MMDVM_VOICE_GAP_NOTE_MS   35U   /* nominal cadence is 20ms; a missed tick, logged at debug */
+#define MMDVM_VOICE_GAP_WARN_MS   60U   /* firmware's FM_LINK_EXT_GAP_MS underrun tolerance */
 #define MMDVM_VOICE_GAP_DANGER_MS 75U   /* modem's link-mode ext-audio restart threshold */
 
 static void note_mmdvm_voice_pacing(app_t *a, uint64_t now)
@@ -187,14 +188,19 @@ static void note_mmdvm_voice_pacing(app_t *a, uint64_t now)
     uint64_t now_cpu = cpu_time_ms();
     if (a->mmdvm_voice_last_ms != 0) {
         uint64_t gap = now - a->mmdvm_voice_last_ms;
-        if (gap >= MMDVM_VOICE_GAP_WARN_MS) {
+        if (gap >= MMDVM_VOICE_GAP_NOTE_MS) {
             uint64_t cpu_gap = now_cpu - a->mmdvm_voice_last_cpu_ms;
-            if (a->mmdvm_voice_burst_run > 1)
-                LOGW("audio: burst of %d mmdvm-TX frames sent back-to-back just before this gap\n",
-                        a->mmdvm_voice_burst_run);
-            LOGW("audio: %llums gap between mmdvm-TX frames (nominal 20ms), %llums of that was our own CPU time%s\n",
-                    (unsigned long long)gap, (unsigned long long)cpu_gap,
-                    gap >= MMDVM_VOICE_GAP_DANGER_MS ? "  -- at/past the modem's link-mode drop threshold" : "");
+            if (gap < MMDVM_VOICE_GAP_WARN_MS) {
+                LOGD("audio: %llums gap between mmdvm-TX frames (nominal 20ms), %llums of that was our own CPU time\n",
+                        (unsigned long long)gap, (unsigned long long)cpu_gap);
+            } else {
+                if (a->mmdvm_voice_burst_run > 1)
+                    LOGW("audio: burst of %d mmdvm-TX frames sent back-to-back just before this gap\n",
+                            a->mmdvm_voice_burst_run);
+                LOGW("audio: %llums gap between mmdvm-TX frames (nominal 20ms), %llums of that was our own CPU time%s\n",
+                        (unsigned long long)gap, (unsigned long long)cpu_gap,
+                        gap >= MMDVM_VOICE_GAP_DANGER_MS ? "  -- at/past the modem's link-mode drop threshold" : "");
+            }
             a->mmdvm_voice_burst_run = 0;
         } else if (gap <= 2) {
             a->mmdvm_voice_burst_run++;
