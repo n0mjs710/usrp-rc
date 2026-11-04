@@ -4,6 +4,7 @@
 #include "sbuf.h"
 #include "log.h"
 
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,7 +46,7 @@ static void clear_digits(command_session_t *s)
  *   Programming: a stub for now. The config file is the programming interface;
  *                a DTMF unlock would go here if a use for one turns up.
  *   Control op:  no commands yet. They'll sit behind a definable prefix.
- *   User:        the pad test.
+ *   User:        the pad test, time, link on and link off.
  */
 static bool evaluate(command_session_t *s, command_t *out)
 {
@@ -57,7 +58,31 @@ static bool evaluate(command_session_t *s, command_t *out)
         return false;
     }
 
-    const char *prefix = s->cfg->dtmf.pad_test_prefix;
+    const config_dtmf_t *d = &s->cfg->dtmf;
+
+    /* Whole codes win over the pad test's prefix, which matches anything after it. */
+    static const struct { command_type_t type; size_t offset; const char *name; } CODES[] = {
+        {COMMAND_TIME,     offsetof(config_dtmf_t, time_code),     "time"},
+        {COMMAND_LINK_ON,  offsetof(config_dtmf_t, link_on_code),  "link on"},
+        {COMMAND_LINK_OFF, offsetof(config_dtmf_t, link_off_code), "link off"},
+    };
+    for (size_t i = 0; i < sizeof(CODES) / sizeof(CODES[0]); i++) {
+        const char *code = (const char *)d + CODES[i].offset;
+        if (!code[0] || strcmp(s->digits, code) != 0)
+            continue;
+        if (CODES[i].type != COMMAND_TIME && !s->cfg->link.enabled) {
+            LOGI("dtmf: %s ignored -- no link configured\n", CODES[i].name);
+            clear_digits(s);
+            return false;
+        }
+        LOGI("dtmf: %s\n", CODES[i].name);
+        out->type = CODES[i].type;
+        out->digits[0] = '\0';
+        clear_digits(s);
+        return true;
+    }
+
+    const char *prefix = d->pad_test_prefix;
     size_t plen = strlen(prefix);
 
     if (plen && strncmp(s->digits, prefix, plen) == 0 && s->digits[plen]) {

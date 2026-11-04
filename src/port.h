@@ -43,6 +43,9 @@ void port_on_link_keyup(port_t *p, bool active, uint64_t now);
  * Dropped if the port is timed out. */
 void port_queue_reply(port_t *p, int16_t *samples, size_t n);
 
+/* Tell the port whether the link is on, which selects the local courtesy tone. */
+void port_set_link_up(port_t *p, bool up);
+
 /* Timer aggregation for the epoll loop's timeout computation and firing. */
 uint64_t port_next_deadline_ms(const port_t *p);   /* absolute ms; 0 = none armed */
 void     port_check_timers(port_t *p, uint64_t now);

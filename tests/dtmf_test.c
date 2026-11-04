@@ -275,6 +275,37 @@ static void test_commands(void)
     press_all(&r, "7123");
     check("a sequence that matches nothing does nothing", strcmp(end(&r), "") == 0);
 
+    /* The whole-code commands. */
+    {
+        command_t c;
+        press_all(&r, "39");
+        check("time code", command_session_end_of_tx(r.s, &c) && c.type == COMMAND_TIME);
+        press_all(&r, "72");
+        check("link on code", command_session_end_of_tx(r.s, &c) && c.type == COMMAND_LINK_ON);
+        press_all(&r, "73");
+        check("link off code", command_session_end_of_tx(r.s, &c) && c.type == COMMAND_LINK_OFF);
+        press_all(&r, "391");
+        check("a code plus extra digits doesn't match", !command_session_end_of_tx(r.s, &c));
+
+        s_cfg.link.enabled = false;
+        press_all(&r, "73");
+        check("link codes do nothing with no link", !command_session_end_of_tx(r.s, &c));
+        press_all(&r, "39");
+        check("... but time still works", command_session_end_of_tx(r.s, &c) && c.type == COMMAND_TIME);
+        s_cfg.link.enabled = true;
+
+        strcpy(s_cfg.dtmf.time_code, "");
+        press_all(&r, "39");
+        check("an empty code turns its command off", !command_session_end_of_tx(r.s, &c));
+        strcpy(s_cfg.dtmf.time_code, "39");
+
+        strcpy(s_cfg.dtmf.time_code, "51");
+        press_all(&r, "51");
+        check("a whole code wins over the pad test prefix",
+              command_session_end_of_tx(r.s, &c) && c.type == COMMAND_TIME);
+        strcpy(s_cfg.dtmf.time_code, "39");
+    }
+
     press_all(&r, "5999#5123");
     check("# cancels, and a command can follow", strcmp(end(&r), "123") == 0);
     press_all(&r, "5999#");

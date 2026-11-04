@@ -70,6 +70,16 @@ static const test_case_t CASES[] = {
     {"dtmf mute hang vs interdigit", BASE "[dtmf]\nmute_hang_ms = 4000\ninterdigit_ms = 4000\n",
                             "dtmf.mute_hang_ms (4000) must be less than dtmf.interdigit_ms (4000)"},
 
+    {"voice variables",     BASE "[messages]\na = voice: F_THE F_TIME F_IS {time} {ampm} _ {greeting}\n", NULL},
+    {"replacing a built-in reply", BASE "[messages]\nlink_on_reply = cw: LINK\n", NULL},
+    {"silencing a reply",   BASE "[events]\nlink_off_message =\n", NULL},
+    {"variable in cw",      "callsign = W1XYZ\n" BASE "[messages]\na = cw: {time}\n", "only {call} works in cw"},
+    {"variable joined to a word", BASE "[messages]\na = voice: {time}Z\n", "unknown placeholder '{time}Z'"},
+    {"dtmf code uses D",    BASE "[dtmf]\ntime_code = 3D\n", "dtmf.time_code: '3D' can only use"},
+    {"dtmf code used twice", BASE "[dtmf]\nlink_on_code = 39\n", "dtmf.link_on_code: '39' is already used by dtmf.time_code"},
+    {"dtmf codes can be off", BASE "[dtmf]\ntime_code =\nlink_on_code =\nlink_off_code =\n", NULL},
+    {"ct dangling",         BASE "[events]\nct_link_off_message = nope\n", "events.ct_link_off_message: no message named 'nope'"},
+
     {"misspelled mandatory_ids", BASE "[events]\nmandatory_id = honk\n", "events.mandatory_id: unknown setting (did you mean events.mandatory_ids?)"},
     {"mandatory_ids dangling",   BASE "[events]\nmandatory_ids = nope\n", "line 4: events.mandatory_ids: no message named 'nope'"},
     {"too many ids",        BASE "[events]\ninitial_ids = honk honk honk honk honk honk honk honk honk\n", "events.initial_ids: has 9 entries (max 8)"},
@@ -237,13 +247,13 @@ int main(void)
     rc = load_text(BASE);
     const config_elem_t *catalog = element("yellow_jacket", 2);
     check("available without being in the config", rc == 0 && catalog && catalog->freq1 == 660 && catalog->ms == 50);
-    check("all 28 tones loaded", s_cfg.nmessages == 28);
+    check("all 28 tones and 3 built-in replies loaded", s_cfg.nmessages == 31);
     check("loud warning keeps its own level", element("timeout_warn", 0) && element("timeout_warn", 0)->amp == 0.9);
 
     rc = load_text(BASE "[messages]\nyellow_jacket = tone: 100:10\nmine = tone: 200:20\n");
     const config_message_t *over = config_find_message(&s_cfg, "yellow_jacket");
     check("same name replaces the catalog tone", rc == 0 && over && over->nelements == 1 && over->elements[0].freq1 == 100);
-    check("replacing doesn't add a message, a new tone does", s_cfg.nmessages == 29);
+    check("replacing doesn't add a message, a new tone does", s_cfg.nmessages == 32);
 
     printf("[6] shipped configs load\n");
     check("usrp-rc.conf.sample", capture_load("usrp-rc.conf.sample") == 0);
@@ -270,6 +280,53 @@ int main(void)
     check("voice {call} clips exist (N-Z)", message_validate(&s_cfg, vocab) == 0);
     load_text("callsign = 0123456789\n" BASE "[messages]\na = voice: {call}\n");
     check("voice {call} clips exist (digits)", message_validate(&s_cfg, vocab) == 0);
+
+    load_text(BASE);
+    check("the built-in replies' clips and variables all exist", message_validate(&s_cfg, vocab) == 0);
+
+    {
+        static const struct { int h, m; const char *want; } TIMES[] = {
+            {0, 0,   "F_TWELVE F_OCLOCK"},
+            {9, 5,   "F_NINE F_OH F_FIVE"},
+            {9, 15,  "F_NINE F_FIFTEEN"},
+            {11, 10, "F_ELEVEN F_TEN"},
+            {12, 0,  "F_TWELVE F_OCLOCK"},
+            {13, 20, "F_ONE F_TWENTY"},
+            {14, 42, "F_TWO F_FORTY F_TWO"},
+            {23, 59, "F_ELEVEN F_FIFTY F_NINE"},
+        };
+        int good = 1;
+        for (size_t i = 0; i < sizeof(TIMES) / sizeof(TIMES[0]); i++) {
+            struct tm when = {.tm_hour = TIMES[i].h, .tm_min = TIMES[i].m};
+            const char *clips[MESSAGE_VAR_MAX_CLIPS];
+            int n = message_var_clips(VOICE_VAR_TIME, &when, clips);
+            char got[64] = "";
+            for (int c = 0; c < n; c++) {
+                strcat(got, c ? " " : "");
+                strcat(got, clips[c]);
+            }
+            if (strcmp(got, TIMES[i].want) != 0) {
+                printf("  %02d:%02d spoke '%s', wanted '%s'\n", TIMES[i].h, TIMES[i].m, got, TIMES[i].want);
+                good = 0;
+            }
+        }
+        check("{time} speaks the right words", good);
+
+        static const struct { int h; const char *ampm, *greeting; } PARTS[] = {
+            {0, "F_A_M", "F_MORNING"}, {11, "F_A_M", "F_MORNING"}, {12, "F_P_M", "F_AFTERNOON"},
+            {17, "F_P_M", "F_AFTERNOON"}, {18, "F_P_M", "F_EVENING"}, {23, "F_P_M", "F_EVENING"},
+        };
+        good = 1;
+        for (size_t i = 0; i < sizeof(PARTS) / sizeof(PARTS[0]); i++) {
+            struct tm when = {.tm_hour = PARTS[i].h};
+            const char *clips[MESSAGE_VAR_MAX_CLIPS];
+            message_var_clips(VOICE_VAR_AMPM, &when, clips);
+            good &= strcmp(clips[0], PARTS[i].ampm) == 0;
+            message_var_clips(VOICE_VAR_GREETING, &when, clips);
+            good &= strcmp(clips[0], PARTS[i].greeting) == 0;
+        }
+        check("{ampm} and {greeting} change at the right hours", good);
+    }
 
     load_text(BASE "[messages]\na = voice: REPEATER | cw: W1XYZ/R\n");
     check("valid content passes", message_validate(&s_cfg, vocab) == 0);

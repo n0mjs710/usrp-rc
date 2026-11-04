@@ -69,7 +69,8 @@ typedef struct {
     /* No mmdvm-side sequence counter: MMDVM-Host's FM protocol has no
      * sequence field. Only the link (still USRP) needs one. */
     uint32_t link_tx_seq;
-    bool     link_tx_ended;   /* a DTMF command took the link down this transmission */
+    bool     link_tx_ended;   /* nothing more goes to the link this transmission */
+    bool     link_up;         /* off by DTMF command: no audio to or from the link */
 
     uint64_t mmdvm_watchdog_deadline;
     uint64_t link_watchdog_deadline;
@@ -310,9 +311,11 @@ static void pace_tick(app_t *a, uint64_t now)
 
 static void mmdvm_key_edge(app_t *a, uint64_t now)
 {
-    send_link_key(a, true);
-    if (a->link_sock >= 0)
+    a->link_tx_ended = !a->link_up;
+    if (a->link_up) {
+        send_link_key(a, true);
         LOGI("link: KEY -> peer\n");
+    }
     port_on_mmdvm_keyup(a->port, true, now);
 }
 
@@ -335,6 +338,37 @@ static void link_tx_end(app_t *a)
     LOGI("link: UNKEY -> peer\n");
 }
 
+/* Stop listening to the link: the peer is treated as having unkeyed. */
+static void link_rx_end(app_t *a, uint64_t now)
+{
+    if (!a->prev_link_keyup)
+        return;
+    a->prev_link_keyup = false;
+    a->link_watchdog_deadline = 0;
+    jitter_buffer_flush(a->jb);
+    port_on_link_keyup(a->port, false, now);
+}
+
+static void set_link(app_t *a, bool up)
+{
+    if (a->link_up != up)
+        LOGI("link: turned %s by command\n", up ? "on" : "off");
+    a->link_up = up;
+    port_set_link_up(a->port, up);
+    if (!up) {
+        link_rx_end(a, monotonic_ms());
+        link_tx_end(a);
+    }
+}
+
+static void reply_with_message(app_t *a, const char *name)
+{
+    if (!name[0])
+        return;
+    rendered_audio_t r = message_render(&a->cfg, a->vocab, name, -1.0);
+    port_queue_reply(a->port, r.samples, r.n);
+}
+
 static void run_command(app_t *a, const command_t *c)
 {
     switch (c->type) {
@@ -347,6 +381,17 @@ static void run_command(app_t *a, const command_t *c)
         port_queue_reply(a->port, r.samples, r.n);
         break;
     }
+    case COMMAND_TIME:
+        reply_with_message(a, a->cfg.events.time_message);
+        break;
+    case COMMAND_LINK_ON:
+        set_link(a, true);
+        reply_with_message(a, a->cfg.events.link_on_message);
+        break;
+    case COMMAND_LINK_OFF:
+        set_link(a, false);
+        reply_with_message(a, a->cfg.events.link_off_message);
+        break;
     }
 }
 
@@ -354,12 +399,12 @@ static void mmdvm_unkey_edge(app_t *a, uint64_t now)
 {
     ste_reset(a->ste);
     link_tx_end(a);
-    a->link_tx_ended = false;
 
     /* Before the port sees the unkey, so a reply is in place when the tail starts. */
     command_t c;
     if (a->cmd && command_session_end_of_tx(a->cmd, &c))
         run_command(a, &c);
+    a->link_tx_ended = false;
 
     port_on_mmdvm_keyup(a->port, false, now);
 }
@@ -527,6 +572,9 @@ static void handle_link(app_t *a)
         }
         if (usrp_parse(buf, (size_t)n, &pkt) != 0)
             continue;
+
+        if (!a->link_up)
+            continue;   /* keep draining the socket, but don't act on any of it */
 
         uint64_t now = monotonic_ms();
         a->link_watchdog_deadline = now + WATCHDOG_MS;
@@ -707,6 +755,10 @@ int main(int argc, char *argv[])
         return 1;
     }
     port_set_ptt_callback(a->port, on_port_ptt, a);
+
+    a->link_up = a->cfg.link.enabled && a->cfg.link.start_on;
+    /* With no link at all, there's no "link off" for the courtesy tone to show. */
+    port_set_link_up(a->port, a->link_up || !a->cfg.link.enabled);
 
     if (ste_create(&a->ste, a->cfg.audio.ste_delay_ms, a->cfg.audio.lead_trim_ms) != 0) {
         LOGE("usrp-rc: failed to init STE buffer\n");

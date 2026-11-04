@@ -596,6 +596,43 @@ static bool scenario_command_reply(config_t *base, vocab_cache_t *vocab)
     return ok;
 }
 
+static bool scenario_link_state_courtesy_tone(config_t *base, vocab_cache_t *vocab)
+{
+    printf("\n[9] local courtesy tone follows the link state\n");
+    bool ok = true;
+    config_t cfg = *base;
+    cfg.timers.id_interval = 600.0;   /* keep a scheduled ID out of the measurements */
+    port_t *p = fresh_port(&cfg, vocab);
+    prime(p);
+
+    int ms[2];
+    for (int i = 0; i < 2; i++) {
+        port_set_link_up(p, i == 0);
+        key_local(p, true);
+        wait_ms(p, 150);
+        key_local(p, false);
+        ms[i] = 0;
+        for (int t = 0; t < 1000; t += TICK_MS)
+            if (tick(p)) ms[i] += TICK_MS;
+    }
+    CHECK(ms[0] <= 80, "link on plays the normal tone (%d ms)", ms[0]);
+    CHECK(ms[1] >= 180, "link off plays its own tone (%d ms)", ms[1]);
+
+    /* Unset, there's nothing different to play. */
+    cfg.events.ct_link_off_message[0] = 0;
+    key_local(p, true);
+    wait_ms(p, 150);
+    key_local(p, false);
+    int fallback = 0;
+    for (int t = 0; t < 1000; t += TICK_MS)
+        if (tick(p)) fallback += TICK_MS;
+    CHECK(fallback > 0 && fallback <= 80, "with none set, link off falls back to the normal tone (%d ms)", fallback);
+
+    port_destroy(p);
+    printf(ok ? "[9] PASS\n" : "[9] FAIL\n");
+    return ok;
+}
+
 /* ── driver ───────────────────────────────────────────────────────────── */
 
 int main(void)
@@ -625,6 +662,7 @@ int main(void)
         scenario_timeout_recovery,
         scenario_impolite_resets_tx_activity,
         scenario_command_reply,
+        scenario_link_state_courtesy_tone,
     };
     int n = (int)(sizeof(scenarios) / sizeof(scenarios[0]));
 

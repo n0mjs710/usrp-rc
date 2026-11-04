@@ -19,6 +19,9 @@
 
 typedef enum {
     COMMAND_PAD_TEST,   /* read `digits` back to the user */
+    COMMAND_TIME,
+    COMMAND_LINK_ON,
+    COMMAND_LINK_OFF,
 } command_type_t;
 
 typedef struct {

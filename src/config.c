@@ -26,6 +26,7 @@ void config_defaults(config_t *cfg)
     cfg->link.codec         = LINK_CODEC_PCM;
     cfg->link.opus_bitrate  = 8000;
     cfg->link.opus_frame_ms = 60;
+    cfg->link.start_on      = true;
 
     cfg->audio.master_gain          = 1.0;
     cfg->audio.morse_wpm            = 20;
@@ -59,7 +60,16 @@ void config_defaults(config_t *cfg)
     cfg->dtmf.beep_hz       = 440;
     cfg->dtmf.beep_on_ms    = 100;
     cfg->dtmf.beep_off_ms   = 900;
+    /* ACC's own defaults where they exist: pad test 5, time is demo prefix 3 + 9,
+     * link is prefix 7 + 2 (receive/transmit) or 3 (off). */
     strncpy(cfg->dtmf.pad_test_prefix, "5", sizeof(cfg->dtmf.pad_test_prefix) - 1);
+    strncpy(cfg->dtmf.time_code, "39", sizeof(cfg->dtmf.time_code) - 1);
+    strncpy(cfg->dtmf.link_on_code, "72", sizeof(cfg->dtmf.link_on_code) - 1);
+    strncpy(cfg->dtmf.link_off_code, "73", sizeof(cfg->dtmf.link_off_code) - 1);
+
+    strncpy(cfg->events.time_message, "time_readback", sizeof(cfg->events.time_message) - 1);
+    strncpy(cfg->events.link_on_message, "link_on_reply", sizeof(cfg->events.link_on_message) - 1);
+    strncpy(cfg->events.link_off_message, "link_off_reply", sizeof(cfg->events.link_off_message) - 1);
 
     cfg->access_mode = ACCESS_COR;
 
@@ -129,6 +139,7 @@ static const field_t FIELDS[] = {
     CHOICE("link", "codec", FT_ENUM, link.codec, CODEC_CHOICES),
     INT("link",  "opus_bitrate",  link.opus_bitrate, 4000, 64000),
     INT("link",  "opus_frame_ms", link.opus_frame_ms, 20, 60),
+    BOOL("link", "start_on",      link.start_on),
 
     /* Generous on purpose: these catch typos and nonsense, not unusual sites.
      * Tone and sample scaling clamp to full scale, so >1.0 is legal but clips. */
@@ -163,6 +174,9 @@ static const field_t FIELDS[] = {
     INT("dtmf",  "beep_on_ms",    dtmf.beep_on_ms, 0, 10000),
     INT("dtmf",  "beep_off_ms",   dtmf.beep_off_ms, 0, 10000),
     STR("dtmf",  "pad_test_prefix", dtmf.pad_test_prefix),
+    STR("dtmf",  "time_code",     dtmf.time_code),
+    STR("dtmf",  "link_on_code",  dtmf.link_on_code),
+    STR("dtmf",  "link_off_code", dtmf.link_off_code),
 
     STR("events", "startup_message",        events.startup_message),
     NAMES("initial_ids",   events.initial_ids,   events.n_initial_ids),
@@ -171,6 +185,10 @@ static const field_t FIELDS[] = {
     STR("events", "impolite_id",            events.impolite_id),
     STR("events", "ct_message",             events.ct_message),
     STR("events", "ct_link_message",        events.ct_link_message),
+    STR("events", "ct_link_off_message",    events.ct_link_off_message),
+    STR("events", "time_message",           events.time_message),
+    STR("events", "link_on_message",        events.link_on_message),
+    STR("events", "link_off_message",       events.link_off_message),
     STR("events", "timeout_message",        events.timeout_message),
     STR("events", "timeout_cancel_message", events.timeout_cancel_message),
 };
@@ -666,7 +684,7 @@ static void read_cw(char *text, const char *path, const config_t *cfg, config_me
             len = strlen(piece);
             p += 6;
         } else if (*p == '{') {
-            cfg_err("%s: unknown placeholder in '%s' (only {call} exists)\n", path, text);
+            cfg_err("%s: unknown placeholder in '%s' (only {call} works in cw)\n", path, text);
             return;
         } else {
             p++;
@@ -710,6 +728,14 @@ static void add_voice_callsign(config_elem_t *elem, const char *path, const char
     }
 }
 
+static voice_var_t voice_var(const char *tok)
+{
+    if (strcmp(tok, "{time}") == 0)     return VOICE_VAR_TIME;
+    if (strcmp(tok, "{ampm}") == 0)     return VOICE_VAR_AMPM;
+    if (strcmp(tok, "{greeting}") == 0) return VOICE_VAR_GREETING;
+    return VOICE_VAR_NONE;
+}
+
 static void read_voice(char *words, const char *path, const config_t *cfg, config_message_t *out)
 {
     config_elem_t *elem = new_element(out, path);
@@ -720,12 +746,22 @@ static void read_voice(char *words, const char *path, const config_t *cfg, confi
     char *save = NULL;
     for (char *tok = strtok_r(words, " \t", &save); tok; tok = strtok_r(NULL, " \t", &save)) {
         int gap_ms;
-        if (strcmp(tok, "{call}") == 0) {
+        voice_var_t var = voice_var(tok);
+        if (var != VOICE_VAR_NONE) {
+            if (elem->n_voice_words == CFG_MAX_VOICE_WORDS)
+                cfg_err("%s: more than %d words\n", path, CFG_MAX_VOICE_WORDS);
+            if (elem->n_voice_words >= CFG_MAX_VOICE_WORDS) {
+                elem->n_voice_words = CFG_MAX_VOICE_WORDS + 1;
+                continue;
+            }
+            elem->voice_words[elem->n_voice_words++].var = var;
+        } else if (strcmp(tok, "{call}") == 0) {
             if (!cfg->callsign[0])
                 cfg_err("%s: uses {call} but no callsign is set\n", path);
             add_voice_callsign(elem, path, cfg->callsign);
         } else if (strchr(tok, '{')) {
-            cfg_err("%s: unknown placeholder '%s' (only {call} exists, as its own word)\n", path, tok);
+            cfg_err("%s: unknown placeholder '%s' (expected {call}, {time}, {ampm} or {greeting}, as its own word)\n",
+                    path, tok);
         } else if (parse_voice_gap(tok, &gap_ms)) {
             if (gap_ms > 60000)
                 cfg_err("%s: pause '%s' is too long (max 60000 ms)\n", path, tok);
@@ -920,6 +956,27 @@ static void read_messages(const entries_t *es, config_t *cfg, bool catalog)
     s_line = 0;
 }
 
+/* Replies that must exist for the commands to work out of the box. Loaded ahead
+ * of the config's own messages, so reusing one of these names replaces it. */
+static void load_builtin_messages(config_t *cfg)
+{
+    static const struct { const char *name, *words; } BUILTIN[] = {
+        {"time_readback",  "F_GOOD {greeting} _ F_THE F_TIME F_IS {time} {ampm}"},
+        {"link_on_reply",  "LINK ON"},
+        {"link_off_reply", "LINK OFF"},
+    };
+    for (size_t i = 0; i < sizeof(BUILTIN) / sizeof(BUILTIN[0]); i++) {
+        char words[128];
+        snprintf(words, sizeof(words), "%s", BUILTIN[i].words);
+        config_message_t *m = message_slot(cfg, BUILTIN[i].name, 0, BUILTIN[i].name);
+        if (!m)
+            return;
+        memset(m, 0, sizeof(*m));
+        strcpy(m->name, BUILTIN[i].name);
+        read_voice(words, BUILTIN[i].name, cfg, m);
+    }
+}
+
 static void load_tone_catalog(config_t *cfg)
 {
     for (size_t i = 0; i < sizeof(TONE_CATALOGS) / sizeof(TONE_CATALOGS[0]); i++) {
@@ -990,10 +1047,21 @@ static void validate(const entries_t *es, const config_t *cfg)
             cfg_err("link.opus_frame_ms must be 20, 40, or 60\n");
     }
 
-    /* # and D are the cancel and enter keys, so a prefix could never be typed. */
-    const char *prefix = cfg->dtmf.pad_test_prefix;
-    if (prefix[strspn(prefix, "0123456789*ABC")])
-        cfg_err("dtmf.pad_test_prefix: '%s' can only use 0-9, *, A, B and C\n", prefix);
+    /* # and D are the cancel and enter keys, so a code could never be typed. */
+    static const struct { const char *key; size_t offset; } CODES[] = {
+        {"pad_test_prefix", offsetof(config_dtmf_t, pad_test_prefix)},
+        {"time_code",       offsetof(config_dtmf_t, time_code)},
+        {"link_on_code",    offsetof(config_dtmf_t, link_on_code)},
+        {"link_off_code",   offsetof(config_dtmf_t, link_off_code)},
+    };
+    for (size_t i = 0; i < sizeof(CODES) / sizeof(CODES[0]); i++) {
+        const char *code = (const char *)&cfg->dtmf + CODES[i].offset;
+        if (code[strspn(code, "0123456789*ABC")])
+            cfg_err("dtmf.%s: '%s' can only use 0-9, *, A, B and C\n", CODES[i].key, code);
+        for (size_t j = 0; j < i; j++)
+            if (code[0] && strcmp(code, (const char *)&cfg->dtmf + CODES[j].offset) == 0)
+                cfg_err("dtmf.%s: '%s' is already used by dtmf.%s\n", CODES[i].key, code, CODES[j].key);
+    }
     if (cfg->dtmf.mute_hang_ms >= cfg->dtmf.interdigit_ms)
         cfg_err("dtmf.mute_hang_ms (%d) must be less than dtmf.interdigit_ms (%d)\n",
                 cfg->dtmf.mute_hang_ms, cfg->dtmf.interdigit_ms);
@@ -1003,6 +1071,10 @@ static void validate(const entries_t *es, const config_t *cfg)
     CHECK_ONE("impolite_id",            impolite_id);
     CHECK_ONE("ct_message",             ct_message);
     CHECK_ONE("ct_link_message",        ct_link_message);
+    CHECK_ONE("ct_link_off_message",    ct_link_off_message);
+    CHECK_ONE("time_message",           time_message);
+    CHECK_ONE("link_on_message",        link_on_message);
+    CHECK_ONE("link_off_message",       link_off_message);
     CHECK_ONE("timeout_message",        timeout_message);
     CHECK_ONE("timeout_cancel_message", timeout_cancel_message);
     check_event(es, cfg, "initial_ids",   ev->initial_ids,   ev->n_initial_ids);
@@ -1047,6 +1119,7 @@ int config_load(config_t *cfg, const char *path)
     log_set_level(cfg->log.level);
 
     load_tone_catalog(cfg);
+    load_builtin_messages(cfg);
     read_messages(&es, cfg, false);
 
     validate(&es, cfg);

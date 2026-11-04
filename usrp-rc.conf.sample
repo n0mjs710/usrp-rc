@@ -25,6 +25,7 @@ codec       = pcm      # pcm or opus
 #bind_address  = 0.0.0.0
 #opus_bitrate  = 8000   # 4000 to 64000; used when codec = opus
 #opus_frame_ms = 60     # 20, 40, or 60; used when codec = opus
+#start_on      = true   # link state at startup; the DTMF link commands change it after that
 
 [events]
 # Which message plays for each occasion. Empty = play nothing.
@@ -38,9 +39,16 @@ timeout_message = timeout_warn
 #anxious_id             =
 #impolite_id            =
 #timeout_cancel_message =
+#ct_link_off_message    =               # local courtesy tone while the link is off; empty = ct_message
+#time_message           = time_readback  # replies to DTMF commands; empty = no reply
+#link_on_message        = link_on_reply
+#link_off_message       = link_off_reply
 
 [messages]
 # Your own messages, by name, for use in [events] above.
+#
+# {call} works in voice and cw. Voice messages can also use these, each as its own
+# word, spoken as of when the message plays: {time}, {ampm}, {greeting}.
 #
 #     name = voice: THISIS {call} REPEATER     voice clips from vocab_8k/ or user_8k/
 #                                              "_" pauses audio.voice_gap_ms, "_400" pauses 400 ms
@@ -115,3 +123,6 @@ default_cw    = cw: {call}/R
 #beep_on_ms      = 100
 #beep_off_ms     = 900
 #pad_test_prefix = 5      # pad test: prefix, then digits to read back. Empty = off.
+#time_code       = 39     # speak the time. Empty = off, likewise the link codes.
+#link_on_code    = 72
+#link_off_code   = 73

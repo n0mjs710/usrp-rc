@@ -76,6 +76,8 @@ struct port {
     size_t       mix_pos;
     port_cont_fn mix_on_drain;
 
+    bool         link_up;
+
     /* command reply waiting for the tail; malloc'd, NULL = none */
     int16_t     *reply;
     size_t       reply_len;
@@ -306,6 +308,16 @@ static void do_timeout_recovery(port_t *p, uint64_t now)
 
 /* ── impolite ID (mix buffer, not ctrl buffer — see port.h) ──────────────── */
 
+static const char *courtesy_tone(const port_t *p)
+{
+    const config_events_t *ev = &p->cfg->events;
+    if (p->last_source == SRC_LINK && ev->ct_link_message[0])
+        return ev->ct_link_message;
+    if (!p->link_up && ev->ct_link_off_message[0])
+        return ev->ct_link_off_message;
+    return ev->ct_message;
+}
+
 static void impolite_id_after_mix(port_t *p, uint64_t now)
 {
     p->impolite_id_playing = false;
@@ -316,7 +328,7 @@ static void impolite_id_after_mix(port_t *p, uint64_t now)
             schedule_ct_delay(p, now);   /* the reply goes first, as on any other tail */
             return;
         }
-        queue_message(p, p->cfg->events.ct_message, -1.0);
+        queue_message(p, courtesy_tone(p), -1.0);
         if (ctrl_buf_playing(p))
             p->ctrl.on_drain = ct_after_drain;
         else
@@ -645,10 +657,7 @@ static void on_ct_delay(port_t *p, uint64_t now)
         return;
     }
 
-    const char *name = p->cfg->events.ct_message;
-    if (p->last_source == SRC_LINK && p->cfg->events.ct_link_message[0])
-        name = p->cfg->events.ct_link_message;
-    queue_message(p, name, -1.0);
+    queue_message(p, courtesy_tone(p), -1.0);
 
     p->tot_used_s = 0.0;
     if (ctrl_buf_playing(p))
@@ -791,6 +800,11 @@ void port_queue_reply(port_t *p, int16_t *samples, size_t n)
     p->reply_len = n;
 }
 
+void port_set_link_up(port_t *p, bool up)
+{
+    p->link_up = up;
+}
+
 /* ── timer aggregation ─────────────────────────────────────────────────── */
 
 uint64_t port_next_deadline_ms(const port_t *p)
@@ -887,6 +901,7 @@ int port_create(port_t **out, const config_t *cfg, vocab_cache_t *vocab)
     p->vocab = vocab;
     p->state = PORT_IDLE;
     p->last_source = SRC_LOCAL;
+    p->link_up = true;
     *out = p;
     return 0;
 }

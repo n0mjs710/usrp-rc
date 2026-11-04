@@ -215,7 +215,20 @@ Only the user tier has commands so far. Programming is done in this file.
 
 | Command | Enter | Result |
 | --- | --- | --- |
-| Pad test | prefix, then digits | reads the digits back (`*` is spoken "Sierra") |
+| Pad test | `5`, then digits | reads the digits back (`*` is spoken "Sierra") |
+| Time | `39` | speaks the time |
+| Link on | `72` | connects the link; says "link on" |
+| Link off | `73` | disconnects the link; says "link off" |
+
+All four codes can be changed with `pad_test_prefix`, `time_code`, `link_on_code`
+and `link_off_code`. An empty value turns that command off.
+
+While the link is off, nothing is sent to it and anything received from it is
+ignored. It returns to `[link] start_on` (true by default) when `usrp-rc` restarts.
+To hear the difference on the air, set `ct_link_off_message` under `[events]`: local
+traffic gets that courtesy tone while the link is off, and `ct_message` while it's on.
+
+The time comes from the system clock and timezone, which are yours to keep right.
 
 Enter a command in one transmission, then unkey. Over the air:
 
@@ -256,7 +269,7 @@ timeout_message = timeout_warn
 ```
 
 Maps occasions (startup, initial/mandatory/anxious/impolite ID, courtesy
-tones, timeout) to message names. `initial_ids` and `mandatory_ids` take a
+tones, timeout, DTMF command replies) to message names. `initial_ids` and `mandatory_ids` take a
 space-separated list and rotate through it. An empty value plays nothing.
 
 ### `[messages]` — the actual audio content

@@ -29,10 +29,18 @@ typedef enum {
  * clip name, or a pause ("_" = cfg->audio.voice_gap_ms default, "_NNN" =
  * NNN ms explicit — recognized only when '_' is followed solely by digits
  * or nothing, so clip names like "_TEEN" are unaffected). */
+typedef enum {
+    VOICE_VAR_NONE = 0,
+    VOICE_VAR_TIME,       /* {time}: the current time, in 12-hour form */
+    VOICE_VAR_AMPM,       /* {ampm} */
+    VOICE_VAR_GREETING,   /* {greeting}: morning, afternoon or evening */
+} voice_var_t;
+
 typedef struct {
-    bool     is_gap;
-    int      gap_ms;             /* valid when is_gap; -1 = use configured default */
-    char     clip[CFG_NAME_STR]; /* valid when !is_gap */
+    bool        is_gap;
+    int         gap_ms;             /* valid when is_gap; -1 = use configured default */
+    voice_var_t var;                /* filled in when the message plays */
+    char        clip[CFG_NAME_STR]; /* valid when !is_gap and no var */
 } config_voice_word_t;
 
 typedef struct {
@@ -78,6 +86,7 @@ typedef struct {
     link_codec_t codec;
     int          opus_bitrate;
     int          opus_frame_ms;
+    bool         start_on;   /* link state at startup; DTMF commands change it after that */
 } config_link_t;
 
 typedef struct {
@@ -119,6 +128,9 @@ typedef struct {
     int  beep_on_ms;
     int  beep_off_ms;
     char pad_test_prefix[CFG_DTMF_PREFIX_STR];   /* empty = pad test off */
+    char time_code[CFG_DTMF_PREFIX_STR];         /* empty = command off, likewise below */
+    char link_on_code[CFG_DTMF_PREFIX_STR];
+    char link_off_code[CFG_DTMF_PREFIX_STR];
 } config_dtmf_t;
 
 typedef struct {
@@ -131,6 +143,10 @@ typedef struct {
     char impolite_id[CFG_NAME_STR];
     char ct_message[CFG_NAME_STR];
     char ct_link_message[CFG_NAME_STR];
+    char ct_link_off_message[CFG_NAME_STR];   /* local traffic while the link is off */
+    char time_message[CFG_NAME_STR];
+    char link_on_message[CFG_NAME_STR];
+    char link_off_message[CFG_NAME_STR];
     char timeout_message[CFG_NAME_STR];
     char timeout_cancel_message[CFG_NAME_STR];
 } config_events_t;

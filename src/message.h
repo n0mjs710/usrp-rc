@@ -4,6 +4,10 @@
 #include "vocab.h"
 #include <stdint.h>
 #include <stddef.h>
+#include <time.h>
+
+/* Enough clips for any runtime variable: {time} is at most hour + two for minutes. */
+#define MESSAGE_VAR_MAX_CLIPS 3
 
 typedef struct {
     int16_t *samples;   /* malloc'd; NULL if empty */
@@ -29,6 +33,10 @@ rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
  * free(result.samples). */
 rendered_audio_t message_render_clips(const config_t *cfg, vocab_cache_t *vocab,
                                       const char *const *clips, int nclips);
+
+/* The clips that speak a runtime variable at a given time. Returns how many. */
+int message_var_clips(voice_var_t var, const struct tm *when,
+                      const char *out[MESSAGE_VAR_MAX_CLIPS]);
 
 /* Check every message's content against what's actually available: voice
  * clips exist in the vocab cache, CW text is all sendable. Logs each problem

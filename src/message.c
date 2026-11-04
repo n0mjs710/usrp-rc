@@ -8,6 +8,68 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+static const char *const F_NUMBERS[] = {
+    "F_OH", "F_ONE", "F_TWO", "F_THREE", "F_FOUR", "F_FIVE", "F_SIX", "F_SEVEN", "F_EIGHT", "F_NINE",
+    "F_TEN", "F_ELEVEN", "F_TWELVE", "F_THIRTEEN", "F_FOURTEEN", "F_FIFTEEN", "F_SIXTEEN",
+    "F_SEVENTEEN", "F_EIGHTEEN", "F_NINETEEN",
+};
+static const char *const F_TENS[] = {"F_TWENTY", "F_THIRTY", "F_FORTY", "F_FIFTY"};
+
+int message_var_clips(voice_var_t var, const struct tm *when,
+                      const char *out[MESSAGE_VAR_MAX_CLIPS])
+{
+    int hour = when->tm_hour, min = when->tm_min, n = 0;
+
+    switch (var) {
+    case VOICE_VAR_TIME:
+        out[n++] = F_NUMBERS[hour % 12 ? hour % 12 : 12];
+        if (min == 0) {
+            out[n++] = "F_OCLOCK";
+        } else if (min < 10) {
+            out[n++] = "F_OH";
+            out[n++] = F_NUMBERS[min];
+        } else if (min < 20) {
+            out[n++] = F_NUMBERS[min];
+        } else {
+            out[n++] = F_TENS[min / 10 - 2];
+            if (min % 10)
+                out[n++] = F_NUMBERS[min % 10];
+        }
+        break;
+    case VOICE_VAR_AMPM:
+        out[n++] = hour < 12 ? "F_A_M" : "F_P_M";
+        break;
+    case VOICE_VAR_GREETING:
+        out[n++] = hour < 12 ? "F_MORNING" : hour < 18 ? "F_AFTERNOON" : "F_EVENING";
+        break;
+    case VOICE_VAR_NONE:
+        break;
+    }
+    return n;
+}
+
+/* Every clip a variable could ask for has to exist, whatever the time is now. */
+static int validate_var(const config_message_t *m, voice_var_t var, vocab_cache_t *vocab)
+{
+    int errors = 0;
+    for (int hour = 0; hour < 24; hour++) {
+        for (int min = 0; min < 60; min++) {
+            struct tm when = {.tm_hour = hour, .tm_min = min};
+            const char *clips[MESSAGE_VAR_MAX_CLIPS];
+            int n = message_var_clips(var, &when, clips);
+            for (int i = 0; i < n; i++) {
+                size_t len;
+                if (!vocab_get(vocab, clips[i], &len)) {
+                    LOGE("config: messages.%s: a variable needs the voice clip '%s'\n", m->name, clips[i]);
+                    return 1;
+                }
+            }
+        }
+    }
+    return errors;
+}
 
 int message_has_voice(const config_t *cfg, const char *name)
 {
@@ -48,7 +110,9 @@ int message_validate(const config_t *cfg, vocab_cache_t *vocab)
             } else if (e->type == ELEM_VOICE) {
                 for (int w = 0; w < e->n_voice_words; w++) {
                     size_t n;
-                    if (!e->voice_words[w].is_gap && !vocab_get(vocab, e->voice_words[w].clip, &n)) {
+                    if (e->voice_words[w].var != VOICE_VAR_NONE) {
+                        errors += validate_var(m, e->voice_words[w].var, vocab);
+                    } else if (!e->voice_words[w].is_gap && !vocab_get(vocab, e->voice_words[w].clip, &n)) {
                         LOGE("config: line %d: messages.%s: no voice clip named '%s'\n",
                              m->line, m->name, e->voice_words[w].clip);
                         errors++;
@@ -145,6 +209,16 @@ rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
                 if (word->is_gap) {
                     int ms = word->gap_ms >= 0 ? word->gap_ms : cfg->audio.voice_gap_ms;
                     sbuf_append_silence(&buf, (size_t)((double)ms / 1000.0 * TONE_SAMPLE_RATE));
+                    continue;
+                }
+                if (word->var != VOICE_VAR_NONE) {
+                    time_t t = time(NULL);
+                    struct tm when;
+                    localtime_r(&t, &when);
+                    const char *clips[MESSAGE_VAR_MAX_CLIPS];
+                    int n = message_var_clips(word->var, &when, clips);
+                    for (int c = 0; c < n; c++)
+                        append_clip(cfg, vocab, clips[c], &buf);
                     continue;
                 }
                 append_clip(cfg, vocab, word->clip, &buf);
