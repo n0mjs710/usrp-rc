@@ -34,6 +34,12 @@ typedef enum {
     VOICE_VAR_TIME,       /* {time}: the current time, in 12-hour form */
     VOICE_VAR_AMPM,       /* {ampm} */
     VOICE_VAR_GREETING,   /* {greeting}: morning, afternoon or evening */
+    VOICE_VAR_DAY,        /* {day}: day of the week */
+    VOICE_VAR_DATE,       /* {date}: month and day */
+    VOICE_VAR_KEYUPS_DAY,    /* {keyups_day}: key-ups in the last 24 hours */
+    VOICE_VAR_KEYUPS_WEEK,   /* {keyups_week}: ... in the last 7 days */
+    VOICE_VAR_MINUTES_DAY,   /* {minutes_day}: minutes of traffic in the last 24 hours */
+    VOICE_VAR_MINUTES_WEEK,  /* {minutes_week}: ... in the last 7 days */
 } voice_var_t;
 
 typedef struct {
@@ -131,6 +137,7 @@ typedef struct {
     int  beep_off_ms;
     char pad_test_prefix[CFG_DTMF_PREFIX_STR];   /* empty = pad test off */
     char time_code[CFG_DTMF_PREFIX_STR];         /* empty = command off, likewise below */
+    char stats_code[CFG_DTMF_PREFIX_STR];
     char link_on_code[CFG_DTMF_PREFIX_STR];
     char link_off_code[CFG_DTMF_PREFIX_STR];
 } config_dtmf_t;
@@ -148,6 +155,7 @@ typedef struct {
     char ct_link_off_message[CFG_NAME_STR];   /* local traffic while the link is off */
     char tail_message[CFG_NAME_STR];
     char time_message[CFG_NAME_STR];
+    char stats_message[CFG_NAME_STR];
     char link_on_message[CFG_NAME_STR];
     char link_off_message[CFG_NAME_STR];
     char timeout_message[CFG_NAME_STR];
@@ -162,6 +170,10 @@ typedef enum {
 typedef struct {
     char level[16];   /* "error", "warn", "info", or "debug" */
 } config_log_t;
+
+typedef struct {
+    char file[256];   /* where usage survives a restart; empty = memory only */
+} config_stats_t;
 
 #define CFG_MAX_SCHEDULE      32
 #define CFG_MAX_SCHEDULE_SETS 8
@@ -194,6 +206,7 @@ typedef struct {
     config_timers_t  timers;
     config_events_t  events;
     config_dtmf_t    dtmf;
+    config_stats_t   stats;
     access_mode_t    access_mode;
     config_log_t     log;
 

@@ -742,6 +742,56 @@ static bool scenario_tail_message_after_hang(config_t *base, vocab_cache_t *voca
     return ok;
 }
 
+static double g_activity_seconds;
+static int    g_activity_count;
+
+static void on_activity(void *arg, double seconds)
+{
+    (void)arg;
+    g_activity_seconds += seconds;
+    g_activity_count++;
+}
+
+static bool scenario_usage_counting(config_t *base, vocab_cache_t *vocab)
+{
+    printf("\n[12] usage counts transmissions, not kerchunks or lockouts\n");
+    bool ok = true;
+    config_t cfg = *base;
+    cfg.timers.id_interval = 600.0;
+    port_t *p = fresh_port(&cfg, vocab);
+    port_set_activity_callback(p, on_activity, NULL);
+    g_activity_seconds = 0.0;
+    g_activity_count = 0;
+
+    key_local(p, true);
+    wait_ms(p, 1000);
+    key_local(p, false);
+    wait_until_idle(p, 3000);
+    CHECK(g_activity_count == 1, "a transmission counts once (%d)", g_activity_count);
+    CHECK(g_activity_seconds > 0.9 && g_activity_seconds < 1.1, "for its length (%.2f s)", g_activity_seconds);
+
+    key_local(p, true);
+    wait_ms(p, 50);
+    key_local(p, false);
+    wait_ms(p, 300);
+    CHECK(g_activity_count == 1, "a kerchunk doesn't count (%d)", g_activity_count);
+
+    key_local(p, true);
+    wait_ms(p, 5500);        /* past the 5 s timeout */
+    key_local(p, false);
+    wait_until_idle(p, 5000);
+    CHECK(g_activity_count == 1, "a timed-out transmission doesn't count (%d)", g_activity_count);
+
+    port_on_link_keyup(p, true, g_now);
+    wait_ms(p, 500);
+    port_on_link_keyup(p, false, g_now);
+    CHECK(g_activity_count == 2, "link traffic counts too (%d)", g_activity_count);
+
+    port_destroy(p);
+    printf(ok ? "[12] PASS\n" : "[12] FAIL\n");
+    return ok;
+}
+
 /* ── driver ───────────────────────────────────────────────────────────── */
 
 int main(void)
@@ -774,6 +824,7 @@ int main(void)
         scenario_link_state_courtesy_tone,
         scenario_tail_message_count,
         scenario_tail_message_after_hang,
+        scenario_usage_counting,
     };
     int n = (int)(sizeof(scenarios) / sizeof(scenarios[0]));
 

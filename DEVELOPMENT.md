@@ -74,6 +74,13 @@ windows have no start or end events to miss. `main.c` re-evaluates it every minu
 into `app_t.events`, and `port.c` reads events through `p->ev`, which points there.
 Anything that changes by time should read `p->ev` rather than `cfg->events`.
 
+## Usage statistics
+
+`src/stats.c` keeps a rolling week in hourly buckets, keyed by hours since the epoch so
+daylight saving can't disturb them. It's the only thing that writes to disk during
+normal running. It saves on a timer rather than per key-up to go easy on SD cards, and
+uses a temp file and rename so a power failure can't corrupt it.
+
 ## Target platform
 
 Developed on a Raspberry Pi 3B+ (similar architecture/OS to the production

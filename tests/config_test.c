@@ -74,6 +74,9 @@ static const test_case_t CASES[] = {
     {"voice variables",     BASE "[messages]\na = voice: F_THE F_TIME F_IS {time} {ampm} _ {greeting}\n", NULL},
     {"replacing a built-in reply", BASE "[messages]\nlink_on_reply = cw: LINK\n", NULL},
     {"silencing a reply",   BASE "[events]\nlink_off_message =\n", NULL},
+    {"date and usage variables", BASE "[messages]\na = voice: {day} {date} {keyups_day} {keyups_week} {minutes_day} {minutes_week}\n", NULL},
+    {"stats file setting",  BASE "[stats]\nfile = /tmp/x\n", NULL},
+    {"stats file off",      BASE "[stats]\nfile =\n", NULL},
     {"variable in cw",      "callsign = W1XYZ\n" BASE "[messages]\na = cw: {time}\n", "only {call} works in cw"},
     {"variable joined to a word", BASE "[messages]\na = voice: {time}Z\n", "unknown placeholder '{time}Z'"},
     {"dtmf code uses D",    BASE "[dtmf]\ntime_code = 3D\n", "dtmf.time_code: '3D' can only use"},
@@ -267,13 +270,13 @@ int main(void)
     rc = load_text(BASE);
     const config_elem_t *catalog = element("yellow_jacket", 2);
     check("available without being in the config", rc == 0 && catalog && catalog->freq1 == 660 && catalog->ms == 50);
-    check("all 28 tones and 3 built-in replies loaded", s_cfg.nmessages == 31);
+    check("all 28 tones and 4 built-in replies loaded", s_cfg.nmessages == 32);
     check("loud warning keeps its own level", element("timeout_warn", 0) && element("timeout_warn", 0)->amp == 0.9);
 
     rc = load_text(BASE "[messages]\nyellow_jacket = tone: 100:10\nmine = tone: 200:20\n");
     const config_message_t *over = config_find_message(&s_cfg, "yellow_jacket");
     check("same name replaces the catalog tone", rc == 0 && over && over->nelements == 1 && over->elements[0].freq1 == 100);
-    check("replacing doesn't add a message, a new tone does", s_cfg.nmessages == 32);
+    check("replacing doesn't add a message, a new tone does", s_cfg.nmessages == 33);
 
     printf("[6] shipped configs load\n");
     check("usrp-rc.conf.sample", capture_load("usrp-rc.conf.sample") == 0);
@@ -305,6 +308,7 @@ int main(void)
     check("the built-in replies' clips and variables all exist", message_validate(&s_cfg, vocab) == 0);
 
     {
+        message_stats_t stats = {0};
         static const struct { int h, m; const char *want; } TIMES[] = {
             {0, 0,   "F_TWELVE F_OCLOCK"},
             {9, 5,   "F_NINE F_OH F_FIVE"},
@@ -319,7 +323,7 @@ int main(void)
         for (size_t i = 0; i < sizeof(TIMES) / sizeof(TIMES[0]); i++) {
             struct tm when = {.tm_hour = TIMES[i].h, .tm_min = TIMES[i].m};
             const char *clips[MESSAGE_VAR_MAX_CLIPS];
-            int n = message_var_clips(VOICE_VAR_TIME, &when, clips);
+            int n = message_var_clips(VOICE_VAR_TIME, &when, &stats, clips);
             char got[64] = "";
             for (int c = 0; c < n; c++) {
                 strcat(got, c ? " " : "");
@@ -340,12 +344,45 @@ int main(void)
         for (size_t i = 0; i < sizeof(PARTS) / sizeof(PARTS[0]); i++) {
             struct tm when = {.tm_hour = PARTS[i].h};
             const char *clips[MESSAGE_VAR_MAX_CLIPS];
-            message_var_clips(VOICE_VAR_AMPM, &when, clips);
+            message_var_clips(VOICE_VAR_AMPM, &when, &stats, clips);
             good &= strcmp(clips[0], PARTS[i].ampm) == 0;
-            message_var_clips(VOICE_VAR_GREETING, &when, clips);
+            message_var_clips(VOICE_VAR_GREETING, &when, &stats, clips);
             good &= strcmp(clips[0], PARTS[i].greeting) == 0;
         }
         check("{ampm} and {greeting} change at the right hours", good);
+
+        static const struct { long v; const char *want; } NUMS[] = {
+            {0, "ZERO"}, {7, "SEVEN"}, {13, "THIRTEEN"}, {20, "TWENTY"}, {42, "FORTY TWO"},
+            {100, "ONE HUNDRED"}, {305, "THREE HUNDRED FIVE"}, {1000, "ONE THOUSAND"},
+            {1010, "ONE THOUSAND TEN"}, {2345, "TWO THOUSAND THREE HUNDRED FORTY FIVE"},
+            {99999, "NINETY NINE THOUSAND NINE HUNDRED NINETY NINE"},
+            {250000, "NINETY NINE THOUSAND NINE HUNDRED NINETY NINE"},
+        };
+        good = 1;
+        for (size_t i = 0; i < sizeof(NUMS) / sizeof(NUMS[0]); i++) {
+            struct tm when = {0};
+            message_stats_t st = {.keyups_week = NUMS[i].v};
+            const char *clips[MESSAGE_VAR_MAX_CLIPS];
+            int n = message_var_clips(VOICE_VAR_KEYUPS_WEEK, &when, &st, clips);
+            char got[96] = "";
+            for (int c = 0; c < n; c++) {
+                strcat(got, c ? " " : "");
+                strcat(got, clips[c]);
+            }
+            if (strcmp(got, NUMS[i].want) != 0) {
+                printf("  %ld spoke '%s', wanted '%s'\n", NUMS[i].v, got, NUMS[i].want);
+                good = 0;
+            }
+        }
+        check("numbers speak the right words", good);
+
+        struct tm when = {.tm_wday = 3, .tm_mon = 10, .tm_mday = 24};
+        const char *clips[MESSAGE_VAR_MAX_CLIPS];
+        check("{day}", message_var_clips(VOICE_VAR_DAY, &when, &stats, clips) == 1
+              && strcmp(clips[0], "WEDNESDAY") == 0);
+        check("{date}", message_var_clips(VOICE_VAR_DATE, &when, &stats, clips) == 3
+              && strcmp(clips[0], "NOVEMBER") == 0 && strcmp(clips[1], "TWENTY") == 0
+              && strcmp(clips[2], "FOUR") == 0);
     }
 
     load_text(BASE "[messages]\na = voice: REPEATER | cw: W1XYZ/R\n");

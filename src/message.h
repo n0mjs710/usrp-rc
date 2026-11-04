@@ -6,8 +6,19 @@
 #include <stddef.h>
 #include <time.h>
 
-/* Enough clips for any runtime variable: {time} is at most hour + two for minutes. */
-#define MESSAGE_VAR_MAX_CLIPS 3
+/* Enough clips for any runtime variable, the longest being a number up to 99,999:
+ * "ninety nine thousand nine hundred ninety nine". */
+#define MESSAGE_VAR_MAX_CLIPS 8
+
+/* Usage figures for the statistics variables. */
+typedef struct {
+    long keyups_day, keyups_week;
+    long minutes_day, minutes_week;
+} message_stats_t;
+
+/* Where those come from when a message plays; without this they read as zero. */
+typedef void (*message_stats_fn)(void *arg, message_stats_t *out);
+void message_set_stats_source(message_stats_fn fn, void *arg);
 
 typedef struct {
     int16_t *samples;   /* malloc'd; NULL if empty */
@@ -34,8 +45,8 @@ rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
 rendered_audio_t message_render_clips(const config_t *cfg, vocab_cache_t *vocab,
                                       const char *const *clips, int nclips);
 
-/* The clips that speak a runtime variable at a given time. Returns how many. */
-int message_var_clips(voice_var_t var, const struct tm *when,
+/* The clips that speak a runtime variable. Returns how many. */
+int message_var_clips(voice_var_t var, const struct tm *when, const message_stats_t *stats,
                       const char *out[MESSAGE_VAR_MAX_CLIPS]);
 
 /* Check every message's content against what's actually available: voice

@@ -280,6 +280,8 @@ static void test_commands(void)
         command_t c;
         press_all(&r, "39");
         check("time code", command_session_end_of_tx(r.s, &c) && c.type == COMMAND_TIME);
+        press_all(&r, "38");
+        check("usage code", command_session_end_of_tx(r.s, &c) && c.type == COMMAND_STATS);
         press_all(&r, "72");
         check("link on code", command_session_end_of_tx(r.s, &c) && c.type == COMMAND_LINK_ON);
         press_all(&r, "73");

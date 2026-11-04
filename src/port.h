@@ -24,6 +24,10 @@ typedef struct port port_t;
 int  port_create(port_t **out, const config_t *cfg, vocab_cache_t *vocab);
 void port_destroy(port_t *p);
 
+/* Called when a transmission that counts as usage ends: not kerchunks or time spent
+ * timed out, since neither is traffic being repeated. */
+void port_set_activity_callback(port_t *p, void (*cb)(void *arg, double seconds), void *arg);
+
 /* Called once main.c is ready to accept PTT edges (KEY/UNKEY frames to
  * mmdvm) and pacing-timer (re)arm requests. `reason` is a short static
  * string (e.g. "repeat", "mandatory-id", "hang-expired") naming why PTT

@@ -92,6 +92,9 @@ struct port {
     bool         job_was_ptt;
     bool         job_post_pad_needed;
 
+    void (*activity_cb)(void *arg, double seconds);
+    void  *activity_arg;
+
     void (*set_ptt_cb)(void *arg, bool active, const char *reason);
     void  *set_ptt_arg;
 };
@@ -830,6 +833,8 @@ static void cor_idle_edge(port_t *p, port_source_t source, uint64_t now)
             set_ptt(p, false, now, "kerchunk");
             port_transition(p, PORT_IDLE, now);
         } else {
+            if (p->activity_cb)
+                p->activity_cb(p->activity_arg, duration_s);
             port_transition(p, PORT_TAIL, now);
             if (p->initial_id_pending) {
                 p->initial_id_pending = false;
@@ -995,6 +1000,12 @@ int port_create(port_t **out, const config_t *cfg, vocab_cache_t *vocab)
     p->link_up = true;
     *out = p;
     return 0;
+}
+
+void port_set_activity_callback(port_t *p, void (*cb)(void *arg, double seconds), void *arg)
+{
+    p->activity_cb  = cb;
+    p->activity_arg = arg;
 }
 
 void port_set_ptt_callback(port_t *p, void (*cb)(void *arg, bool active, const char *reason), void *arg)

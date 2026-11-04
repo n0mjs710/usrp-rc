@@ -46,7 +46,7 @@ static void clear_digits(command_session_t *s)
  *   Programming: a stub for now. The config file is the programming interface;
  *                a DTMF unlock would go here if a use for one turns up.
  *   Control op:  no commands yet. They'll sit behind a definable prefix.
- *   User:        the pad test, time, link on and link off.
+ *   User:        the pad test, time, usage figures, link on and link off.
  */
 static bool evaluate(command_session_t *s, command_t *out)
 {
@@ -63,6 +63,7 @@ static bool evaluate(command_session_t *s, command_t *out)
     /* Whole codes win over the pad test's prefix, which matches anything after it. */
     static const struct { command_type_t type; size_t offset; const char *name; } CODES[] = {
         {COMMAND_TIME,     offsetof(config_dtmf_t, time_code),     "time"},
+        {COMMAND_STATS,    offsetof(config_dtmf_t, stats_code),    "usage"},
         {COMMAND_LINK_ON,  offsetof(config_dtmf_t, link_on_code),  "link on"},
         {COMMAND_LINK_OFF, offsetof(config_dtmf_t, link_off_code), "link off"},
     };
@@ -70,7 +71,8 @@ static bool evaluate(command_session_t *s, command_t *out)
         const char *code = (const char *)d + CODES[i].offset;
         if (!code[0] || strcmp(s->digits, code) != 0)
             continue;
-        if (CODES[i].type != COMMAND_TIME && !s->cfg->link.enabled) {
+        bool needs_link = CODES[i].type == COMMAND_LINK_ON || CODES[i].type == COMMAND_LINK_OFF;
+        if (needs_link && !s->cfg->link.enabled) {
             LOGI("dtmf: %s ignored -- no link configured\n", CODES[i].name);
             clear_digits(s);
             return false;

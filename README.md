@@ -226,11 +226,12 @@ Only the user tier has commands so far. Programming is done in this file.
 | --- | --- | --- |
 | Pad test | `5`, then digits | reads the digits back (`*` is spoken "Sierra") |
 | Time | `39` | speaks the time |
+| Usage | `38` | speaks key-ups and minutes of traffic over the last 24 hours |
 | Link on | `72` | connects the link; says "link on" |
 | Link off | `73` | disconnects the link; says "link off" |
 
-All four codes can be changed with `pad_test_prefix`, `time_code`, `link_on_code`
-and `link_off_code`. An empty value turns that command off.
+All of these codes can be changed with `pad_test_prefix`, `time_code`, `stats_code`,
+`link_on_code` and `link_off_code`. An empty value turns that command off.
 
 While the link is off, nothing is sent to it and anything received from it is
 ignored. It returns to `[link] start_on` (true by default) when `usrp-rc` restarts.
@@ -281,6 +282,18 @@ Maps occasions (startup, initial/mandatory/anxious/impolite ID, courtesy
 tones, timeout, DTMF command replies) to message names. `initial_ids` and `mandatory_ids` take a
 space-separated list and rotate through it. An empty value plays nothing.
 
+### `[stats]` — usage figures
+
+`usrp-rc` counts key-ups and the time spent repeating traffic, local or from the link,
+in hourly buckets over a rolling week. Kerchunks and timed-out transmissions don't
+count. The `{keyups_*}` and `{minutes_*}` variables speak these figures, for a message
+or the usage command. Rewording the reply is a matter of redefining `stats_readback`.
+
+The figures survive restarts in `file` (`/var/lib/usrp-rc/stats` by default), which is
+saved every 15 minutes if anything changed and at shutdown. A power failure loses at
+most that much. Set `file` empty to keep them in memory only. If the file can't be
+written, usage still works until the next restart and a warning is logged.
+
 ### `[schedule]` — changing events by time and day
 
 ```ini
@@ -322,6 +335,11 @@ my_tone  = tone: 330:50 495:50 660:50
 my_mix   = voice: THISIS {call} | tone: 880:100 | cw: {call}/R
 ```
 
+- **Variables** are spoken as of when the message plays, each as its own word in a
+  `voice:` part: `{time}`, `{ampm}`, `{greeting}` (morning, afternoon or evening),
+  `{day}`, `{date}` (month and day), `{keyups_day}`, `{keyups_week}`, `{minutes_day}`
+  and `{minutes_week}`. Time and greeting use the female `F_` clips; the rest use the
+  standard ones. `usrp-rc --check` confirms every clip they need exists.
 - **`{call}`** is replaced by the top-level `callsign` setting, which holds only
   the callsign (letters and digits). Add `/R`, `REPEATER`, or anything else in
   the message itself. CW sends it as written; voice spells it out, so `W1XYZ`

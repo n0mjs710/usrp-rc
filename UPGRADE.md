@@ -8,6 +8,14 @@ restarting. It reports anything out of date by line number.
 
 ### Required
 
+Reinstall the service file and reload systemd, as usage statistics need a writable
+state directory:
+
+```bash
+sudo make install
+sudo systemctl daemon-reload
+```
+
 Rename this setting under `[events]`. usrp-rc will not start until you do:
 
 | Old | New |
@@ -25,6 +33,7 @@ details on each.
 | A different courtesy tone while the link is off | `[events]` `ct_link_off_message` |
 | A tail message | `[events]` `tail_message` |
 | Settings that change by time and day | a `[schedule]` section |
+| Usage figures in a different place, or not on disk | `[stats]` `file` |
 
 With DTMF enabled, these commands work by default. Set a code empty to turn its
 command off:
@@ -33,6 +42,7 @@ command off:
 | --- | --- | --- |
 | `5` + digits | reads the digits back | `pad_test_prefix` |
 | `39` | speaks the time | `time_code` |
+| `38` | speaks usage over the last 24 hours | `stats_code` |
 | `72` | turns the link on | `link_on_code` |
 | `73` | turns the link off | `link_off_code` |
 

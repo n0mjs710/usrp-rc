@@ -42,6 +42,7 @@ timeout_message = timeout_warn
 #ct_link_off_message    =               # local courtesy tone while the link is off; empty = ct_link_on_message
 #tail_message           =               # see timers.tail_every; empty = none
 #time_message           = time_readback  # replies to DTMF commands; empty = no reply
+#stats_message          = stats_readback
 #link_on_message        = link_on_reply
 #link_off_message       = link_off_reply
 
@@ -49,7 +50,8 @@ timeout_message = timeout_warn
 # Your own messages, by name, for use in [events] above.
 #
 # {call} works in voice and cw. Voice messages can also use these, each as its own
-# word, spoken as of when the message plays: {time}, {ampm}, {greeting}.
+# word, spoken as of when the message plays: {time}, {ampm}, {greeting}, {day}, {date},
+# {keyups_day}, {keyups_week}, {minutes_day}, {minutes_week}.
 #
 #     name = voice: THISIS {call} REPEATER     voice clips from vocab_8k/ or user_8k/
 #                                              "_" pauses audio.voice_gap_ms, "_400" pauses 400 ms
@@ -128,6 +130,10 @@ default_cw    = cw: {call}/R
 #tail_every  = 10      # play events.tail_message every this many tails; 0 = off
 #tail_after_hang = 0   # ... or key up and play it this long after the last tail; 0 = off
 
+#[stats]
+# Where usage figures survive a restart. Empty = keep them in memory only.
+#file = /var/lib/usrp-rc/stats
+
 #[dtmf]
 # Over-the-air DTMF commands from the repeater receiver. Off by default.
 #enabled         = false
@@ -140,6 +146,7 @@ default_cw    = cw: {call}/R
 #beep_on_ms      = 100
 #beep_off_ms     = 900
 #pad_test_prefix = 5      # pad test: prefix, then digits to read back. Empty = off.
-#time_code       = 39     # speak the time. Empty = off, likewise the link codes.
+#time_code       = 39     # speak the time. Empty = off, likewise the codes below.
+#stats_code      = 38     # speak usage over the last 24 hours (events.stats_message)
 #link_on_code    = 72
 #link_off_code   = 73

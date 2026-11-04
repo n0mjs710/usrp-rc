@@ -17,7 +17,73 @@ static const char *const F_NUMBERS[] = {
 };
 static const char *const F_TENS[] = {"F_TWENTY", "F_THIRTY", "F_FORTY", "F_FIFTY"};
 
-int message_var_clips(voice_var_t var, const struct tm *when,
+static const char *const NUMBERS[] = {
+    "ZERO", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE",
+    "TEN", "ELEVEN", "TWELVE", "THIRTEEN", "FOURTEEN", "FIFTEEN", "SIXTEEN",
+    "SEVENTEEN", "EIGHTEEN", "NINETEEN",
+};
+static const char *const TENS[] = {
+    "TWENTY", "THIRTY", "FORTY", "FIFTY", "SIXTY", "SEVENTY", "EIGHTY", "NINETY",
+};
+static const char *const DAYS[] = {
+    "SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY",
+};
+static const char *const MONTHS[] = {
+    "JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST",
+    "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER",
+};
+
+static message_stats_fn s_stats_fn;
+static void            *s_stats_arg;
+
+void message_set_stats_source(message_stats_fn fn, void *arg)
+{
+    s_stats_fn  = fn;
+    s_stats_arg = arg;
+}
+
+/* 1-99, with no zero: the part of a number between its hundreds and thousands. */
+static int small_number(int v, const char **out)
+{
+    int n = 0;
+    if (v < 20) {
+        out[n++] = NUMBERS[v];
+    } else {
+        out[n++] = TENS[v / 10 - 2];
+        if (v % 10)
+            out[n++] = NUMBERS[v % 10];
+    }
+    return n;
+}
+
+/* Clamped at 99,999, which a week of key-ups or minutes isn't going to reach. */
+static int number_clips(long v, const char **out)
+{
+    if (v < 0)
+        v = 0;
+    if (v > 99999)
+        v = 99999;
+    if (v == 0) {
+        out[0] = NUMBERS[0];
+        return 1;
+    }
+    int n = 0;
+    if (v >= 1000) {
+        n += small_number((int)(v / 1000), out + n);
+        out[n++] = "THOUSAND";
+        v %= 1000;
+    }
+    if (v >= 100) {
+        out[n++] = NUMBERS[v / 100];
+        out[n++] = "HUNDRED";
+        v %= 100;
+    }
+    if (v > 0)
+        n += small_number((int)v, out + n);
+    return n;
+}
+
+int message_var_clips(voice_var_t var, const struct tm *when, const message_stats_t *stats,
                       const char *out[MESSAGE_VAR_MAX_CLIPS])
 {
     int hour = when->tm_hour, min = when->tm_min, n = 0;
@@ -44,31 +110,51 @@ int message_var_clips(voice_var_t var, const struct tm *when,
     case VOICE_VAR_GREETING:
         out[n++] = hour < 12 ? "F_MORNING" : hour < 18 ? "F_AFTERNOON" : "F_EVENING";
         break;
+    case VOICE_VAR_DAY:
+        out[n++] = DAYS[when->tm_wday];
+        break;
+    case VOICE_VAR_DATE:
+        out[n++] = MONTHS[when->tm_mon];
+        n += number_clips(when->tm_mday, out + n);
+        break;
+    case VOICE_VAR_KEYUPS_DAY:
+        n = number_clips(stats->keyups_day, out);
+        break;
+    case VOICE_VAR_KEYUPS_WEEK:
+        n = number_clips(stats->keyups_week, out);
+        break;
+    case VOICE_VAR_MINUTES_DAY:
+        n = number_clips(stats->minutes_day, out);
+        break;
+    case VOICE_VAR_MINUTES_WEEK:
+        n = number_clips(stats->minutes_week, out);
+        break;
     case VOICE_VAR_NONE:
         break;
     }
     return n;
 }
 
-/* Every clip a variable could ask for has to exist, whatever the time is now. */
+/* Every clip a variable could ask for has to exist, whatever it happens to say now. */
 static int validate_var(const config_message_t *m, voice_var_t var, vocab_cache_t *vocab)
 {
-    int errors = 0;
-    for (int hour = 0; hour < 24; hour++) {
-        for (int min = 0; min < 60; min++) {
-            struct tm when = {.tm_hour = hour, .tm_min = min};
-            const char *clips[MESSAGE_VAR_MAX_CLIPS];
-            int n = message_var_clips(var, &when, clips);
-            for (int i = 0; i < n; i++) {
-                size_t len;
-                if (!vocab_get(vocab, clips[i], &len)) {
-                    LOGE("config: messages.%s: a variable needs the voice clip '%s'\n", m->name, clips[i]);
-                    return 1;
-                }
+    /* Stepping everything together reaches every day, month, hour and minute, and every
+     * word a number can use: past 1,099 they only repeat. */
+    for (int i = 0; i < 1100; i++) {
+        struct tm when = {.tm_hour = i % 24, .tm_min = i % 60, .tm_wday = i % 7,
+                          .tm_mon = i % 12, .tm_mday = i % 31 + 1};
+        message_stats_t stats = {i, i, i, i};
+        const char *clips[MESSAGE_VAR_MAX_CLIPS];
+        int n = message_var_clips(var, &when, &stats, clips);
+        for (int c = 0; c < n; c++) {
+            size_t len;
+            if (!vocab_get(vocab, clips[c], &len)) {
+                LOGE("config: messages.%s: a variable needs the voice clip '%s'\n", m->name, clips[c]);
+                return 1;
             }
         }
     }
-    return errors;
+    return 0;
 }
 
 int message_has_voice(const config_t *cfg, const char *name)
@@ -215,8 +301,11 @@ rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
                     time_t t = time(NULL);
                     struct tm when;
                     localtime_r(&t, &when);
+                    message_stats_t stats = {0};
+                    if (s_stats_fn)
+                        s_stats_fn(s_stats_arg, &stats);
                     const char *clips[MESSAGE_VAR_MAX_CLIPS];
-                    int n = message_var_clips(word->var, &when, clips);
+                    int n = message_var_clips(word->var, &when, &stats, clips);
                     for (int c = 0; c < n; c++)
                         append_clip(cfg, vocab, clips[c], &buf);
                     continue;

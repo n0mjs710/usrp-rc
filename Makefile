@@ -32,6 +32,7 @@ SRCS = src/main.c \
        src/dtmf.c \
        src/command.c \
        src/schedule.c \
+       src/stats.c \
        src/log.c
 
 OBJS     = $(patsubst %.c,$(BUILDDIR)/%.o,$(SRCS))
@@ -90,6 +91,12 @@ DTMF_TEST_OBJS = $(BUILDDIR)/src/dtmf.o $(BUILDDIR)/src/command.o \
 $(DTMF_TEST): $(BUILDDIR)/tests/dtmf_test.o $(DTMF_TEST_OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^ -lm
 
+STATS_TEST = $(BUILDDIR)/tests/stats_test
+STATS_TEST_OBJS = $(BUILDDIR)/src/stats.o $(BUILDDIR)/src/log.o
+
+$(STATS_TEST): $(BUILDDIR)/tests/stats_test.o $(STATS_TEST_OBJS)
+	$(CC) $(LDFLAGS) -o $@ $^
+
 CONFIG_TEST = $(BUILDDIR)/tests/config_test
 CONFIG_TEST_OBJS = $(filter-out $(BUILDDIR)/src/port.o,$(HARNESS_OBJS))
 
@@ -97,10 +104,11 @@ $(CONFIG_TEST): $(BUILDDIR)/tests/config_test.o $(CONFIG_TEST_OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^ -lm
 
 # Run from the repo root -- tests/harness.conf, tones.conf and vocab_8k/ are relative.
-check: $(TARGET) $(HARNESS) $(JITTER_TEST) $(DTMF_TEST) $(CONFIG_TEST)
+check: $(TARGET) $(HARNESS) $(JITTER_TEST) $(DTMF_TEST) $(STATS_TEST) $(CONFIG_TEST)
 	./$(HARNESS)
 	./$(JITTER_TEST)
 	./$(DTMF_TEST)
+	./$(STATS_TEST)
 	./$(CONFIG_TEST)
 	python3 tools/toml2conf.py tests/legacy.toml | diff - tests/legacy.conf
 	./$(TARGET) --check tests/legacy.conf

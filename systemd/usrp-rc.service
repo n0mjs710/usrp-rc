@@ -18,6 +18,8 @@ TimeoutStopSec=5
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
+# Usage statistics survive restarts in /var/lib/usrp-rc.
+StateDirectory=usrp-rc
 PrivateTmp=yes
 
 [Install]

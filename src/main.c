@@ -10,6 +10,7 @@
 #include "port.h"
 #include "command.h"
 #include "schedule.h"
+#include "stats.h"
 #include "util.h"
 #include "log.h"
 
@@ -44,6 +45,10 @@
  * these continuously; this is just the missing consumer). */
 #define HEARTBEAT_INTERVAL_MS 60000u
 
+/* How often usage is written out, if it changed. Easy on the SD card; a power failure
+ * loses at most this much of it. */
+#define STATS_SAVE_INTERVAL_MS (15u * 60u * 1000u)
+
 static volatile sig_atomic_t g_stop = 0;
 
 static void sig_handler(int sig)
@@ -64,6 +69,9 @@ typedef struct {
     int mmdvm_sock;
     int link_sock;
     int epfd;
+
+    stats_t  *stats;
+    uint64_t  stats_deadline;
 
     config_events_t events;   /* the config's, as changed by any open schedule window */
     bool     schedule_active[CFG_MAX_SCHEDULE];
@@ -390,6 +398,9 @@ static void run_command(app_t *a, const command_t *c)
     case COMMAND_TIME:
         reply_with_message(a, a->cfg.events.time_message);
         break;
+    case COMMAND_STATS:
+        reply_with_message(a, a->cfg.events.stats_message);
+        break;
     case COMMAND_LINK_ON:
         set_link(a, true);
         reply_with_message(a, a->cfg.events.link_on_message);
@@ -619,6 +630,24 @@ static void handle_link(app_t *a)
     }
 }
 
+/* ── usage ─────────────────────────────────────────────────────────────── */
+
+static void on_port_activity(void *arg, double seconds)
+{
+    app_t *a = arg;
+    stats_record(a->stats, time(NULL), seconds);
+}
+
+static void stats_for_messages(void *arg, message_stats_t *out)
+{
+    app_t *a = arg;
+    time_t now = time(NULL);
+    out->keyups_day   = stats_keyups(a->stats, now, 24);
+    out->keyups_week  = stats_keyups(a->stats, now, 168);
+    out->minutes_day  = stats_minutes(a->stats, now, 24);
+    out->minutes_week = stats_minutes(a->stats, now, 168);
+}
+
 /* ── schedule ──────────────────────────────────────────────────────────── */
 
 /* Runs once a minute, on the minute. Works from the wall clock each time, so a clock
@@ -644,7 +673,7 @@ static void schedule_update(app_t *a, uint64_t now)
 static int next_timeout_ms(app_t *a, uint64_t now)
 {
     uint64_t min = 0;
-    uint64_t cand[7];
+    uint64_t cand[8];
     int nc = 0;
 
     uint64_t pd = port_next_deadline_ms(a->port);
@@ -655,6 +684,7 @@ static int next_timeout_ms(app_t *a, uint64_t now)
     if (a->heartbeat_deadline) cand[nc++] = a->heartbeat_deadline;
     if (a->fm_ping_deadline) cand[nc++] = a->fm_ping_deadline;
     if (a->schedule_deadline) cand[nc++] = a->schedule_deadline;
+    if (a->stats_deadline) cand[nc++] = a->stats_deadline;
 
     for (int i = 0; i < nc; i++)
         if (min == 0 || cand[i] < min) min = cand[i];
@@ -669,6 +699,11 @@ static void check_all_timers(app_t *a, uint64_t now)
 {
     if (a->schedule_deadline && now >= a->schedule_deadline)
         schedule_update(a, now);
+
+    if (a->stats_deadline && now >= a->stats_deadline) {
+        stats_save(a->stats);
+        a->stats_deadline = now + STATS_SAVE_INTERVAL_MS;
+    }
 
     port_check_timers(a->port, now);
 
@@ -786,6 +821,14 @@ int main(int argc, char *argv[])
     }
     port_set_ptt_callback(a->port, on_port_ptt, a);
 
+    if (stats_create(&a->stats, a->cfg.stats.file, time(NULL)) != 0) {
+        LOGE("usrp-rc: failed to init usage statistics\n");
+        return 1;
+    }
+    a->stats_deadline = monotonic_ms() + STATS_SAVE_INTERVAL_MS;
+    port_set_activity_callback(a->port, on_port_activity, a);
+    message_set_stats_source(stats_for_messages, a);
+
     a->link_up = a->cfg.link.enabled && a->cfg.link.start_on;
     /* With no link at all, there's no "link off" for the courtesy tone to show. */
     port_set_link_up(a->port, a->link_up || !a->cfg.link.enabled);
@@ -897,6 +940,8 @@ int main(int argc, char *argv[])
     jitter_buffer_destroy(a->jb);
     ste_destroy(a->ste);
     command_session_destroy(a->cmd);
+    stats_save(a->stats);
+    stats_destroy(a->stats);
     port_destroy(a->port);
     vocab_cache_destroy(a->vocab);
     free(a);

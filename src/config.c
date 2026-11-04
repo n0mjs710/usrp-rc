@@ -66,10 +66,13 @@ void config_defaults(config_t *cfg)
      * link is prefix 7 + 2 (receive/transmit) or 3 (off). */
     strncpy(cfg->dtmf.pad_test_prefix, "5", sizeof(cfg->dtmf.pad_test_prefix) - 1);
     strncpy(cfg->dtmf.time_code, "39", sizeof(cfg->dtmf.time_code) - 1);
+    strncpy(cfg->dtmf.stats_code, "38", sizeof(cfg->dtmf.stats_code) - 1);
     strncpy(cfg->dtmf.link_on_code, "72", sizeof(cfg->dtmf.link_on_code) - 1);
     strncpy(cfg->dtmf.link_off_code, "73", sizeof(cfg->dtmf.link_off_code) - 1);
 
     strncpy(cfg->events.time_message, "time_readback", sizeof(cfg->events.time_message) - 1);
+    strncpy(cfg->events.stats_message, "stats_readback", sizeof(cfg->events.stats_message) - 1);
+    strncpy(cfg->stats.file, "/var/lib/usrp-rc/stats", sizeof(cfg->stats.file) - 1);
     strncpy(cfg->events.link_on_message, "link_on_reply", sizeof(cfg->events.link_on_message) - 1);
     strncpy(cfg->events.link_off_message, "link_off_reply", sizeof(cfg->events.link_off_message) - 1);
 
@@ -179,8 +182,11 @@ static const field_t FIELDS[] = {
     INT("dtmf",  "beep_off_ms",   dtmf.beep_off_ms, 0, 10000),
     STR("dtmf",  "pad_test_prefix", dtmf.pad_test_prefix),
     STR("dtmf",  "time_code",     dtmf.time_code),
+    STR("dtmf",  "stats_code",    dtmf.stats_code),
     STR("dtmf",  "link_on_code",  dtmf.link_on_code),
     STR("dtmf",  "link_off_code", dtmf.link_off_code),
+
+    STR("stats", "file", stats.file),
 
     STR("events", "startup_message",        events.startup_message),
     NAMES("initial_ids",   events.initial_ids,   events.n_initial_ids),
@@ -192,6 +198,7 @@ static const field_t FIELDS[] = {
     STR("events", "ct_link_off_message",    events.ct_link_off_message),
     STR("events", "tail_message",           events.tail_message),
     STR("events", "time_message",           events.time_message),
+    STR("events", "stats_message",          events.stats_message),
     STR("events", "link_on_message",        events.link_on_message),
     STR("events", "link_off_message",       events.link_off_message),
     STR("events", "timeout_message",        events.timeout_message),
@@ -203,7 +210,7 @@ static const field_t FIELDS[] = {
 #define SCHEDULE_SECTION "schedule"
 
 static const char *const SECTIONS[] = {
-    "log", "mmdvm", "link", "audio", "timers", "dtmf", "events", MESSAGES_SECTION, SCHEDULE_SECTION, NULL,
+    "log", "mmdvm", "link", "audio", "timers", "dtmf", "stats", "events", MESSAGES_SECTION, SCHEDULE_SECTION, NULL,
 };
 
 static const char *const ELEM_TYPES[] = {"cw", "voice", "tone", NULL};
@@ -744,6 +751,12 @@ static voice_var_t voice_var(const char *tok)
     if (strcmp(tok, "{time}") == 0)     return VOICE_VAR_TIME;
     if (strcmp(tok, "{ampm}") == 0)     return VOICE_VAR_AMPM;
     if (strcmp(tok, "{greeting}") == 0) return VOICE_VAR_GREETING;
+    if (strcmp(tok, "{day}") == 0)      return VOICE_VAR_DAY;
+    if (strcmp(tok, "{date}") == 0)     return VOICE_VAR_DATE;
+    if (strcmp(tok, "{keyups_day}") == 0)   return VOICE_VAR_KEYUPS_DAY;
+    if (strcmp(tok, "{keyups_week}") == 0)  return VOICE_VAR_KEYUPS_WEEK;
+    if (strcmp(tok, "{minutes_day}") == 0)  return VOICE_VAR_MINUTES_DAY;
+    if (strcmp(tok, "{minutes_week}") == 0) return VOICE_VAR_MINUTES_WEEK;
     return VOICE_VAR_NONE;
 }
 
@@ -771,7 +784,7 @@ static void read_voice(char *words, const char *path, const config_t *cfg, confi
                 cfg_err("%s: uses {call} but no callsign is set\n", path);
             add_voice_callsign(elem, path, cfg->callsign);
         } else if (strchr(tok, '{')) {
-            cfg_err("%s: unknown placeholder '%s' (expected {call}, {time}, {ampm} or {greeting}, as its own word)\n",
+            cfg_err("%s: unknown placeholder '%s' (see [messages] in the README for the list; each must be its own word)\n",
                     path, tok);
         } else if (parse_voice_gap(tok, &gap_ms)) {
             if (gap_ms > 60000)
@@ -975,6 +988,7 @@ static void load_builtin_messages(config_t *cfg)
         {"time_readback",  "F_GOOD {greeting} _ F_THE F_TIME F_IS {time} {ampm}"},
         {"link_on_reply",  "LINK ON"},
         {"link_off_reply", "LINK OFF"},
+        {"stats_readback", "COUNT {keyups_day} _ MINUTES {minutes_day}"},
     };
     for (size_t i = 0; i < sizeof(BUILTIN) / sizeof(BUILTIN[0]); i++) {
         char words[128];
@@ -1205,6 +1219,7 @@ static void validate(const entries_t *es, const config_t *cfg)
     static const struct { const char *key; size_t offset; } CODES[] = {
         {"pad_test_prefix", offsetof(config_dtmf_t, pad_test_prefix)},
         {"time_code",       offsetof(config_dtmf_t, time_code)},
+        {"stats_code",      offsetof(config_dtmf_t, stats_code)},
         {"link_on_code",    offsetof(config_dtmf_t, link_on_code)},
         {"link_off_code",   offsetof(config_dtmf_t, link_off_code)},
     };
@@ -1228,6 +1243,7 @@ static void validate(const entries_t *es, const config_t *cfg)
     CHECK_ONE("ct_link_off_message",    ct_link_off_message);
     CHECK_ONE("tail_message",           tail_message);
     CHECK_ONE("time_message",           time_message);
+    CHECK_ONE("stats_message",          stats_message);
     CHECK_ONE("link_on_message",        link_on_message);
     CHECK_ONE("link_off_message",       link_off_message);
     CHECK_ONE("timeout_message",        timeout_message);
