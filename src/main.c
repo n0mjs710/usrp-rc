@@ -191,7 +191,7 @@ static void note_mmdvm_voice_pacing(app_t *a, uint64_t now)
         if (gap >= MMDVM_VOICE_GAP_NOTE_MS) {
             uint64_t cpu_gap = now_cpu - a->mmdvm_voice_last_cpu_ms;
             if (gap < MMDVM_VOICE_GAP_WARN_MS) {
-                LOGD("audio: %llums gap between mmdvm-TX frames (nominal 20ms), %llums of that was our own CPU time\n",
+                LOGD("audio: %llums gap between mmdvm-TX frames, %llums of it our own CPU time (normal; the modem tolerates 60ms)\n",
                         (unsigned long long)gap, (unsigned long long)cpu_gap);
             } else {
                 if (a->mmdvm_voice_burst_run > 1)
@@ -582,7 +582,7 @@ static void handle_mmdvm(app_t *a)
         LOGW("audio: %d mmdvm-RX audio packets arrived together -- a brief stall, here or in MMDVM-Host\n",
                 audio_this_call);
     else if (audio_this_call > 1)
-        LOGD("audio: %d mmdvm-RX audio packets arrived together\n", audio_this_call);
+        LOGD("audio: %d mmdvm-RX audio packets arrived together (normal)\n", audio_this_call);
 }
 
 /* ── link RX handling ──────────────────────────────────────────────────── */
