@@ -827,6 +827,78 @@ static bool scenario_empty_mandatory_uses_impolite(config_t *base, vocab_cache_t
     free(log);
     port_destroy(p);
 
+    /* A solitary key-up with an initial ID owes nothing more. */
+    cfg.timers.id_interval = 1.5;
+    cfg.events.n_mandatory_ids = 1;
+    snprintf(cfg.events.impolite_id, sizeof(cfg.events.impolite_id), "id_voice");
+    p = fresh_port(&cfg, vocab);
+    cap_start();
+    prime(p);
+    wait_ms(p, 3000);
+    log = cap_stop();
+    CHECK(count_occurrences(log, "id: initial") == 1 && count_occurrences(log, "id: mandatory") == 0,
+          "initial ID on a solitary key-up: no further ID");
+    free(log);
+    port_destroy(p);
+
+    /* Without an initial ID, the same key-up owes one at the timer. */
+    cfg.events.n_initial_ids = 0;
+    p = fresh_port(&cfg, vocab);
+    cap_start();
+    prime(p);
+    bool owed = wait_for_log(p, "id: mandatory", 3000);
+    log = cap_stop();
+    CHECK(count_occurrences(log, "id: initial") == 0, "no initial ID: nothing plays on the key-up");
+    CHECK(owed && port_ptt(p), "the timer keys up with the mandatory ID");
+    free(log);
+    wait_until_idle(p, 8000);
+    port_destroy(p);
+
+    /* ... or impolite_id, with no mandatory ID either. */
+    cfg.events.n_mandatory_ids = 0;
+    p = fresh_port(&cfg, vocab);
+    prime(p);
+    cap_start();
+    owed = wait_for_log(p, "impolite_id, as there's no mandatory ID", 3000);
+    free(cap_stop());
+    CHECK(owed && port_ptt(p), "with no mandatory ID either, it uses impolite_id");
+    wait_until_idle(p, 8000);
+    port_destroy(p);
+
+    /* ... or the anxious ID, if a tail reaches its window first. */
+    cfg.events.n_mandatory_ids = 1;
+    cfg.timers.id_interval = 3.0;
+    cfg.timers.id_anxious = 2.5;
+    snprintf(cfg.events.anxious_id, sizeof(cfg.events.anxious_id), "id_voice");
+    p = fresh_port(&cfg, vocab);
+    prime(p);
+    wait_ms(p, 700);
+    cap_start();
+    activity_pulse(p);
+    log = cap_stop();
+    CHECK(count_occurrences(log, "id: anxious") == 1, "a tail in the window plays the anxious ID");
+    free(log);
+    port_destroy(p);
+    cfg.events.n_initial_ids = 1;
+
+    /* With no anxious ID, nothing plays early: the timer waits for the mandatory ID. */
+    cfg.events.n_initial_ids = 1;
+    cfg.events.anxious_id[0] = '\0';
+    cfg.timers.id_interval = 2.0;
+    cfg.timers.id_anxious = 1.0;
+    p = fresh_port(&cfg, vocab);
+    prime(p);
+    activity_pulse(p);
+    cap_start();
+    wait_for_log(p, "id: mandatory", 3000);
+    log = cap_stop();
+    CHECK(count_occurrences(log, "id: anxious") == 0 && count_occurrences(log, "id: impolite") == 0,
+          "with no anxious_id, it waits for the mandatory ID");
+    CHECK(count_occurrences(log, "id: mandatory") == 1, "and that plays");
+    free(log);
+    wait_until_idle(p, 8000);
+    port_destroy(p);
+
     printf(ok ? "[14] PASS\n" : "[14] FAIL\n");
     return ok;
 }

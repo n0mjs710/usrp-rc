@@ -1195,6 +1195,10 @@ static void read_override(char *tok, const char *path, const config_t *cfg, conf
         cfg_err("%s: '%s' can't be scheduled (only [events] settings can, except startup_message)\n", path, key);
         return;
     }
+    if (strcmp(key, "impolite_id") == 0 && !value[0]) {
+        cfg_err("%s: impolite_id can't be empty: it's the ID of last resort\n", path);
+        return;
+    }
     if (op != OVERRIDE_SET && f->type != FT_NAME_LIST) {
         cfg_err("%s: %s takes one message, so it can't use += or -=\n", path, key);
         return;
@@ -1361,7 +1365,7 @@ static void check_schedule_lists(const config_t *cfg)
             if (o->offset != offsetof(config_events_t, mandatory_ids))
                 continue;
             if (o->op == OVERRIDE_SET && !o->value[0])
-                LOGW("config: schedule.%s: mandatory_ids= leaves no mandatory ID during this window; IDs fall back to impolite_id\n",
+                LOGW("config: schedule.%s: mandatory_ids= leaves no mandatory ID during this window, so it will use impolite_id\n",
                      cfg->schedule[i].name);
             if (o->op != OVERRIDE_REMOVE)
                 continue;
@@ -1415,6 +1419,8 @@ static void validate(const entries_t *es, const config_t *cfg)
     CHECK_ONE("startup_message",        startup_message);
     CHECK_ONE("anxious_id",             anxious_id);
     CHECK_ONE("impolite_id",            impolite_id);
+    if (!ev->impolite_id[0])
+        cfg_err("events.impolite_id is required: it's the ID of last resort if mandatory_ids is empty\n");
     CHECK_ONE("ct_link_on_message",             ct_link_on_message);
     CHECK_ONE("ct_link_message",        ct_link_message);
     CHECK_ONE("ct_link_off_message",    ct_link_off_message);
@@ -1442,12 +1448,10 @@ static void validate(const entries_t *es, const config_t *cfg)
     if (tail_used && cfg->timers.tail_every == 0)
         LOGW("config: a tail message is set, but timers.tail_every is 0, so it won't play\n");
 
-    /* Not errors: a site may legitimately ID some other way. Misspelling the
-     * key can't land here -- that's already an unknown-setting error. */
+    /* Not an error, as impolite_id covers it. Misspelling the key can't land here --
+     * that's already an unknown-setting error. */
     if (ev->n_mandatory_ids == 0)
-        LOGW(ev->impolite_id[0]
-             ? "config: events.mandatory_ids is empty -- IDs will use events.impolite_id\n"
-             : "config: events.mandatory_ids and events.impolite_id are empty -- this controller will not transmit an ID\n");
+        LOGW("config: events.mandatory_ids is empty -- mandatory IDs will use events.impolite_id\n");
     if (cfg->timers.id_interval > 600.0)
         LOGW("config: timers.id_interval is %g s, longer than the FCC 10-minute limit\n",
              cfg->timers.id_interval);

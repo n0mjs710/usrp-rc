@@ -22,6 +22,12 @@ Rename this setting under `[events]`. usrp-rc will not start until you do:
 | --- | --- |
 | `ct_message` | `ct_link_on_message` |
 
+Set `impolite_id` under `[events]`. It's now required, because it's the ID of last resort if
+`mandatory_ids` is empty.
+
+An empty `initial_ids` still plays nothing on the first key-up, but the repeater now
+identifies when the ID timer runs out, even if nothing else was transmitted.
+
 Delete `voice_filter` from `[audio]` if you have it. The setting is gone, and it's an
 error if left in.
 

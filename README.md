@@ -94,6 +94,7 @@ remote_port = 41001
 [events]
 initial_ids     = my_voice
 mandatory_ids   = my_cw
+impolite_id     = my_cw
 ct_link_on_message      = yellow_jacket
 ct_link_message = bumble_bee
 timeout_message = timeout_warn
@@ -123,8 +124,8 @@ config: line 31: messages.my_voice: no voice clip named 'THSIS'
 Unknown or misplaced settings, wrong types, out-of-range values, and references
 to messages or voice clips that don't exist are all errors. Run `--check` from
 the same directory the service uses, since `tones.conf`, `user_8k/` and
-`vocab_8k/` are looked for there before the installed copies. An empty
-`events.mandatory_ids` is only a warning, in case the site IDs some other way.
+`vocab_8k/` are looked for there before the installed copies. An empty `events.mandatory_ids` is a
+warning, because `events.impolite_id`, which is required, is used in its place.
 
 ### Converting an old `usrp-rc.toml`
 
@@ -279,6 +280,7 @@ short.
 [events]
 initial_ids     = my_voice
 mandatory_ids   = my_cw
+impolite_id     = my_cw
 ct_link_on_message      = yellow_jacket
 ct_link_message = bumble_bee
 timeout_message = timeout_warn

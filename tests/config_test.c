@@ -109,6 +109,9 @@ static const test_case_t CASES[] = {
     {"schedule dec-8x", BASE "[messages]\nm = cw: A\n[schedule]\na = dec-8x 19:00-21:00 tail_messages=m\n", "'dec-8x' is not valid days"},
     {"schedule last-fri", BASE "[messages]\nm = cw: A\n[schedule]\na = last-fri 19:00-21:00 tail_messages=m\n", "'last-fri' is not valid days"},
     {"schedule too many rules", BASE "[messages]\nm = cw: A\n[schedule]\na = 1st,2nd,3rd,4th,5th,6th,7th,8th,9th 19:00-21:00 tail_messages=m\n", "'1st,2nd,3rd,4th,5th,6th,7th,8th,9th' is not valid days"},
+    {"impolite_id empty", BASE "[events]\nimpolite_id =\n", "events.impolite_id is required"},
+    {"impolite_id empty in a window", BASE "[events]\nimpolite_id = honk\n[schedule]\na = mon 01:00-02:00 impolite_id=\n", "impolite_id can't be empty"},
+    {"impolite_id changed in a window", BASE "[events]\nimpolite_id = honk\n[schedule]\na = mon 01:00-02:00 impolite_id=beep\n", NULL},
     {"schedule += and -=", BASE "[messages]\nm = cw: A\nn = cw: B\n[schedule]\na = mon 01:00-02:00 tail_messages+=m,n mandatory_ids-=m\n", NULL},
     {"schedule += on one message", BASE "[messages]\nm = cw: A\n[schedule]\na = mon 01:00-02:00 ct_link_on_message+=m\n", "ct_link_on_message takes one message, so it can't use += or -="},
     {"schedule -= on one message", BASE "[messages]\nm = cw: A\n[schedule]\na = mon 01:00-02:00 ct_link_on_message-=m\n", "ct_link_on_message takes one message, so it can't use += or -="},
@@ -208,9 +211,14 @@ static int capture_load(const char *path)
     return rc;
 }
 
+/* impolite_id is required, so add one unless the test is about it. At the end, to leave
+ * the line numbers in expected messages alone. */
 static int load_text(const char *text)
 {
-    write_file(CONF_TMP, text);
+    static char full[8192];
+    const char *extra = strstr(text, "impolite_id") ? "" : "\n[events]\nimpolite_id = honk\n";
+    snprintf(full, sizeof(full), "%s%s", text, extra);
+    write_file(CONF_TMP, full);
     return capture_load(CONF_TMP);
 }
 
@@ -251,7 +259,7 @@ int main(void)
     printf("[3] values land where they should\n");
     rc = load_text(BASE "[timers]\nhang = 9\n");
     check("hang loaded", rc == 0 && s_cfg.timers.hang == 9.0);
-    check("no mandatory IDs warns", strstr(s_log, "will not transmit an ID") != NULL);
+    check("no mandatory IDs warns", strstr(s_log, "mandatory IDs will use events.impolite_id") != NULL);
     check("mmdvm ports default to the MMDVM-Host pairing",
           s_cfg.mmdvm.local_port == 4810 && s_cfg.mmdvm.rpt_port == 3810);
 

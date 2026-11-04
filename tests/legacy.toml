@@ -24,6 +24,7 @@ hang = 2.5
 startup_message = ""
 initial_ids     = ["site_voice", "site_cw"]
 mandatory_ids   = ["site_cw"]
+impolite_id     = "site_cw"
 ct_message      = "yellow_jacket"
 ct_link_message = "my_tone"
 

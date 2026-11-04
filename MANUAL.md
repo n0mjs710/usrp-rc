@@ -155,6 +155,7 @@ enabled = true
 [events]
 initial_ids         = my_voice
 mandatory_ids       = my_cw
+impolite_id         = my_cw
 ct_link_on_message  = yellow_jacket
 ct_link_off_message = comet
 ct_link_message     = bumble_bee
@@ -303,15 +304,24 @@ leave it empty to play nothing.
 | `initial_ids` | At the end of the first transmission when no ID timer is running. Rotates through its list. |
 | `mandatory_ids` | When the ID timer (`timers.id_interval`) runs out and the repeater isn't busy. Rotates through its list. |
 | `anxious_id` | In a tail during the last `timers.id_anxious` seconds before the timer runs out, so the ID doesn't have to key up on its own later. |
-| `impolite_id` | When the timer runs out while someone is talking. It's mixed over the conversation, with CW at `audio.impolite_morse_level`. If this is empty, the next `mandatory_ids` message is used. |
+| `impolite_id` | When the timer runs out while someone is talking. It's mixed over the conversation, with CW at `audio.impolite_morse_level`. Required. |
 
 If nothing has been transmitted since the last ID, no new ID plays until someone uses the
 repeater again.
 
-**ID safety net:** the station has to identify, so if `mandatory_ids` is ever empty when the
-timer runs out, `impolite_id` plays in its place, and the repeater keys up to send it if
-needed. This protects you from a config mistake. It isn't a way to set up IDs, so keep
-`mandatory_ids` filled in. `--check` warns if it's empty.
+**How IDs work:** any transmission means an ID is owed, and any ID clears that. When the
+timer runs out, the repeater sends an ID if one is owed, and otherwise stays quiet. That's
+why a single key-up followed by an initial ID needs nothing further: the station has already
+identified. With no initial ID, the ID is still owed when the timer runs out, so it goes out
+then, even if nothing else was transmitted. That's the anxious ID if a tail reaches it first,
+otherwise the mandatory ID, otherwise `impolite_id`.
+
+**ID safety net:** the station has to identify, so `impolite_id` is required, and `usrp-rc`
+won't start without it. If `mandatory_ids` is ever empty when an ID is due, `impolite_id`
+plays in its place, and the repeater keys up to send it if needed. This protects you from a
+config mistake. It isn't a way to set up IDs, so keep that list filled in. `--check` warns if
+it's empty. `anxious_id` has no such backup: without one, the repeater just waits for the
+mandatory ID.
 
 If someone keys up during a voice ID, the ID stops and the impolite ID plays instead. A
 CW ID carries on underneath.
@@ -455,8 +465,8 @@ that, since any extras are left out.
 
 **`-=` can't remove your last mandatory ID.** If it would, one ID stays in the rotation, and
 `--check` warns you. Setting `mandatory_ids=` empty leaves only the
-[ID safety net](#ids), and `--check` warns about that too. With `impolite_id` empty as well,
-no ID goes out, and the log says `NO ID SENT`.
+[ID safety net](#ids), and `--check` warns about that too. A window can change `impolite_id`
+but can't set it empty.
 
 **Line order matters with `=`.** A general line after a specific one overrides it. In this
 order, `weekly` replaces `meeting` every time, so `meeting` never takes effect:
@@ -771,6 +781,7 @@ start_on    = false
 | A sequence starts, but no reply | Read the `dtmf:` line that ends it, which says what matched or why it was abandoned. If a command matched, check whether its reply is set empty in `[events]`. |
 | `72` or `73` does nothing | Look for `link is not configured`, which means `link.enabled = false`. |
 | `usrp-rc` won't start | Run `--check` and work from the first error down. |
+| `events.impolite_id is required` | Set `impolite_id` under `[events]`. It's the ID of last resort if `mandatory_ids` is empty. |
 | `events.ct_message: renamed` | Change it to `ct_link_on_message`. |
 | `needs commas between names` | Change `id1 id2` to `id1,id2`. |
 | `a variable needs the voice clip` | That clip is missing. Run `sudo make install` to restore stock clips. |

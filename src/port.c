@@ -484,18 +484,31 @@ static void initial_id_after_drain(port_t *p, uint64_t now)
         schedule_ct_delay(p, now);
 }
 
+/* The next initial ID, or NULL if none are set. */
+static const char *initial_id_next(port_t *p)
+{
+    int n = p->ev->n_initial_ids;
+    if (n == 0)
+        return NULL;
+    int idx = p->id_rot_initial % n;
+    p->id_rot_initial = (idx + 1) % n;
+    LOGI("id: initial  '%s'  (%d/%d)\n", p->ev->initial_ids[idx], idx + 1, n);
+    return p->ev->initial_ids[idx];
+}
+
 static void initial_id_render_and_queue(port_t *p, uint64_t now)
 {
-    if (p->ev->n_initial_ids == 0) {
-        LOGW("port: no initial_ids configured\n");
-        initial_id_after_drain(p, now);
+    const char *name = initial_id_next(p);
+    if (!name) {
+        /* An initial ID covers a solitary key-up, as the end of communications. Without
+         * one, the station hasn't identified, so the timer still owes an ID. */
+        if (p->id_deadline == 0)
+            schedule_id(p, now);
+        p->tx_activity = true;
+        if (p->state == PORT_TAIL && !cor_active(p))
+            schedule_ct_delay(p, now);
         return;
     }
-    int idx = p->id_rot_initial % p->ev->n_initial_ids;
-    const char *name = p->ev->initial_ids[idx];
-    p->id_rot_initial = (idx + 1) % p->ev->n_initial_ids;
-
-    LOGI("id: initial  '%s'  (%d/%d)\n", name, idx + 1, p->ev->n_initial_ids);
     p->voice_id_active = message_has_voice(p->cfg, name);
     p->id_playing = true;
     queue_message(p, name, -1.0);
@@ -506,7 +519,7 @@ static void do_initial_id(port_t *p, uint64_t now)
 {
     p->job_epoch = p->id_epoch;
     int pre_ms = p->cfg->audio.pre_message_ms;
-    if (pre_ms > 0) {
+    if (pre_ms > 0 && p->ev->n_initial_ids > 0) {
         p->pad_deadline = now + (uint64_t)pre_ms;
         p->pad_cont     = initial_id_render_and_queue;
         return;
@@ -585,15 +598,13 @@ static void startup_after_id_drain(port_t *p, uint64_t now)
 
 static void startup_queue_id(port_t *p, uint64_t now)
 {
-    if (p->ev->n_initial_ids == 0) {
+    const char *name = initial_id_next(p);
+    if (!name) {
+        /* The startup message transmitted without identifying, so an ID is owed. */
         startup_after_id_drain(p, now);
+        p->tx_activity = true;
         return;
     }
-    int idx = p->id_rot_initial % p->ev->n_initial_ids;
-    const char *name = p->ev->initial_ids[idx];
-    p->id_rot_initial = (idx + 1) % p->ev->n_initial_ids;
-
-    LOGI("id: initial  '%s'  (%d/%d)\n", name, idx + 1, p->ev->n_initial_ids);
     p->voice_id_active = message_has_voice(p->cfg, name);
     p->id_playing = true;
     queue_message(p, name, -1.0);

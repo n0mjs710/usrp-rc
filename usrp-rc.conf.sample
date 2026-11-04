@@ -32,12 +32,12 @@ codec       = pcm      # pcm or opus
 # initial_ids, mandatory_ids and tail_messages rotate through a comma-separated list (max 8).
 initial_ids     = default_voice
 mandatory_ids   = default_cw
+impolite_id     = default_cw   # required: also the ID of last resort if mandatory_ids is empty
 ct_link_on_message = yellow_jacket
 ct_link_message    = bumble_bee
 timeout_message = timeout_warn
 #startup_message        =
 #anxious_id             =
-#impolite_id            =
 #timeout_cancel_message =
 #ct_link_off_message    =               # local courtesy tone while the link is off; empty = ct_link_on_message
 #tail_messages          =               # see timers.tail_every; empty = none
