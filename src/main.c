@@ -402,18 +402,18 @@ static void run_command(app_t *a, const command_t *c)
         break;
     }
     case COMMAND_TIME:
-        reply_with_message(a, a->cfg.events.time_message);
+        reply_with_message(a, a->events.time_message);
         break;
     case COMMAND_STATS:
-        reply_with_message(a, a->cfg.events.stats_message);
+        reply_with_message(a, a->events.stats_message);
         break;
     case COMMAND_LINK_ON:
         set_link(a, true);
-        reply_with_message(a, a->cfg.events.link_on_message);
+        reply_with_message(a, a->events.link_on_message);
         break;
     case COMMAND_LINK_OFF:
         set_link(a, false);
-        reply_with_message(a, a->cfg.events.link_off_message);
+        reply_with_message(a, a->events.link_off_message);
         break;
     }
 }
@@ -904,6 +904,8 @@ int main(int argc, char *argv[])
         ev.data.fd = a->link_sock;
         epoll_ctl(a->epfd, EPOLL_CTL_ADD, a->link_sock, &ev);
     }
+
+    a->events = a->cfg.events;
 
     /* Ahead of the startup message, so it already sees any open window. */
     if (a->cfg.nschedule > 0) {
