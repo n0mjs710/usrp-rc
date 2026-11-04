@@ -430,11 +430,14 @@ static void mmdvm_unkey_edge(app_t *a, uint64_t now)
  * actually delivering mmdvm-RX packets to us on the expected ~20ms
  * cadence in the first place? If gaps show up here, the irregularity
  * predates us and no amount of tuning our own send timing will fix it.
- * `packets_this_call`, checked after the drain loop below, is direct
- * evidence (not an inference) that our loop fell behind: it's a literal
- * count of how many datagrams were already sitting in the kernel socket
- * buffer by the time we got back to reading it. */
+ *
+ * `audio_this_call` counts FMD datagrams found waiting together. FMS and FME are
+ * left out, as MMDVM-Host sends them right next to audio on every transmission.
+ * Three together means audio was held up about as long as the gap warning's limit;
+ * two is ordinary scheduling, which the jitter buffer absorbs. It can't say whether
+ * the delay was ours or MMDVM-Host's. */
 #define MMDVM_RX_GAP_WARN_MS 35U
+#define MMDVM_RX_BURST_WARN  3
 
 /* One reframed 160-sample frame of received RF audio, fanned out to the
  * local repeat path and the link. Split out of handle_mmdvm() because a
@@ -481,7 +484,7 @@ static void handle_mmdvm(app_t *a)
 {
     uint8_t buf[FM_MAX_PKT_LEN + 64];
     fm_packet_t pkt;
-    int packets_this_call = 0;
+    int audio_this_call = 0;
 
     for (;;) {
         ssize_t n = recv(a->mmdvm_sock, buf, sizeof(buf), 0);
@@ -497,11 +500,12 @@ static void handle_mmdvm(app_t *a)
 
         /* Keepalives are not traffic: they arrive every 5 s regardless of
          * whether anyone is talking, so they must not feed the watchdog,
-         * the pacing monitor, or the fell-behind counter. */
+         * the pacing monitor, or the audio count. */
         if (pkt.type == FM_PKT_PING || pkt.type == FM_PKT_NONE)
             continue;
 
-        packets_this_call++;
+        if (pkt.type == FM_PKT_DATA)
+            audio_this_call++;
         a->mmdvm_watchdog_deadline = now + WATCHDOG_MS;
 
         switch (pkt.type) {
@@ -568,9 +572,11 @@ static void handle_mmdvm(app_t *a)
         }
     }
 
-    if (packets_this_call > 1)
-        LOGW("audio: %d mmdvm-RX packets were queued and drained in one pass -- our loop fell behind\n",
-                packets_this_call);
+    if (audio_this_call >= MMDVM_RX_BURST_WARN)
+        LOGW("audio: %d mmdvm-RX audio packets arrived together -- a brief stall, here or in MMDVM-Host\n",
+                audio_this_call);
+    else if (audio_this_call > 1)
+        LOGD("audio: %d mmdvm-RX audio packets arrived together\n", audio_this_call);
 }
 
 /* ── link RX handling ──────────────────────────────────────────────────── */
