@@ -132,7 +132,7 @@ default_cw    = cw: {call}/R
 
 #[stats]
 # Where usage figures survive a restart. Empty = keep them in memory only.
-#file = /var/lib/usrp-rc/stats
+#file = /var/local/usrp-rc/stats
 
 #[dtmf]
 # Over-the-air DTMF commands from the repeater receiver. Off by default.

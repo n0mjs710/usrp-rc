@@ -72,7 +72,7 @@ void config_defaults(config_t *cfg)
 
     strncpy(cfg->events.time_message, "time_readback", sizeof(cfg->events.time_message) - 1);
     strncpy(cfg->events.stats_message, "stats_readback", sizeof(cfg->events.stats_message) - 1);
-    strncpy(cfg->stats.file, "/var/lib/usrp-rc/stats", sizeof(cfg->stats.file) - 1);
+    strncpy(cfg->stats.file, "/var/local/usrp-rc/stats", sizeof(cfg->stats.file) - 1);
     strncpy(cfg->events.link_on_message, "link_on_reply", sizeof(cfg->events.link_on_message) - 1);
     strncpy(cfg->events.link_off_message, "link_off_reply", sizeof(cfg->events.link_off_message) - 1);
 

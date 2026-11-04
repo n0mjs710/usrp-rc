@@ -18,8 +18,9 @@ TimeoutStopSec=5
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
-# Usage statistics survive restarts in /var/lib/usrp-rc.
-StateDirectory=usrp-rc
+# Usage statistics survive restarts here. The dash keeps the repeater on the air if
+# the directory is ever missing; the figures just won't save.
+ReadWritePaths=-/var/local/usrp-rc
 PrivateTmp=yes
 
 [Install]

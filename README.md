@@ -289,10 +289,12 @@ in hourly buckets over a rolling week. Kerchunks and timed-out transmissions don
 count. The `{keyups_*}` and `{minutes_*}` variables speak these figures, for a message
 or the usage command. Rewording the reply is a matter of redefining `stats_readback`.
 
-The figures survive restarts in `file` (`/var/lib/usrp-rc/stats` by default), which is
+The figures survive restarts in `file` (`/var/local/usrp-rc/stats` by default), which is
 saved every 15 minutes if anything changed and at shutdown. A power failure loses at
-most that much. Set `file` empty to keep them in memory only. If the file can't be
-written, usage still works until the next restart and a warning is logged.
+most that much. The file holds one week at most and never grows past that. Set `file`
+empty to keep them in memory only. If the file can't be written, usage still works until
+the next restart and a warning is logged. The service file only allows writes to
+`/var/local/usrp-rc`, so a `file` anywhere else also needs its own `ReadWritePaths`.
 
 ### `[schedule]` — changing events by time and day
 

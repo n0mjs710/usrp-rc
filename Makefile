@@ -7,6 +7,7 @@ UNITDIR    ?= $(PREFIX)/lib/systemd/system
 # never writes to either at runtime), not configuration -- they belong under
 # share/, not /etc.
 DATADIR    ?= $(PREFIX)/share/usrp-rc
+STATEDIR   ?= /var/local/usrp-rc
 
 CC      ?= gcc
 CFLAGS  += -std=c11 -O2 -Wall -Wextra -D_GNU_SOURCE -fPIE \
@@ -134,6 +135,7 @@ install: $(TARGET)
 	install -Dm644 tones.conf                  $(DESTDIR)$(DATADIR)/tones.conf
 	install -Dm755 tools/toml2conf.py          $(DESTDIR)$(DATADIR)/toml2conf.py
 	install -Dm644 systemd/usrp-rc.service     $(DESTDIR)$(UNITDIR)/usrp-rc.service
+	install -dm755 $(DESTDIR)$(STATEDIR)
 	@mkdir -p $(DESTDIR)$(DATADIR)/vocab_8k
 	@cp -n vocab_8k/*.wav $(DESTDIR)$(DATADIR)/vocab_8k/ 2>/dev/null || true
 	install -Dm644 user_8k/README.md          $(DESTDIR)$(DATADIR)/user_8k/README.md
@@ -159,4 +161,5 @@ uninstall:
 	rm -f $(DESTDIR)$(DATADIR)/tones.conf $(DESTDIR)$(DATADIR)/toml2conf.py
 	rm -f $(DESTDIR)$(DATADIR)/user_8k/README.md
 	@echo "usrp-rc: config at $(SYSCONFDIR)/usrp-rc/ preserved — remove manually if desired"
+	@echo "usrp-rc: usage figures in $(STATEDIR)/ preserved — remove manually if desired"
 	@echo "usrp-rc: any of your own clips in $(DATADIR)/user_8k/ preserved — remove manually if desired"
