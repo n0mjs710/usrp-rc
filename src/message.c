@@ -2,7 +2,6 @@
 #include "tone.h"
 #include "morse.h"
 #include "sbuf.h"
-#include "voice_filter.h"
 #include "log.h"
 
 #include <stdio.h>
@@ -218,21 +217,7 @@ static void append_clip(const config_t *cfg, vocab_cache_t *vocab, const char *c
         LOGE("message: voice clip '%s' not found\n", clip);
         return;
     }
-    if (!cfg->audio.voice_filter) {
-        sbuf_append_scaled(buf, cached, n, cfg->audio.voice_level);
-        return;
-    }
-    /* Filter a copy -- `cached` is owned by the vocab cache and
-     * reused for every future play of this clip. */
-    int16_t *filtered = malloc(n * sizeof(int16_t));
-    if (!filtered) {
-        sbuf_append_scaled(buf, cached, n, cfg->audio.voice_level);
-        return;
-    }
-    memcpy(filtered, cached, n * sizeof(int16_t));
-    voice_filter_apply(filtered, n);
-    sbuf_append_scaled(buf, filtered, n, cfg->audio.voice_level);
-    free(filtered);
+    sbuf_append_scaled(buf, cached, n, cfg->audio.voice_level);
 }
 
 rendered_audio_t message_render_clips(const config_t *cfg, vocab_cache_t *vocab,

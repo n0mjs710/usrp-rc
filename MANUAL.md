@@ -546,7 +546,6 @@ The connection to MMDVM-Host on the same machine.
 | `voice_level` | `0.9` | 0-2 | Voice clip level |
 | `tone_level` | `0.5` | 0-2 | Level for tones without their own `@LEVEL`, and for the DTMF beep |
 | `voice_gap_ms` | `150` | 0-10000 | Length of a bare `_` pause |
-| `voice_filter` | `true` | `true`, `false` | Band-limit voice clips to match MMDVM-Host's receive filter (300-2700 Hz) |
 | `ste_delay_ms` | `0` | 0-2000 | Delays repeated and link audio, for squelch tail elimination; 0 is off |
 | `lead_trim_ms` | `0` | 0-2000 | Mutes this much at the start of each transmission; 0 is off |
 | `pre_message_ms` | `0` | 0-10000 | Dead air after the transmitter keys, before CW or voice |

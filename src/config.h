@@ -104,7 +104,6 @@ typedef struct {
     double   voice_level;
     double   tone_level;     /* tones without their own @LEVEL */
     int      voice_gap_ms;   /* default pause length for a bare "_" word */
-    bool     voice_filter;   /* band-limit voice clips to match MMDVM-Host's RX filter -- see voice_filter.c */
     int      ste_delay_ms;
     int      lead_trim_ms;   /* mute this much mmdvm-RX audio at the start of each transmission */
     int      pre_message_ms;

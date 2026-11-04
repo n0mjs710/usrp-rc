@@ -22,6 +22,9 @@ Rename this setting under `[events]`. usrp-rc will not start until you do:
 | --- | --- |
 | `ct_message` | `ct_link_on_message` |
 
+Delete `voice_filter` from `[audio]` if you have it. The setting is gone, and it's an
+error if left in.
+
 If `initial_ids` or `mandatory_ids` lists more than one message, separate the names with
 commas (`mandatory_ids = id1,id2`). Spaces are now an error.
 

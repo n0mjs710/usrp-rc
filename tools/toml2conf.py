@@ -21,6 +21,7 @@ OLD_TONE_DEFAULTS = {"freq1": 0.0, "freq2": 0.0, "ms": 80, "amp": 0.8}
 SECTIONS = ["log", "mmdvm", "link", "audio", "timers", "events"]
 
 # Settings that have since been renamed.
+REMOVED = {("audio", "voice_filter")}
 RENAMED = {("events", "ct_message"): "ct_link_on_message"}
 
 
@@ -117,6 +118,8 @@ def convert(config):
             continue
         lines.append(f"[{section}]")
         for key, value in table.items():
+            if (section, key) in REMOVED:
+                continue
             key = RENAMED.get((section, key), key)
             lines.append(f"{key} = {scalar(value)}".rstrip())
         lines.append("")

@@ -36,7 +36,6 @@ void config_defaults(config_t *cfg)
     cfg->audio.voice_level          = 0.9;
     cfg->audio.tone_level           = 0.5;
     cfg->audio.voice_gap_ms         = 150;
-    cfg->audio.voice_filter         = true;
     cfg->audio.ste_delay_ms         = 0;
     cfg->audio.lead_trim_ms         = 0;
     cfg->audio.pre_message_ms       = 0;
@@ -156,7 +155,6 @@ static const field_t FIELDS[] = {
     DBL("audio",  "voice_level",          audio.voice_level, 0, 2),
     DBL("audio",  "tone_level",           audio.tone_level, 0, 2),
     INT("audio",  "voice_gap_ms",         audio.voice_gap_ms, 0, 10000),
-    BOOL("audio", "voice_filter",         audio.voice_filter),
     INT("audio",  "ste_delay_ms",         audio.ste_delay_ms, 0, 2000),
     INT("audio",  "lead_trim_ms",         audio.lead_trim_ms, 0, 2000),
     INT("audio",  "pre_message_ms",       audio.pre_message_ms, 0, 10000),
@@ -311,6 +309,10 @@ static void err_unknown_setting(const char *section, const char *key)
     }
     if (strcmp(section, "events") == 0 && strcmp(key, "tail_message") == 0) {
         cfg_err("%s: renamed to events.tail_messages, a comma-separated list\n", have);
+        return;
+    }
+    if (strcmp(section, "audio") == 0 && strcmp(key, "voice_filter") == 0) {
+        cfg_err("%s: removed, delete this line (see UPGRADE.md)\n", have);
         return;
     }
     if (strcmp(section, "timers") == 0 && strcmp(key, "tail_after_hang") == 0) {

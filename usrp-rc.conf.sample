@@ -113,7 +113,6 @@ default_cw    = cw: {call}/R
 #voice_level          = 0.9
 #tone_level           = 0.5    # tones without their own @LEVEL
 #voice_gap_ms         = 150    # length of a bare "_" pause
-#voice_filter         = true   # band-limit voice clips to match MMDVM-Host's RX filter (300-2700 Hz)
 #ste_delay_ms         = 0      # squelch tail elimination delay (0 = off)
 #lead_trim_ms         = 0      # mute this much leading RX audio per transmission (0 = off)
 #pre_message_ms       = 0      # dead air after PTT-on before CW/voice starts
