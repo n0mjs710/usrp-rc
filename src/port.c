@@ -803,7 +803,7 @@ static void cor_active_edge(port_t *p, port_source_t source, uint64_t now)
 
     const char *src = source == SRC_LOCAL ? "local" : "link";
     const char *action = source == SRC_LOCAL
-        ? (p->cfg->link.enabled ? "repeat + link-fwd" : "repeat")
+        ? (p->cfg->link.enabled && p->link_up ? "repeat + link-fwd" : "repeat")
         : "rf-fwd";
     LOGI("cor: ACTIVE  source=%s  -> %s\n", src, action);
 
