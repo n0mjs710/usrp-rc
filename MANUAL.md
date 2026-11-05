@@ -278,7 +278,7 @@ standard voice. `{call}` is the only variable that also works in `cw:`.
 
 | Item | Limit |
 | --- | --- |
-| Messages in total | 64, of which 28 are catalog tones and 4 are built-in replies, leaving 32 unless you replace those |
+| Length of one message or clip | 3 minutes |
 | Parts in one message | 32, where each note counts as one and each `voice:` or `cw:` part as one |
 | Words and pauses in one `voice:` part | 32 |
 | Message and clip names | 31 characters |
@@ -288,9 +288,21 @@ standard voice. `{call}` is the only variable that also works in `cw:`.
 Every time it starts, and on every `--check`, `usrp-rc` confirms that every clip each
 message could need exists, including the built-in replies. Variables are checked against
 everything they could ever say, so `{keyups_day}` needs `THOUSAND` even at 12 key-ups. If
-a clip is missing, `usrp-rc` names it and won't start.
+a clip is missing, `usrp-rc` names it and won't start. A message over 3 minutes stops it
+starting too. A clip over 3 minutes is logged and skipped, so it only matters if a message
+uses it.
+
+Messages you've defined but not assigned are checked the same way, so a problem in one
+stops `usrp-rc` starting, even though it could never play.
 
 The check can't hear audio, so listen to your new messages on the air.
+
+### Unused messages
+
+You can define as many messages as you like. Once they've passed the check, `usrp-rc` keeps
+only the ones that an `[events]` setting or a schedule window names, and the catalog tones
+you aren't using take up no memory. At startup and with `--check`, it reports both counts:
+`34 messages defined, 9 in use`.
 
 ## Events
 

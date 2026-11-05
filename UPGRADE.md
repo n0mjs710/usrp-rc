@@ -62,5 +62,9 @@ command off:
 
 ### Behavior changes
 
+- The 64-message limit is gone. Messages no event or schedule window names are checked,
+  then dropped from memory.
+- A message or clip can be at most 3 minutes long. A longer message stops usrp-rc starting.
+  A longer clip is logged and skipped, which only stops it starting if a message uses it.
 - The courtesy tone after an impolite ID now follows the same rules as any other
   tail. It used to always be the local tone, even after link traffic.

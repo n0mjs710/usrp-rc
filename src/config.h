@@ -4,7 +4,6 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define CFG_MAX_MESSAGES     64
 #define CFG_MAX_ELEMENTS     32
 #define CFG_MAX_ID_ROTATION  8
 #define CFG_MAX_VOICE_WORDS  32
@@ -231,8 +230,9 @@ typedef struct {
     access_mode_t    access_mode;
     config_log_t     log;
 
-    config_message_t messages[CFG_MAX_MESSAGES];
+    config_message_t *messages;   /* everything defined, until config_prune_messages() */
     int               nmessages;
+    int               messages_cap;
 
     config_schedule_t schedule[CFG_MAX_SCHEDULE];
     int               nschedule;
@@ -247,6 +247,12 @@ void config_defaults(config_t *cfg);
  * parsing got, so a caller can carry on checking and report further problems,
  * but must not run with it. */
 int  config_load(config_t *cfg, const char *path);
+
+/* Drop every message that no [events] setting or schedule window names. Run after
+ * message_validate(), so unused messages are still checked. */
+void config_prune_messages(config_t *cfg);
+
+void config_free(config_t *cfg);
 
 /* Look up a message by name; returns NULL if not found or name is empty. */
 const config_message_t *config_find_message(const config_t *cfg, const char *name);

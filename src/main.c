@@ -778,9 +778,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    /* app_t embeds config_t directly (messages[64] x elements[32] x
-     * voice_words[32] adds up to several MB) -- heap-allocate it rather
-     * than risk overflowing the thread stack. */
+    /* Too large for the thread stack: config_t's schedule alone is tens of kB. */
     app_t *a = calloc(1, sizeof(*a));
     if (!a) {
         LOGE("usrp-rc: out of memory\n");
@@ -808,8 +806,11 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    int defined = a->cfg.nmessages;
+    config_prune_messages(&a->cfg);
+
     if (check_only) {
-        printf("usrp-rc: %s OK (%d messages)\n", config_path, a->cfg.nmessages);
+        printf("usrp-rc: %s OK (%d messages defined, %d in use)\n", config_path, defined, a->cfg.nmessages);
         return 0;
     }
 
@@ -825,7 +826,7 @@ int main(int argc, char *argv[])
                a->cfg.mmdvm.local_address, a->cfg.mmdvm.local_port,
                a->cfg.mmdvm.rpt_address,   a->cfg.mmdvm.rpt_port);
     }
-    printf("usrp-rc: %d messages loaded\n", a->cfg.nmessages);
+    printf("usrp-rc: %d messages defined, %d in use\n", defined, a->cfg.nmessages);
 
     if (port_create(&a->port, &a->cfg, a->vocab) != 0) {
         LOGE("usrp-rc: failed to init port state machine\n");
@@ -958,6 +959,7 @@ int main(int argc, char *argv[])
     stats_destroy(a->stats);
     port_destroy(a->port);
     vocab_cache_destroy(a->vocab);
+    config_free(&a->cfg);
     free(a);
     return 0;
 }

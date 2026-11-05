@@ -198,6 +198,7 @@ static int capture_load(const char *path)
     if (!freopen(LOG_TMP, "w", stderr))
         exit(1);
     g_log_level = LOG_LEVEL_INFO;
+    config_free(&s_cfg);
     int rc = config_load(&s_cfg, path);
     fflush(stderr);
     dup2(saved, STDERR_FILENO);
@@ -600,6 +601,97 @@ int main(void)
         check("dec-8: once a year", hits[DATE] == 5);
         check("feb-29: 2024 and 2028 only", hits[LEAP] == 2);
         check("last-day overnight carries into the 1st", bad_late == 0);
+    }
+
+    printf("[10] only messages that can play are kept\n");
+    {
+        static const char *const KEYS[] = {
+            "startup_message", "initial_ids", "mandatory_ids", "anxious_id", "impolite_id",
+            "ct_link_on_message", "ct_link_message", "ct_link_off_message", "tail_messages",
+            "time_message", "stats_message", "link_on_message", "link_off_message",
+            "timeout_message", "timeout_cancel_message",
+        };
+        #define MSGS BASE "[messages]\nkeep = cw: A\ndrop = cw: B\n"
+        char conf[1024], what[128];
+        for (size_t i = 0; i < sizeof(KEYS) / sizeof(KEYS[0]); i++) {
+            snprintf(conf, sizeof(conf), MSGS "[events]\n%s = keep\n", KEYS[i]);
+            int rc = load_text(conf);
+            config_prune_messages(&s_cfg);
+            snprintf(what, sizeof(what), "[events] %s", KEYS[i]);
+            check(what, rc == 0 && config_find_message(&s_cfg, "keep") && !config_find_message(&s_cfg, "drop"));
+
+            if (strcmp(KEYS[i], "startup_message") == 0)
+                continue;   /* can't be scheduled */
+            snprintf(conf, sizeof(conf), MSGS "[events]\nimpolite_id = honk\n"
+                     "[schedule]\nw = daily 00:00-01:00 %s=keep\n", KEYS[i]);
+            rc = load_text(conf);
+            config_prune_messages(&s_cfg);
+            snprintf(what, sizeof(what), "[schedule] %s=", KEYS[i]);
+            check(what, rc == 0 && config_find_message(&s_cfg, "keep") && !config_find_message(&s_cfg, "drop"));
+        }
+
+        int rc = load_text(MSGS "[messages]\nkeep2 = cw: C\n[events]\nimpolite_id = honk\n"
+                           "[schedule]\nw = daily 00:00-01:00 tail_messages+=keep,keep2\n");
+        config_prune_messages(&s_cfg);
+        check("every name in a += list", rc == 0 && config_find_message(&s_cfg, "keep")
+              && config_find_message(&s_cfg, "keep2") && !config_find_message(&s_cfg, "drop"));
+
+        rc = load_text(BASE "[events]\nimpolite_id = yellow_jacket\n");
+        config_prune_messages(&s_cfg);
+        check("a catalog tone is kept only if assigned", rc == 0 && config_find_message(&s_cfg, "yellow_jacket")
+              && !config_find_message(&s_cfg, "bumble_bee"));
+        check("a default event's built-in reply is kept", config_find_message(&s_cfg, "time_readback") != NULL);
+        check("and the rendered message still works", message_render(&s_cfg, vocab, "yellow_jacket", -1.0).n == 1200);
+
+        char many[4096] = BASE "[messages]\n";
+        for (int i = 0; i < 70; i++)
+            snprintf(many + strlen(many), sizeof(many) - strlen(many), "m%d = cw: A\n", i);
+        check("no limit on how many are defined", load_text(many) == 0 && s_cfg.nmessages == 102);
+    }
+
+    printf("[11] clips and messages over 3 minutes\n");
+    {
+        char dir[] = "/tmp/usrp_rc_clip_test_XXXXXX";
+        if (!mkdtemp(dir))
+            return 1;
+        static const struct { const char *name; uint32_t secs; } CLIPS[] = {{"just_fits", 180}, {"too_long", 181}};
+        char path[128];
+        for (int i = 0; i < 2; i++) {
+            snprintf(path, sizeof(path), "%s/%s.wav", dir, CLIPS[i].name);
+            uint32_t bytes = CLIPS[i].secs * 16000, riff = bytes + 36, fmt = 16, rate = 8000, byte_rate = 16000;
+            uint16_t pcm = 1, mono = 1, align = 2, bits = 16;
+            FILE *fp = fopen(path, "wb");
+            fwrite("RIFF", 1, 4, fp); fwrite(&riff, 4, 1, fp); fwrite("WAVEfmt ", 1, 8, fp);
+            fwrite(&fmt, 4, 1, fp); fwrite(&pcm, 2, 1, fp); fwrite(&mono, 2, 1, fp);
+            fwrite(&rate, 4, 1, fp); fwrite(&byte_rate, 4, 1, fp); fwrite(&align, 2, 1, fp); fwrite(&bits, 2, 1, fp);
+            fwrite("data", 1, 4, fp); fwrite(&bytes, 4, 1, fp);
+            fseek(fp, bytes - 1, SEEK_CUR);
+            fputc(0, fp);
+            fclose(fp);
+        }
+        vocab_cache_t *vc;
+        const char *clip_dirs[] = { dir, "vocab_8k" };
+        vocab_cache_create(&vc, clip_dirs, 2);
+        size_t n = 0;
+        check("a clip at the limit loads", vocab_get(vc, "just_fits", &n) && n == 1440000);
+        check("a clip over it doesn't", vocab_get(vc, "too_long", &n) == NULL);
+
+        load_text(BASE "[messages]\nlong = voice: too_long\n");
+        check("a message using that clip fails the clip check", message_validate(&s_cfg, vc) == 1);
+        load_text(BASE "[messages]\nlong = voice: just_fits _1\n");
+        check("clips that add up past the limit are an error", message_validate(&s_cfg, vc) == 1);
+
+        load_text(BASE "[messages]\nlong = tone: 440:60000 440:60000 440:60000 440:1\n");
+        check("tones past the limit are an error, even unused", message_validate(&s_cfg, vc) == 1);
+        load_text(BASE "[messages]\nfits = tone: 440:60000 440:60000 440:60000\n");
+        check("exactly 3 minutes is fine", message_validate(&s_cfg, vc) == 0);
+
+        vocab_cache_destroy(vc);
+        for (int i = 0; i < 2; i++) {
+            snprintf(path, sizeof(path), "%s/%s.wav", dir, CLIPS[i].name);
+            unlink(path);
+        }
+        rmdir(dir);
     }
 
     if (s_fail) {

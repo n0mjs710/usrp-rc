@@ -69,6 +69,13 @@ static int load_wav(const char *path, int16_t **out, size_t *out_n)
                 fseek(fp, (long)csize + (long)(csize & 1), SEEK_CUR);
                 continue;
             }
+            if (csize / 2 > (uint32_t)MESSAGE_MAX_SECONDS * VOCAB_EXPECTED_RATE) {
+                LOGE("vocab: %s: %u s long, the limit is %d s\n",
+                     path, csize / 2 / VOCAB_EXPECTED_RATE, MESSAGE_MAX_SECONDS);
+                fclose(fp);
+                free(samples);
+                return -1;
+            }
             nsamples = csize / 2;
             samples = malloc(nsamples * sizeof(int16_t));
             if (!samples) { fclose(fp); return -1; }

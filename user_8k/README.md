@@ -21,6 +21,8 @@ On an installed system (via `make install`), this is
 `/usr/local/share/usrp-rc/user_8k/` — data, not configuration, so it's not
 under `/etc/`.
 
+A clip can be at most 3 minutes long. A longer one is logged and skipped.
+
 ## Preparing recordings
 
 `usrp-rc` applies no further equalization to your recordings; it only scales them by

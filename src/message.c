@@ -186,6 +186,7 @@ int message_validate(const config_t *cfg, vocab_cache_t *vocab)
     int errors = 0;
     for (int i = 0; i < cfg->nmessages; i++) {
         const config_message_t *m = &cfg->messages[i];
+        int before = errors;
         for (int j = 0; j < m->nelements; j++) {
             const config_elem_t *e = &m->elements[j];
             if (e->type == ELEM_CW) {
@@ -208,6 +209,15 @@ int message_validate(const config_t *cfg, vocab_cache_t *vocab)
                 }
             }
         }
+        if (errors != before)
+            continue;
+        rendered_audio_t r = message_render(cfg, vocab, m->name, -1.0);
+        if (r.n > (size_t)MESSAGE_MAX_SECONDS * 8000) {
+            LOGE("config: line %d: messages.%s: %zu s long, the limit is %d s\n",
+                 m->line, m->name, (r.n + 7999) / 8000, MESSAGE_MAX_SECONDS);
+            errors++;
+        }
+        free(r.samples);
     }
     return errors;
 }

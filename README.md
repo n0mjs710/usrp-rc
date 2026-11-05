@@ -380,7 +380,9 @@ my_mix   = voice: THISIS {call} | tone: 880:100 | cw: {call}/R
 tones are always available by name, e.g. `ct_link_on_message = yellow_jacket`. It's a
 readable text file listing each tone's notes and what it sounds like. To make
 your own tone, add it under `[messages]` in your config; using a catalog name
-replaces that tone. Up to 64 messages are available, counting the catalog's 28.
+replaces that tone. There's no limit on how many you define, and only the ones an event
+or schedule window names are kept after the startup check. A message or clip can be up to
+3 minutes long.
 
 **Name length**: message names, clip names, and anywhere you reference a
 message name (`ct_link_on_message`, `initial_ids`, etc.) are capped at 31 characters,

@@ -948,9 +948,15 @@ static config_message_t *message_slot(config_t *cfg, const char *name, int n_cat
     for (int i = 0; i < n_catalog; i++)
         if (strcmp(cfg->messages[i].name, name) == 0)
             return &cfg->messages[i];
-    if (cfg->nmessages >= CFG_MAX_MESSAGES) {
-        cfg_err("%s: too many messages (max %d, including the tone catalog)\n", path, CFG_MAX_MESSAGES);
-        return NULL;
+    if (cfg->nmessages == cfg->messages_cap) {
+        int cap = cfg->messages_cap ? cfg->messages_cap * 2 : 64;
+        config_message_t *grown = realloc(cfg->messages, (size_t)cap * sizeof(*grown));
+        if (!grown) {
+            cfg_err("%s: out of memory\n", path);
+            return NULL;
+        }
+        cfg->messages = grown;
+        cfg->messages_cap = cap;
     }
     return &cfg->messages[cfg->nmessages++];
 }
@@ -1321,8 +1327,13 @@ static void check_event(const entries_t *es, const config_t *cfg, const char *ke
     s_line = 0;
 }
 
-#define CHECK_ONE(key, member) \
-    check_event(es, cfg, key, (const char (*)[CFG_NAME_STR])ev->member, 1)
+/* The names an [events] setting holds. Every [events] setting is a message name, so
+ * walking FIELDS covers all of them, including any added later. */
+static int event_names(const config_t *cfg, const field_t *f, const char (**names)[CFG_NAME_STR])
+{
+    *names = (const char (*)[CFG_NAME_STR])((const char *)cfg + f->offset);
+    return f->type == FT_NAME_LIST ? *(const int *)((const char *)cfg + f->count_offset) : 1;
+}
 
 static int count_names(const char *value)
 {
@@ -1416,23 +1427,15 @@ static void validate(const entries_t *es, const config_t *cfg)
         cfg_err("dtmf.mute_hang_ms (%d) must be less than dtmf.interdigit_ms (%d)\n",
                 cfg->dtmf.mute_hang_ms, cfg->dtmf.interdigit_ms);
 
-    CHECK_ONE("startup_message",        startup_message);
-    CHECK_ONE("anxious_id",             anxious_id);
-    CHECK_ONE("impolite_id",            impolite_id);
+    for (size_t i = 0; i < NFIELDS; i++) {
+        if (strcmp(FIELDS[i].section, "events") != 0)
+            continue;
+        const char (*names)[CFG_NAME_STR];
+        int n = event_names(cfg, &FIELDS[i], &names);
+        check_event(es, cfg, FIELDS[i].key, names, n);
+    }
     if (!ev->impolite_id[0])
         cfg_err("events.impolite_id is required: it's the ID of last resort if mandatory_ids is empty\n");
-    CHECK_ONE("ct_link_on_message",             ct_link_on_message);
-    CHECK_ONE("ct_link_message",        ct_link_message);
-    CHECK_ONE("ct_link_off_message",    ct_link_off_message);
-    check_event(es, cfg, "tail_messages", ev->tail_messages, ev->n_tail_messages);
-    CHECK_ONE("time_message",           time_message);
-    CHECK_ONE("stats_message",          stats_message);
-    CHECK_ONE("link_on_message",        link_on_message);
-    CHECK_ONE("link_off_message",       link_off_message);
-    CHECK_ONE("timeout_message",        timeout_message);
-    CHECK_ONE("timeout_cancel_message", timeout_cancel_message);
-    check_event(es, cfg, "initial_ids",   ev->initial_ids,   ev->n_initial_ids);
-    check_event(es, cfg, "mandatory_ids", ev->mandatory_ids, ev->n_mandatory_ids);
 
     if (ev->anxious_id[0] && cfg->timers.id_anxious >= cfg->timers.id_interval)
         cfg_err("timers.id_anxious (%g) must be less than timers.id_interval (%g)\n",
@@ -1490,6 +1493,59 @@ int config_load(config_t *cfg, const char *path)
     validate(&es, cfg);
     entries_free(&es);
     return s_errors ? -1 : 0;
+}
+
+static bool message_in_use(const config_t *cfg, const char *name)
+{
+    for (size_t i = 0; i < NFIELDS; i++) {
+        if (strcmp(FIELDS[i].section, "events") != 0)
+            continue;
+        const char (*names)[CFG_NAME_STR];
+        int n = event_names(cfg, &FIELDS[i], &names);
+        for (int j = 0; j < n; j++)
+            if (strcmp(names[j], name) == 0)
+                return true;
+    }
+    for (int i = 0; i < cfg->nschedule; i++)
+        for (int j = 0; j < cfg->schedule[i].nsets; j++) {
+            char copy[CFG_STR];
+            snprintf(copy, sizeof(copy), "%s", cfg->schedule[i].sets[j].value);
+            char *save = NULL;
+            for (char *n = strtok_r(copy, ",", &save); n; n = strtok_r(NULL, ",", &save))
+                if (strcmp(n, name) == 0)
+                    return true;
+        }
+    return false;
+}
+
+void config_prune_messages(config_t *cfg)
+{
+    int kept = 0;
+    for (int i = 0; i < cfg->nmessages; i++) {
+        if (!message_in_use(cfg, cfg->messages[i].name)) {
+            LOGD("config: message '%s' isn't used, not keeping it\n", cfg->messages[i].name);
+            continue;
+        }
+        if (kept != i)
+            cfg->messages[kept] = cfg->messages[i];
+        kept++;
+    }
+    cfg->nmessages = kept;
+    if (kept > 0) {
+        config_message_t *fit = realloc(cfg->messages, (size_t)kept * sizeof(*fit));
+        if (fit) {
+            cfg->messages = fit;
+            cfg->messages_cap = kept;
+        }
+    }
+}
+
+void config_free(config_t *cfg)
+{
+    free(cfg->messages);
+    cfg->messages = NULL;
+    cfg->nmessages = 0;
+    cfg->messages_cap = 0;
 }
 
 const config_message_t *config_find_message(const config_t *cfg, const char *name)
