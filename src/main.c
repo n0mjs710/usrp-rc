@@ -415,6 +415,12 @@ static void run_command(app_t *a, const command_t *c)
         set_link(a, false);
         reply_with_message(a, a->events.link_off_message);
         break;
+    case COMMAND_LINK_STATUS:
+        reply_with_message(a, a->link_up ? a->events.link_on_message : a->events.link_off_message);
+        break;
+    case COMMAND_NO_LINK:
+        reply_with_message(a, a->events.link_none_message);
+        break;
     }
 }
 

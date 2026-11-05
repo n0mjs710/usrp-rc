@@ -286,12 +286,16 @@ static void test_commands(void)
         check("link on code", command_session_end_of_tx(r.s, &c) && c.type == COMMAND_LINK_ON);
         press_all(&r, "73");
         check("link off code", command_session_end_of_tx(r.s, &c) && c.type == COMMAND_LINK_OFF);
+        press_all(&r, "70");
+        check("link status code", command_session_end_of_tx(r.s, &c) && c.type == COMMAND_LINK_STATUS);
         press_all(&r, "391");
         check("a code plus extra digits doesn't match", !command_session_end_of_tx(r.s, &c));
 
         s_cfg.link.enabled = false;
         press_all(&r, "73");
-        check("link codes do nothing with no link", !command_session_end_of_tx(r.s, &c));
+        check("link codes reply no link service with no link", command_session_end_of_tx(r.s, &c) && c.type == COMMAND_NO_LINK);
+        press_all(&r, "70");
+        check("... link status too", command_session_end_of_tx(r.s, &c) && c.type == COMMAND_NO_LINK);
         press_all(&r, "39");
         check("... but time still works", command_session_end_of_tx(r.s, &c) && c.type == COMMAND_TIME);
         s_cfg.link.enabled = true;

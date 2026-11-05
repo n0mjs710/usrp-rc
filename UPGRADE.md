@@ -39,6 +39,7 @@ see [MANUAL.md](MANUAL.md).
 | DTMF commands | `[dtmf]` `enabled = true` |
 | Link off at start | `[link]` `start_on = false` |
 | Different courtesy tone when the link is off | `[events]` `ct_link_off_message` |
+| Reply to link commands when the repeater has no link | `[events]` `link_none_message` |
 | Tail messages, which rotate through a list | `[events]` `tail_messages` |
 | Minimum time between tail messages | `[timers]` `tail_min_interval` |
 | Settings that change by time and day | `[schedule]` section |
@@ -54,6 +55,7 @@ command.
 | `38` | Says the usage for the last 24 hours | `stats_code` |
 | `72` | Turns the link on | `link_on_code` |
 | `73` | Turns the link off | `link_off_code` |
+| `70` | Says the link state, without a change | `link_status_code` |
 
 ### Changes in operation
 

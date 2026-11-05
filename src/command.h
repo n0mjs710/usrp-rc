@@ -23,6 +23,8 @@ typedef enum {
     COMMAND_STATS,
     COMMAND_LINK_ON,
     COMMAND_LINK_OFF,
+    COMMAND_LINK_STATUS,
+    COMMAND_NO_LINK,    /* a link command on a repeater with no link */
 } command_type_t;
 
 typedef struct {

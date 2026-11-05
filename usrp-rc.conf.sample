@@ -45,6 +45,7 @@ timeout_message = timeout_warn
 #stats_message          = stats_readback
 #link_on_message        = link_on_reply
 #link_off_message       = link_off_reply
+#link_none_message      = link_none_reply # link commands when link.enabled = false
 
 [messages]
 # Your own messages, by name, for use in [events] above.
@@ -158,3 +159,4 @@ default_cw    = cw: {call}/R
 #stats_code      = 38     # speak usage over the last 24 hours (events.stats_message)
 #link_on_code    = 72
 #link_off_code   = 73
+#link_status_code = 70   # says link on or link off, without a change

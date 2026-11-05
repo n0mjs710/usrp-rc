@@ -324,6 +324,25 @@ Clip requirements:
 For the preparation of recordings, see [user_8k/README.md](user_8k/README.md). For the use
 of clips in messages, see [MANUAL.md](MANUAL.md).
 
+### Origin of the stock vocabulary
+
+The stock voice is the Texas Instruments LPC speech vocabulary. For decades, this voice
+has been familiar on amateur repeaters through ACC controllers and others that used TI
+speech chips.
+
+The clips in `vocab_8k/` are not recordings of a controller. Each word was rendered
+directly from its LPC data by an emulation of the TMS5220 speech synthesizer, from the
+[TI LPC Speech Tools](https://github.com/n0mjs710/lpc) project:
+
+- The synthesis core is a port of the MAME `tms5220` core. Its ROM tables were verified
+  against decapped TMS5220 and TMS5220C dies. It reproduces the behavior of the chip at
+  the sample level, to the 8-bit DAC output.
+- The vocabulary, `Vocab_Master.cpp`, has 623 words. It was assembled from the LPCSpeech
+  AVR, FF-800 and Talkie vocabularies. Where more than one recording of a word existed,
+  the best one was selected by listening. Misnamed words were corrected.
+
+In a side-by-side comparison with an ACC controller, the two voices cannot be told apart.
+
 ## Limits and exclusions
 
 This version does not include:

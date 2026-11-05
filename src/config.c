@@ -68,12 +68,14 @@ void config_defaults(config_t *cfg)
     strncpy(cfg->dtmf.stats_code, "38", sizeof(cfg->dtmf.stats_code) - 1);
     strncpy(cfg->dtmf.link_on_code, "72", sizeof(cfg->dtmf.link_on_code) - 1);
     strncpy(cfg->dtmf.link_off_code, "73", sizeof(cfg->dtmf.link_off_code) - 1);
+    strncpy(cfg->dtmf.link_status_code, "70", sizeof(cfg->dtmf.link_status_code) - 1);
 
     strncpy(cfg->events.time_message, "time_readback", sizeof(cfg->events.time_message) - 1);
     strncpy(cfg->events.stats_message, "stats_readback", sizeof(cfg->events.stats_message) - 1);
     strncpy(cfg->stats.file, "/var/local/usrp-rc/stats", sizeof(cfg->stats.file) - 1);
     strncpy(cfg->events.link_on_message, "link_on_reply", sizeof(cfg->events.link_on_message) - 1);
     strncpy(cfg->events.link_off_message, "link_off_reply", sizeof(cfg->events.link_off_message) - 1);
+    strncpy(cfg->events.link_none_message, "link_none_reply", sizeof(cfg->events.link_none_message) - 1);
 
     cfg->access_mode = ACCESS_COR;
 
@@ -183,6 +185,7 @@ static const field_t FIELDS[] = {
     STR("dtmf",  "stats_code",    dtmf.stats_code),
     STR("dtmf",  "link_on_code",  dtmf.link_on_code),
     STR("dtmf",  "link_off_code", dtmf.link_off_code),
+    STR("dtmf",  "link_status_code", dtmf.link_status_code),
 
     STR("stats", "file", stats.file),
 
@@ -199,6 +202,7 @@ static const field_t FIELDS[] = {
     STR("events", "stats_message",          events.stats_message),
     STR("events", "link_on_message",        events.link_on_message),
     STR("events", "link_off_message",       events.link_off_message),
+    STR("events", "link_none_message",      events.link_none_message),
     STR("events", "timeout_message",        events.timeout_message),
     STR("events", "timeout_cancel_message", events.timeout_cancel_message),
 };
@@ -1014,6 +1018,7 @@ static void load_builtin_messages(config_t *cfg)
         {"time_readback",  "F_GOOD {greeting} _ F_THE F_TIME F_IS {time} {ampm}"},
         {"link_on_reply",  "LINK ON"},
         {"link_off_reply", "LINK OFF"},
+        {"link_none_reply", "NO LINK SERVICE"},
         {"stats_readback", "{keyups_day} KEY UP _S _ {minutes_day} MINUTES"},
     };
     for (size_t i = 0; i < sizeof(BUILTIN) / sizeof(BUILTIN[0]); i++) {
@@ -1414,6 +1419,7 @@ static void validate(const entries_t *es, const config_t *cfg)
         {"stats_code",      offsetof(config_dtmf_t, stats_code)},
         {"link_on_code",    offsetof(config_dtmf_t, link_on_code)},
         {"link_off_code",   offsetof(config_dtmf_t, link_off_code)},
+        {"link_status_code", offsetof(config_dtmf_t, link_status_code)},
     };
     for (size_t i = 0; i < sizeof(CODES) / sizeof(CODES[0]); i++) {
         const char *code = (const char *)&cfg->dtmf + CODES[i].offset;

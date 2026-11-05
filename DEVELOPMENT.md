@@ -91,8 +91,9 @@ there's nothing Pi-specific in the source; it's plain C11 against
 
 ## Regenerating `vocab_8k/` from source audio
 
-`vocab_8k/` (712 clips) is committed to the repo pre-built, converted from
-a 48 kHz reference vocabulary to the 8 kHz mono S16LE both audio paths use —
+`vocab_8k/` (623 clips) is committed to the repo pre-built, converted from
+a render of `Vocab_Master.cpp` in
+[TI LPC Speech Tools](https://github.com/n0mjs710/lpc) to the 8 kHz mono S16LE both audio paths use —
 a normal clone and build never needs `sox` or the 48 kHz source. Only
 regenerate it if the reference vocabulary itself changes:
 

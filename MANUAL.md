@@ -79,6 +79,7 @@ commands operate only if the operator sets `[dtmf] enabled = true`.
 | `38` | Usage | "*n* key ups, *n* minutes": key-ups and minutes of traffic in the last 24 hours |
 | `72` | Link on | "Link on" |
 | `73` | Link off | "Link off" |
+| `70` | Link status | "Link on" or "Link off". The link state does not change. |
 | `5` + digits | Pad test | The digits. Use this command to test the DTMF tones of a radio. |
 
 ### 2.2 Special keys
@@ -116,6 +117,8 @@ The repeater discards an entry for these conditions:
 | The pause between two digits is too long | 4 seconds. Only the digits before the pause are discarded. |
 | The transmission continues too long after the last digit | 8 seconds |
 | The entry has too many digits | 32 |
+
+If the repeater has no link, `70`, `72` and `73` reply "No link service".
 
 An entry that does not agree with a command has no effect. No error sound plays. The
 repeater does not accept commands when it is timed out.
@@ -497,6 +500,9 @@ shows the link state to listeners.
 | `stats_message` | Reply to the usage command | `stats_readback` |
 | `link_on_message` | Reply to the link-on command | `link_on_reply` |
 | `link_off_message` | Reply to the link-off command | `link_off_reply` |
+| `link_none_message` | Reply to a link command when the repeater has no link | `link_none_reply` |
+
+The link-status command replies with `link_on_message` or `link_off_message`.
 
 If a reply setting is empty, the command operates without a reply.
 
@@ -688,15 +694,16 @@ schedule: 'net_reminder' ended
 
 | Setting | Effect |
 | --- | --- |
-| `enabled = false` | The repeater has no link. `72` and `73` have no effect. |
+| `enabled = false` | The repeater has no link. `70`, `72` and `73` reply with `link_none_message`: "No link service". |
 | `start_on = false` | The link is off at start. `72` turns it on. |
 
 - When the link is off, `usrp-rc` sends nothing to the link. It ignores all audio from
   the link.
 - `usrp-rc` does not keep the link state after a restart. At each start, the link state
   is the value of `start_on`.
-- To show the link state on the air, set a different `ct_link_off_message`. See
-  [6.2](#62-courtesy-tones).
+- To hear the link state without a change, use the link-status command, `70`.
+- To show the link state with each courtesy tone, set a different `ct_link_off_message`.
+  See [6.2](#62-courtesy-tones).
 - At this time, each station can use `72` and `73`. A control operator level is planned.
 - At this time, `codec = opus` operates only with other tools from the same author.
 
@@ -767,6 +774,7 @@ dtmf: '38': ACCEPTED command = usage
 | --- | --- | --- |
 | `ACCEPTED` | The command executed. | `'5123': ACCEPTED command = DTMF test + 123` |
 | `ERROR` | The entry is complete, but no command can execute. | `'99': ERROR no command matched` |
+| | A link command on a repeater with no link. The reply is "No link service". | `'70': ERROR command = link status, no link service` |
 | `ABANDONED` | The entry stopped before it was complete. | `'12#': ABANDONED user terminated` |
 
 An `ABANDONED` line also names the timer that expired, if a timer expired. At
@@ -898,6 +906,7 @@ Levels above 1.0 are permitted, but they can cause clipping.
 | `stats_code` | `38` | 7 keys maximum | Usage command. Empty is off. |
 | `link_on_code` | `72` | 7 keys maximum | Link-on command. Empty is off. |
 | `link_off_code` | `73` | 7 keys maximum | Link-off command. Empty is off. |
+| `link_status_code` | `70` | 7 keys maximum | Link-status command. Empty is off. |
 | `min_tone_ms` | `40` | 30-1000 | Minimum tone length for a digit |
 | `max_tone_ms` | `5000` | 100-60000 | A longer tone discards the entry. |
 | `interdigit_ms` | `4000` | 100-60000 | A longer pause discards the digits before it. |
@@ -934,6 +943,7 @@ All `[events]` settings are message names. Empty plays nothing.
 | `stats_message` | `stats_readback` | No | [6.4](#64-command-replies) |
 | `link_on_message` | `link_on_reply` | No | [6.4](#64-command-replies) |
 | `link_off_message` | `link_off_reply` | No | [6.4](#64-command-replies) |
+| `link_none_message` | `link_none_reply` | No | [6.4](#64-command-replies) |
 
 A list holds a maximum of 8 names.
 
@@ -1047,7 +1057,7 @@ cause of a problem.
 | No response to DTMF | `[dtmf] enabled = true` is not set. The default is off. | Set `enabled = true`. |
 | No DTMF lines in the log | The decoder does not detect the tones. | At `log.level = info`, look for `dtmf: sequence started`. If it is not there, decrease `min_tone_ms`. At `log.level = debug`, look for short tones. |
 | An entry starts, but no reply plays | The command did not execute, or its reply is empty. | Read the `dtmf:` line at the end of the entry. If a command executed, make sure that its reply setting in `[events]` is not empty. |
-| `72` or `73` has no effect | `link.enabled = false` | Look for `link is not configured` in the log. |
+| `70`, `72` or `73` replies "No link service" | `link.enabled = false` | If the repeater has a link, set `[link] enabled = true` and `remote_host`. |
 | `usrp-rc` does not start | Configuration error | Do `--check`. Correct the errors from the first error down. |
 | `events.impolite_id is required` | `impolite_id` is not set. | Set `impolite_id` in `[events]`. |
 | `events.ct_message: renamed` | Old setting name | Change it to `ct_link_on_message`. |

@@ -304,13 +304,13 @@ int main(void)
     rc = load_text(BASE);
     const config_elem_t *catalog = element("yellow_jacket", 2);
     check("available without being in the config", rc == 0 && catalog && catalog->freq1 == 660 && catalog->ms == 50);
-    check("all 28 tones and 4 built-in replies loaded", s_cfg.nmessages == 32);
+    check("all 28 tones and 5 built-in replies loaded", s_cfg.nmessages == 33);
     check("loud warning keeps its own level", element("timeout_warn", 0) && element("timeout_warn", 0)->amp == 0.9);
 
     rc = load_text(BASE "[messages]\nyellow_jacket = tone: 100:10\nmine = tone: 200:20\n");
     const config_message_t *over = config_find_message(&s_cfg, "yellow_jacket");
     check("same name replaces the catalog tone", rc == 0 && over && over->nelements == 1 && over->elements[0].freq1 == 100);
-    check("replacing doesn't add a message, a new tone does", s_cfg.nmessages == 33);
+    check("replacing doesn't add a message, a new tone does", s_cfg.nmessages == 34);
 
     printf("[6] shipped configs load\n");
     check("usrp-rc.conf.sample", capture_load("usrp-rc.conf.sample") == 0);
@@ -608,7 +608,7 @@ int main(void)
         static const char *const KEYS[] = {
             "startup_message", "initial_ids", "mandatory_ids", "anxious_id", "impolite_id",
             "ct_link_on_message", "ct_link_message", "ct_link_off_message", "tail_messages",
-            "time_message", "stats_message", "link_on_message", "link_off_message",
+            "time_message", "stats_message", "link_on_message", "link_off_message", "link_none_message",
             "timeout_message", "timeout_cancel_message",
         };
         #define MSGS BASE "[messages]\nkeep = cw: A\ndrop = cw: B\n"
@@ -646,7 +646,7 @@ int main(void)
         char many[4096] = BASE "[messages]\n";
         for (int i = 0; i < 70; i++)
             snprintf(many + strlen(many), sizeof(many) - strlen(many), "m%d = cw: A\n", i);
-        check("no limit on how many are defined", load_text(many) == 0 && s_cfg.nmessages == 102);
+        check("no limit on how many are defined", load_text(many) == 0 && s_cfg.nmessages == 103);
     }
 
     printf("[11] clips and messages over 3 minutes\n");
