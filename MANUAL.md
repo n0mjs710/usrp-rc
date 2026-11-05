@@ -35,7 +35,7 @@ codes, and your repeater's owner may have changed or turned off any of them.
 | Enter | Command | What you hear |
 | --- | --- | --- |
 | `39` | Time | "Good morning, the time is seven thirty A M" |
-| `38` | Usage | "Count *n*, minutes *n*": key-ups and minutes of traffic over the last 24 hours |
+| `38` | Usage | "*n* key ups, *n* minutes": key-ups and minutes of traffic over the last 24 hours |
 | `72` | Link on | "Link on" |
 | `73` | Link off | "Link off" |
 | `5` + digits | Pad test | Your digits read back, to check your radio's tones |
@@ -367,7 +367,7 @@ define a message with the built-in name:
 
 ```ini
 [messages]
-stats_readback = voice: COUNT {keyups_week} _ MINUTES {minutes_week}
+stats_readback = voice: {keyups_week} KEY UP _S _ {minutes_week} MINUTES
 ```
 
 ### Tail messages
@@ -749,7 +749,7 @@ weekend_tail = weekends 08:00-20:00 tail_messages=weekend_time
 
 ```ini
 [messages]
-stats_readback = voice: COUNT {keyups_week} _ MINUTES {minutes_week}
+stats_readback = voice: {keyups_week} KEY UP _S _ {minutes_week} MINUTES
 ```
 
 **No tail messages overnight**

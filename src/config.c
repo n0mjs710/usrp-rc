@@ -1014,7 +1014,7 @@ static void load_builtin_messages(config_t *cfg)
         {"time_readback",  "F_GOOD {greeting} _ F_THE F_TIME F_IS {time} {ampm}"},
         {"link_on_reply",  "LINK ON"},
         {"link_off_reply", "LINK OFF"},
-        {"stats_readback", "COUNT {keyups_day} _ MINUTES {minutes_day}"},
+        {"stats_readback", "{keyups_day} KEY UP _S _ {minutes_day} MINUTES"},
     };
     for (size_t i = 0; i < sizeof(BUILTIN) / sizeof(BUILTIN[0]); i++) {
         char words[128];
