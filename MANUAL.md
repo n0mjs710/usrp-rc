@@ -1062,7 +1062,7 @@ cause of a problem.
 | `events.impolite_id is required` | `impolite_id` is not set. | Set `impolite_id` in `[events]`. |
 | `events.ct_message: renamed` | Old setting name | Change it to `ct_link_on_message`. |
 | `needs commas between names` | Spaces separate list names. | Change `id1 id2` to `id1,id2`. |
-| `a variable needs the voice clip` | A stock clip is missing. | Do `sudo make install` to install the missing stock clips. |
+| `a variable needs the voice clip` | A stock clip is missing. | Do `sudo make install`. It replaces all stock clips. |
 | A tail message does not play | `tail_every` is 0, or the conditions are not true. | Look for the `tail_every` warning. On a quiet repeater, the `tail_every` count can be not yet reached. `tail_min_interval` can also prevent the message. |
 | A window opens at the wrong time | The clock or the time zone is wrong. | Examine the clock and time zone with `timedatectl`. |
 | Usage statistics reset at restart | `usrp-rc` cannot write the file. | Look for `stats: can't save` in the log. Make sure that `/var/local/usrp-rc` exists and the service file is current. Then do `sudo systemctl daemon-reload`. |

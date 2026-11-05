@@ -66,5 +66,8 @@ command.
 - The maximum length of a message or a clip is 3 minutes. A longer message prevents the
   start. `usrp-rc` does not load a longer clip, and records this in the log. This prevents
   the start only if a message uses the clip.
+- `make install` now replaces all stock voice clips in `vocab_8k/`, and removes stock
+  clips that are no longer in the repository. Before, it did not replace clips that
+  existed. Move any changed stock clips to `user_8k/` before the installation.
 - The courtesy tone after an impolite ID now follows the same rules as other tails.
   Before, it was always the local tone, also after link traffic.

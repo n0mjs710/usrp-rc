@@ -134,8 +134,10 @@ install: $(TARGET)
 	install -Dm755 tools/toml2conf.py          $(DESTDIR)$(DATADIR)/toml2conf.py
 	install -Dm644 systemd/usrp-rc.service     $(DESTDIR)$(UNITDIR)/usrp-rc.service
 	install -dm755 $(DESTDIR)$(STATEDIR)
+	@# The stock set is replaced as a whole; site clips belong in user_8k/.
 	@mkdir -p $(DESTDIR)$(DATADIR)/vocab_8k
-	@cp -n vocab_8k/*.wav $(DESTDIR)$(DATADIR)/vocab_8k/ 2>/dev/null || true
+	@rm -f $(DESTDIR)$(DATADIR)/vocab_8k/*.wav
+	install -m644 vocab_8k/*.wav $(DESTDIR)$(DATADIR)/vocab_8k/
 	install -Dm644 user_8k/README.md          $(DESTDIR)$(DATADIR)/user_8k/README.md
 	@if [ -z "$(DESTDIR)" ]; then \
 		if [ ! -f $(SYSCONFDIR)/usrp-rc/usrp-rc.conf ]; then \

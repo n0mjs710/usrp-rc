@@ -144,8 +144,11 @@ frame timing.
 | `/var/local/usrp-rc/` | Usage statistics |
 
 > **Note:** `make install` does not replace a configuration file that exists. If no
-> configuration exists, it copies the sample to `usrp-rc.conf`. It also does not replace
-> stock voice clips that exist.
+> configuration exists, it copies the sample to `usrp-rc.conf`.
+
+> **Note:** `make install` replaces all stock voice clips in `vocab_8k/`. It removes
+> stock clips that are no longer in the repository. Put site clips in `user_8k/` only.
+> `make install` does not change `user_8k/`.
 
 ### Remove the program
 
