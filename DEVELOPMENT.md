@@ -25,7 +25,7 @@ the operator-facing view.
   (`src/fm_protocol.{c,h}`): three-byte ASCII tags, `FMS` (start, carries
   the callsign), `FMD` (audio, S16LE), `FME` (end), `FMP` (5 s keepalive).
   Implemented against **MMDVM-Host's own `FMNetwork.cpp` / `FMControl.cpp`
-  as the definitive reference**, not `fmgateway`'s copy — fmgateway's
+  as the definitive reference**, not FMGateway's copy — FMGateway's
   receive paths scale S16LE→float by `/65536` where MMDVM-Host uses
   `/32767`, i.e. 6 dB low.
 

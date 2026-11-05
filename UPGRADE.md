@@ -1,70 +1,68 @@
 # Upgrading usrp-rc
 
-What you need to change in `usrp-rc.conf` when moving to a new version, without
-reading the whole README. Check your edits with `usrp-rc --check <file>` before
-restarting. It reports anything out of date by line number.
+This document lists the configuration changes necessary for each new version. After
+each change, examine the configuration with `usrp-rc --check <file>`. `--check` shows
+each out-of-date setting by line number.
 
 ## Unreleased (`dtmf-control` branch)
 
-### Required
+### Necessary changes
 
-Reinstall the service file and reload systemd, as usage statistics need a writable
-state directory:
+1. Install the service file again, and reload systemd. The usage statistics need a
+   state directory with write access.
 
-```bash
-sudo make install
-sudo systemctl daemon-reload
-```
+   ```bash
+   sudo make install
+   sudo systemctl daemon-reload
+   ```
 
-Rename this setting under `[events]`. usrp-rc will not start until you do:
+2. In `[events]`, change this setting name. `usrp-rc` does not start with the old name.
 
-| Old | New |
-| --- | --- |
-| `ct_message` | `ct_link_on_message` |
+   | Old | New |
+   | --- | --- |
+   | `ct_message` | `ct_link_on_message` |
 
-Set `impolite_id` under `[events]`. It's now required, because it's the ID of last resort if
-`mandatory_ids` is empty.
+3. In `[events]`, set `impolite_id`. This setting is now necessary. It is the last ID
+   that the repeater uses if `mandatory_ids` is empty.
+4. In `[audio]`, remove `voice_filter`, if it is in the file. This setting no longer
+   exists. It causes an error.
+5. In `initial_ids` and `mandatory_ids`, use commas between names:
+   `mandatory_ids = id1,id2`. Spaces between names cause an error.
 
-An empty `initial_ids` still plays nothing on the first key-up, but the repeater now
-identifies when the ID timer runs out, even if nothing else was transmitted.
+### New functions
 
-Delete `voice_filter` from `[audio]` if you have it. The setting is gone, and it's an
-error if left in.
+These functions are off, or operate as before, until they are set. For each function,
+see [MANUAL.md](MANUAL.md).
 
-If `initial_ids` or `mandatory_ids` lists more than one message, separate the names with
-commas (`mandatory_ids = id1,id2`). Spaces are now an error.
-
-### Optional: new features
-
-All of these are off, or behave as before, until you set them. See the README for
-details on each.
-
-| To get | Add |
+| Function | Setting |
 | --- | --- |
 | DTMF commands | `[dtmf]` `enabled = true` |
-| The link off at startup | `[link]` `start_on = false` |
-| A different courtesy tone while the link is off | `[events]` `ct_link_off_message` |
-| Tail messages, rotating through a list | `[events]` `tail_messages` |
-| A limit on how often it plays | `[timers]` `tail_min_interval` |
-| Settings that change by time and day | a `[schedule]` section |
-| Usage figures in a different place, or not on disk | `[stats]` `file` |
+| Link off at start | `[link]` `start_on = false` |
+| Different courtesy tone when the link is off | `[events]` `ct_link_off_message` |
+| Tail messages, which rotate through a list | `[events]` `tail_messages` |
+| Minimum time between tail messages | `[timers]` `tail_min_interval` |
+| Settings that change by time and day | `[schedule]` section |
+| Different location for usage statistics, or memory only | `[stats]` `file` |
 
-With DTMF enabled, these commands work by default. Set a code empty to turn its
-command off:
+When DTMF is enabled, these commands operate by default. An empty code disables its
+command.
 
-| Enter | Does | Setting |
+| Code | Command | Setting |
 | --- | --- | --- |
-| `5` + digits | reads the digits back | `pad_test_prefix` |
-| `39` | speaks the time | `time_code` |
-| `38` | speaks usage over the last 24 hours | `stats_code` |
-| `72` | turns the link on | `link_on_code` |
-| `73` | turns the link off | `link_off_code` |
+| `5` + digits | Says the digits | `pad_test_prefix` |
+| `39` | Says the time | `time_code` |
+| `38` | Says the usage for the last 24 hours | `stats_code` |
+| `72` | Turns the link on | `link_on_code` |
+| `73` | Turns the link off | `link_off_code` |
 
-### Behavior changes
+### Changes in operation
 
-- The 64-message limit is gone. Messages no event or schedule window names are checked,
-  then dropped from memory.
-- A message or clip can be at most 3 minutes long. A longer message stops usrp-rc starting.
-  A longer clip is logged and skipped, which only stops it starting if a message uses it.
-- The courtesy tone after an impolite ID now follows the same rules as any other
-  tail. It used to always be the local tone, even after link traffic.
+- If `initial_ids` is empty, the first key-up plays no ID, as before. But when the ID timer
+  expires, the repeater now sends an ID, also if no other transmission occurred.
+- The 64-message limit is removed. `usrp-rc` examines all messages. It then removes from
+  memory the messages that no event or schedule window uses.
+- The maximum length of a message or a clip is 3 minutes. A longer message prevents the
+  start. `usrp-rc` does not load a longer clip, and records this in the log. This prevents
+  the start only if a message uses the clip.
+- The courtesy tone after an impolite ID now follows the same rules as other tails.
+  Before, it was always the local tone, also after link traffic.

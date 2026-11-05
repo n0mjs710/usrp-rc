@@ -1,33 +1,55 @@
-# usrp-rc — Repeater Controller for MMDVM-Host
+# usrp-rc: Repeater Controller for MMDVM-Host
 
-A compiled C daemon that runs on the same SBC as MMDVM-Host (FM analog mode)
-and acts as both the repeater controller and network bridge. It replaces
-FMGateway and the control functions in MMDVM-Host with a single,
-single-threaded, no-dependency binary.
+`usrp-rc` is a repeater controller and network bridge for an MMDVM-Host FM repeater. It
+operates on the same computer as MMDVM-Host. It replaces FMGateway and the controller
+functions of MMDVM-Host.
 
-`usrp-rc` has two ports, each speaking their native protocol:
+For operation and the settings reference, see [MANUAL.md](MANUAL.md).
 
-- **mmdvm** — MMDVM-Host's **FM Network** protocol, on loopback (the
-  "repeater" side). `usrp-rc` takes the place of G4KLX's `fmgateway` here;
-  you must not run `fmgateway` as well.
-- **link** — **USRP** PCM or Opus to/from a suitable reflector or hub,
-  or any ASL-compatible endpoint (the network side) in USRP mode. Opus
-  is only (currently) supported with other tools from this author..
+## Contents
 
-Between those two ports sits a full repeater controller — IDs, courtesy
-tones, hang timer, timeout, squelch tail elimination, CW/voice/tone/tail
-messages, clock/calendar scheduler, DTMF control — generated entirely
-locally, with no network dependency for controller behavior (i.e. a remote
-ASL server).
+- [Description](#description)
+- [Functional overview](#functional-overview)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [MMDVM-Host integration](#mmdvm-host-integration)
+- [Configuration](#configuration)
+- [Operation](#operation)
+- [Voice clips](#voice-clips)
+- [Limits and exclusions](#limits-and-exclusions)
+- [Related documents](#related-documents)
 
-> **Note on the mmdvm-side protocol.** Earlier development connected to
-> MMDVMHost over USRP. MMDVM-Host's 2026 restructuring removed native USRP
-> support and moved FM to its own tagged protocol plus a separate gateway
-> program. `usrp-rc` speaks that protocol directly. Audio parameters
-> are unchanged (8 kHz, 20 ms frames); only the framing on the loopback
-> differs. The link side is unaffected and still USRP.
+## Description
 
-## How it works
+`usrp-rc` is one compiled C program. It operates in one thread. It has two ports:
+
+| Port | Protocol | Connects to |
+| --- | --- | --- |
+| mmdvm | MMDVM-Host FM Network protocol, on the loopback interface | MMDVM-Host on the same computer |
+| link | USRP, with PCM or Opus audio | A USRP reflector or hub, or an AllStarLink (ASL) node in USRP mode |
+
+> **Note:** At this time, Opus audio operates only with other tools from the same author.
+
+The controller functions are:
+
+- Station identification: initial, mandatory, anxious and impolite IDs
+- Courtesy tones, with different tones for local traffic, link traffic and link off
+- Hang timer, kerchunk filter and time-out timer
+- Squelch tail elimination
+- CW, voice and tone messages, and tail messages
+- Clock and calendar schedule
+- DTMF commands
+- Usage statistics
+
+All controller functions operate locally. They do not need a network connection or a
+remote ASL server.
+
+> **Note:** Earlier versions connected to MMDVM-Host with USRP. In 2026, MMDVM-Host
+> removed its USRP support. FM moved to its own protocol and a separate gateway program.
+> `usrp-rc` uses that protocol directly. The audio format did not change: 8 kHz, 20 ms
+> frames. The link port continues to use USRP.
+
+## Functional overview
 
 ```
 MMDVM-Host (loopback)                  usrp-rc                    Network
@@ -39,50 +61,200 @@ MMDVM-Host (loopback)                  usrp-rc                    Network
                       controller audio (IDs, CT, timeout, hang)
 ```
 
-- **COR** is derived from MMDVM-Host's explicit start/end-of-transmission
-  markers. MMDVM-Host handles all radio hardware and CTCSS encode/decode.
-- **STE** (squelch tail elimination) delays mmdvm-RX audio by `ste_delay_ms`
-  before repeating it, on *both* the local mmdvm-TX repeat leg and the
-  link-TX uplink, so the squelch-crash tail at the end of a transmission
-  and DTMF blips are dropped rather than repeated or forwarded. Key-up/unkey
-  signaling is not delayed — only the audio is, with silence filling the gap
-  until the delay line catches up.
-- **Leading-edge trim** mutes the first `lead_trim_ms` of mmdvm-RX audio in
-  each transmission, on the same two legs, for the noise MMDVM-Host can
-  pass before the carrier audio is actually up. The trimmed span goes out as
-  silence, so it adds no latency and doesn't shift frame timing.
-- The repeater controller treats keyup from *either* port as access: a
-  network caller opens the repeater exactly like a local radio caller, and
-  gets a distinct courtesy tone (`ct_link_message`) so listeners can tell
-  local and network-originated traffic apart.
+| Audio | Source | Destination |
+| --- | --- | --- |
+| Local receive audio | mmdvm RX | mmdvm TX (repeat) and link TX (uplink) |
+| Link receive audio | link RX, through a jitter buffer | mmdvm TX |
+| Controller audio | `usrp-rc` | mmdvm TX |
 
-## Build dependencies
+### Carrier detection
+
+MMDVM-Host sends a start marker and an end marker for each received transmission.
+`usrp-rc` uses these markers as COR. MMDVM-Host controls all radio hardware. MMDVM-Host
+also does CTCSS encode and decode.
+
+### Access
+
+A key-up on either port gives access to the repeater. A link station opens the repeater
+the same as a local station. Link traffic gets its own courtesy tone, `ct_link_message`.
+Thus, listeners can hear the source of the traffic.
+
+### Squelch tail elimination
+
+`audio.ste_delay_ms` delays local receive audio. The delay applies to the repeat path and
+to the link uplink. At the end of a transmission, `usrp-rc` discards the delayed audio.
+Thus, the squelch tail and DTMF blips do not go out.
+
+The delay applies to audio only. Key-up and unkey are not delayed. At the start of a
+transmission, silence fills the gap until the delayed audio arrives.
+
+### Leading-edge trim
+
+`audio.lead_trim_ms` mutes the start of local receive audio in each transmission. The
+trim applies to the repeat path and to the link uplink. It removes noise that MMDVM-Host
+can send before the carrier audio is stable.
+
+The muted part goes out as silence. Thus, the trim adds no delay and does not change the
+frame timing.
+
+## Requirements
+
+| Item | Requirement |
+| --- | --- |
+| Computer | The Linux computer that operates MMDVM-Host |
+| Operating system | Linux with systemd |
+| MMDVM-Host | A version with the FM Network protocol (2026 or later) |
+| Packages | `build-essential`, `pkg-config`, `libsystemd-dev`, `libopus-dev` |
+
+## Installation
+
+### Install the program
+
+1. Install the packages:
+
+   ```bash
+   sudo apt-get install -y build-essential pkg-config libsystemd-dev libopus-dev
+   ```
+
+2. Build the program:
+
+   ```bash
+   make
+   ```
+
+3. Install the program, the data files and the service:
+
+   ```bash
+   sudo make install
+   sudo systemctl daemon-reload
+   ```
+
+### Installed files
+
+| Path | Contents |
+| --- | --- |
+| `/usr/local/bin/usrp-rc` | Program |
+| `/etc/usrp-rc/usrp-rc.conf` | Configuration |
+| `/etc/usrp-rc/usrp-rc.conf.sample` | Sample configuration, with all settings and their defaults |
+| `/usr/local/share/usrp-rc/tones.conf` | Tone catalog |
+| `/usr/local/share/usrp-rc/vocab_8k/` | Stock voice clips |
+| `/usr/local/share/usrp-rc/user_8k/` | Site voice clips |
+| `/usr/local/share/usrp-rc/toml2conf.py` | Converter for old configurations |
+| `/usr/local/lib/systemd/system/usrp-rc.service` | systemd service |
+| `/var/local/usrp-rc/` | Usage statistics |
+
+> **Note:** `make install` does not replace a configuration file that exists. If no
+> configuration exists, it copies the sample to `usrp-rc.conf`. It also does not replace
+> stock voice clips that exist.
+
+### Remove the program
 
 ```bash
-sudo apt-get install -y build-essential pkg-config libsystemd-dev libopus-dev
+sudo make uninstall
 ```
 
-## Building
+This command removes the program, the service, the stock voice clips, the tone catalog
+and the converter. It keeps the configuration, the usage statistics and the site voice
+clips.
+
+### Convert an old configuration
+
+Earlier versions used `/etc/usrp-rc/usrp-rc.toml`. If `make install` finds this file and
+no `usrp-rc.conf`, it converts the file automatically.
+
+To convert a file manually (Python 3.11 or later is necessary):
 
 ```bash
-make
+python3 tools/toml2conf.py usrp-rc.toml usrp-rc.conf
+usrp-rc --check usrp-rc.conf
 ```
 
-To install system-wide (binary, example config, vocab, systemd unit):
+| Item | Converter action |
+| --- | --- |
+| Settings | Copied as written. This includes settings that the old parser ignored. `--check` shows them by line number. |
+| Messages equal to a catalog tone | Not copied |
+| Comments | Not copied |
+| Output file that exists | Not replaced |
 
-```bash
-sudo make install
-```
+## MMDVM-Host integration
+
+### Port settings
+
+`usrp-rc` takes the place of FMGateway. The `[mmdvm]` settings in `usrp-rc` have the same
+names and functions as the `[Network]` settings in `FMGateway.ini`. The names in
+`MMDVM-Host.ini` are opposite.
+
+| `usrp-rc` `[mmdvm]` | `FMGateway.ini` `[Network]` | `MMDVM-Host.ini` `[FM Network]` | Function |
+| --- | --- | --- | --- |
+| `local_address` | `LocalAddress` | `GatewayAddress` | Address on which `usrp-rc` receives |
+| `local_port` | `LocalPort` | `GatewayPort` | Port on which `usrp-rc` receives |
+| `rpt_address` | `RptAddress` | `LocalAddress` | Address of MMDVM-Host |
+| `rpt_port` | `RptPort` | `LocalPort` | Port of MMDVM-Host |
+
+The `usrp-rc` defaults are `127.0.0.1`, `local_port = 4810` and `rpt_port = 3810`. If
+`MMDVM-Host.ini` uses the same values, the `[mmdvm]` section is not necessary. If not, set
+the ports to agree with `MMDVM-Host.ini`.
+
+### Procedure
+
+1. In `MMDVM-Host.ini`, set `LinkMode=1` in the `[FM]` section.
+
+   This setting removes almost all controller functions from MMDVM-Host and the modem:
+   kerchunk, hang, courtesy tone, ID and other functions. `usrp-rc` then controls the
+   repeater.
+
+   > **CAUTION:** If `LinkMode` is not 1, two controllers operate the same repeater.
+
+2. In `MMDVM-Host.ini`, make sure that `[FM Network]` has `Enable=1`. Record the address
+   and port values. Example, from a site that uses other ports:
+
+   ```ini
+   [FM Network]
+   Enable=1
+   LocalAddress=127.0.0.1
+   LocalPort=20012
+   GatewayAddress=127.0.0.1
+   GatewayPort=20013
+   ```
+
+3. In `/etc/usrp-rc/usrp-rc.conf`, set `[mmdvm]` to agree. For the example in step 2:
+
+   ```ini
+   [mmdvm]
+   local_port = 20013
+   rpt_port   = 20012
+   ```
+
+   If FMGateway operated before, copy `LocalPort` and `RptPort` from `[Network]` in
+   `FMGateway.ini`.
+
+4. Stop FMGateway, and make sure that it does not start again at boot. `usrp-rc` uses its
+   port.
+
+   > **CAUTION:** Do not operate FMGateway and `usrp-rc` at the same time.
+
+5. Restart MMDVM-Host.
+
+### Audio levels
+
+1. Set `audio.master_gain` for the deviation of the transmitter. This setting changes the
+   level of all controller audio: tones, CW and voice.
+2. Start with `master_gain` well below 1.0. A steady tone gives more deviation than
+   speech at the same digital peak level.
+3. Set `morse_level`, `voice_level` and `tone_level` to balance the sounds against each
+   other.
+4. Measure the deviation with a deviation meter, or adjust by ear.
+
+> **Note:** In `MMDVM-Host.ini`, `[FM Network]` `TXAudioGain` also changes the level of
+> controller audio. `PreEmphasis=1` increases high frequencies to the transmitter.
 
 ## Configuration
 
-See [MANUAL.md](MANUAL.md) for the full user manual, including DTMF commands and a
-reference to every setting.
+The configuration file is `/etc/usrp-rc/usrp-rc.conf`. It contains `key = value` lines
+under `[section]` headers. `#` starts a comment. A setting that is not in the file has its
+default value.
 
-Copy `usrp-rc.conf.sample` to `/etc/usrp-rc/usrp-rc.conf` (or pass a path on
-the command line) and edit for your site. The format is plain `key = value`
-lines under `[section]` headers, with no quotes, and `#` starts a comment. Any
-setting you leave out takes its default, so a typical config is short:
+This configuration is complete for a linked repeater:
 
 ```ini
 callsign = W1XYZ
@@ -104,339 +276,73 @@ my_voice = voice: THISIS {call} REPEATER
 my_cw    = cw: {call}/R
 ```
 
-`usrp-rc.conf.sample` is the full reference, with every option and its default.
+For the file format, all settings, DTMF commands, messages, events and the schedule, see
+[MANUAL.md](MANUAL.md).
 
-### Checking a config
+### Apply a change
 
-```bash
-usrp-rc --check /etc/usrp-rc/usrp-rc.conf
-```
+To apply a change and to read configuration errors, see
+[MANUAL.md](MANUAL.md#33-apply-a-change), section 3.3. `usrp-rc` does not start if the
+configuration has errors.
 
-`usrp-rc` refuses to start if the config has errors, and reports all of them
-at once, with line numbers:
+## Operation
 
-```text
-config: line 12: timers.hnag: unknown setting (did you mean timers.hang?)
-config: line 20: events.ct_link_on_message: no message named 'yelow_jacket' (did you mean 'yellow_jacket'?)
-config: line 31: messages.my_voice: no voice clip named 'THSIS'
-```
+| Task | Command |
+| --- | --- |
+| Start the service, and start it at each boot | `sudo systemctl enable --now usrp-rc` |
+| Stop the service | `sudo systemctl stop usrp-rc` |
+| Restart the service | `sudo systemctl restart usrp-rc` |
+| Monitor the log | `journalctl -u usrp-rc -f` |
 
-Unknown or misplaced settings, wrong types, out-of-range values, and references
-to messages or voice clips that don't exist are all errors. Run `--check` from
-the same directory the service uses, since `tones.conf`, `user_8k/` and
-`vocab_8k/` are looked for there before the installed copies. An empty `events.mandatory_ids` is a
-warning, because `events.impolite_id`, which is required, is used in its place.
+At startup, the log shows the number of messages defined and the number in use.
 
-### Converting an old `usrp-rc.toml`
-
-```bash
-python3 tools/toml2conf.py usrp-rc.toml usrp-rc.conf   # needs Python 3.11+
-usrp-rc --check usrp-rc.conf
-```
-
-Settings carry over as written, including any the old parser quietly ignored,
-so `--check` shows those by line number. Messages identical to a catalog tone
-are left out. Comments don't carry over, and it won't overwrite an existing
-file. `sudo make install` runs this for you if it finds a
-`/etc/usrp-rc/usrp-rc.toml` and no `usrp-rc.conf`.
-
-### `[mmdvm]` — the loopback link to MMDVM-Host
-
-```ini
-[mmdvm]
-local_address = 127.0.0.1
-local_port    = 4810
-rpt_address   = 127.0.0.1
-rpt_port      = 3810
-```
-
-These are the defaults, so most sites can leave this section out. `usrp-rc`
-binds `local_port` to receive from MMDVM-Host and sends to
-`rpt_address:rpt_port`. In `MMDVM-Host.ini` the mapping is reversed —
-`LocalPort` is what MMDVM-Host *binds*, `GatewayPort` is what it *sends to*:
-
-```ini
-[FM Network]
-Enable=1
-LocalPort=3810       ; must equal usrp-rc's rpt_port
-GatewayPort=4810     ; must equal usrp-rc's local_port
-```
-
-Two more requirements on the MMDVM-Host side:
-
-- **`[FM] LinkMode=1`.** This strips MMDVM-Host and the modem of their own
-  kerchunk / hang / courtesy-tone / ID  and other "repeater controller" logic
-  so `usrp-rc` owns the repeater. Without it you get two controllers fighting
-  each other.
-- **Do not run `fmgateway`.** `usrp-rc` occupies that role. Running both
-  means two programs bound to the same gateway port.
-
-### `[link]` — the network peer (rusrp, usrp-reflector, ASL)
-
-```ini
-[link]
-enabled     = true
-start_on    = true
-remote_host = 127.0.0.1
-remote_port = 41001
-local_port  = 34002
-codec       = pcm     # pcm or opus (narrowband SILK, 8 kHz)
-```
-
-Set `enabled = false` to run as a standalone local repeater with no network
-bridge at all — no link socket is created, and nothing else in `[link]`
-matters. set `on_start = true` to connect the link at startup.
-
-### `[audio]` — levels and padding
-
-`master_gain` is a final multiplier applied to all generated controller
-audio (tones, CW, voice) — set it once for your site's modulator/deviation
-headroom (a sustained tone reads much "louder" in FM deviation than speech
-at the same digital peak, so start well below 1.0 — MMDVM-Host's own
-`[FM Network] TXAudioGain` is a factor here too), then balance individual sounds
-against each other with `morse_level`, `voice_level`, and `tone_level`
-within that range. Also covers STE delay and pre/post-message padding — see
-`usrp-rc.conf.sample` for the full list with defaults.
-
-### `[timers]` — hang, courtesy-tone delay, timeout, ID interval
-
-Mirrors standard analog repeater controller terminology: `hang`, `ct_delay`,
-`kerchunk` (anti-kerchunk COR hold), `timeout` (TOT), `id_interval`,
-`id_anxious`.
-
-`tail_every` and `tail_min_interval` set when `events.tail_messages` plays, always at
-the end of a hang. It never keys the transmitter on its own:
-
-- `tail_every = 10` plays it on every 10th tail, just before the carrier drops.
-  A keyup terminates the message immediately.
-- `tail_min_interval = 60` plays it no more often than every 60 seconds, even if the
-  count threshold is reached.
-
-Each time a hang ends, the message plays if both conditions are met, counted from
-the last tail message start. Otherwise that tail ends normally.
-
-### `[dtmf]` — over-the-air commands
-
-Must be enabled with `enabled = true`. DTMF is decoded from the repeater receiver only;
-tones from the link are not decoded.
-
-```ini
-[dtmf]
-enabled         = true
-pad_test_prefix = 5
-```
-
-Commands follow the three-tier structure used by ACC: user commands,
-control operator commands behind a prefix, and programming commands behind an unlock.
-Only user tier command have been include to date. Programming is achieved in the
-configuration file; at this point there is no need for a DTMF programming tier, 
-though it has been retained as a placeholder for potential future use.
-
-| Command | Enter | Result |
-| --- | --- | --- |
-| Pad test | `5`, then digits | reads the digits back (`*` is spoken "Sierra") |
-| Time | `39` | speaks the time |
-| Usage | `38` | speaks key-ups and minutes of traffic over the last 24 hours |
-| Link on | `72` | connects the link; says "link on" |
-| Link off | `73` | disconnects the link; says "link off" |
-
-All codes can be remapped in the dumf configuration stanza, e.g. `pad_test_prefix`,
-`time_code`, `stats_code`, `link_on_code` and `link_off_code`. An empty value turns
-the command off.
-
-As of today, state is not held across restarts of usrp-rc. For example, it returns
-to `[link] start_on` (true by default) when `usrp-rc` restarts. To identify the link
-status over the air without an interrogation command, different courtesy tones may
-be set to indicate whether the link is on or off. in the `[events]` stand set
-`ct_link_off_message` and `ct_link_on_message`.
-
-The time comes from the system clock and timezone, which depend on the operating
-system of the computer – be aware, if the host computer is set to zulu time, then
-the repeater controller will use zulu time.
-
-One command may be entered and evaluated at a time. Over the air:
-
-- Normally loss of COR terminates a command string.
-- `D` suffix (e.g. `73D`)evaluates what you've entered without waiting for the unkey.
-- `#` cancels what you've entered so far, and you can carry on with a new command.
-
-While you enter digits:
-
-- The first valid tone mutes repeat audio, replacing it with a beep (100 ms on,
-  900 ms off by default). The mute releases `mute_hang_ms` after the last tone,
-  and a later tone starts it again. With `audio.ste_delay_ms` at 0, the start of
-  the first tone is repeated before it can be muted. As long as `min_tone_ms` in
-  the `[dtmf]` stanza is shorter than `ste_delay_ms`, DTMF "blips" will not be heard.
-- The first valid tone also terminates link transmission, and the link stays
-  down until you unkey. Neither the digits nor anything you say afterward goes
-  out over the network.
-
-A reply plays after COR loss and before the courtesy tone. Keying on top of a response
-interrupts it. Commands aren't accepted when the repeater is timed out.
-
-A sequence is discarded if a tone is held past `max_tone_ms`, if digits are more
-than `interdigit_ms` apart (only what came before the gap is lost), or if the
-transmission continues more than `end_of_tx_ms` after the last digit. If voice
-ever sets off false digits, `min_tone_ms` is the first setting to raise. At
-`log.level = info` the log shows when a sequence starts and how it ended; `debug` also
-logs each digit and tones that were too
-short.
-
-### `[events]` — which message plays for each occasion
-
-```ini
-[events]
-initial_ids     = my_voice
-mandatory_ids   = my_cw
-impolite_id     = my_cw
-ct_link_on_message      = yellow_jacket
-ct_link_message = bumble_bee
-timeout_message = timeout_warn
-```
-
-Maps occasions (startup, initial/mandatory/anxious/impolite ID, courtesy
-tones, timeout, DTMF command replies) to message names. `initial_ids`, `mandatory_ids` and `tail_messages` take a
-comma-separated list and rotate through it. An empty value plays nothing.
-
-### `[stats]` — usage figures
-
-`usrp-rc` counts key-ups and the time spent repeating traffic, local or from the link,
-in hourly buckets over a rolling week. Kerchunks and timed-out transmissions don't
-count. The `{keyups_*}` and `{minutes_*}` variables speak these figures, for a message
-or the usage command. Rewording the reply is a matter of redefining `stats_readback`.
-
-The figures survive restarts in `file` (`/var/local/usrp-rc/stats` by default), which is
-saved every 15 minutes if anything changed and at shutdown. A power failure loses at
-most that much. The file holds one week at most and never grows past that. Set `file`
-empty to keep them in memory only. If the file can't be written, usage still works until
-the next restart and a warning is logged. The service file only allows writes to
-`/var/local/usrp-rc`, so a `file` anywhere else also needs its own `ReadWritePaths`.
-
-### `[schedule]` — changing events by time and day
-
-```ini
-[messages]
-net_tonight = voice: NET TONIGHT AT SEVEN THIRTY
-net_ct      = cw: N
-
-[schedule]
-net_reminder = wed 07:00-19:25 tail_messages=net_tonight
-net_running  = wed 19:30-20:30 ct_link_on_message=net_ct ct_link_off_message=net_ct
-```
-
-Each line is `name = DAYS HH:MM-HH:MM setting=value ...`, and any `[events]` setting
-except `startup_message` can be changed. While the window is open its settings are
-in force; when it closes they go back by themselves, so there is no second entry to
-write. A restart in the middle of a window picks it straight back up.
-
-- `DAYS` is `sun` to `sat`, `daily`, `weekdays` or `weekends`, or by the calendar: `2nd-tue`
-  (`1st` to `5th`), `15th`, `last-day` or `dec-8`, which repeats every year. Comma-separated.
-  A day that doesn't occur in a given month just doesn't match.
-- Times are 24-hour, from the system clock and timezone. The window includes its
-  start minute but not its end minute.
-- A window that ends before it starts runs past midnight, and belongs to the day it
-  started on: `fri 22:00-02:00` is still open at 01:00 on Saturday.
-- If windows overlap, the later line wins.
-- Lists like `mandatory_ids` take no spaces here (`mandatory_ids=id1,id2`), and
-  an empty value turns a setting off (`tail_messages=`).
-- On a list, `=` replaces it, `+=` adds to it and `-=` removes from it, working from
-  `[events]` down the file. `-=` can't remove the last mandatory ID.
-
-Changes take effect at the top of each minute, and `log.level = info` logs each window
-starting and ending.
-
-### `[messages]` — the actual audio content
-
-Each line names a message, made of `cw:`, `voice:`, and `tone:` parts:
-
-```ini
-[messages]
-my_voice = voice: THISIS {call} REPEATER
-my_cw    = cw: {call}/R
-my_tone  = tone: 330:50 495:50 660:50
-my_mix   = voice: THISIS {call} | tone: 880:100 | cw: {call}/R
-```
-
-- **Variables** are spoken as of when the message plays, each as its own word in a
-  `voice:` part: `{time}`, `{ampm}`, `{greeting}` (morning, afternoon or evening),
-  `{day}`, `{date}` (month and day), `{year}`, `{keyups_day}`, `{keyups_week}`, `{minutes_day}`
-  and `{minutes_week}`. Time and greeting use the female `F_` clips; the rest use the
-  standard ones. `usrp-rc --check` confirms every clip they need exists.
-- **`{call}`** is replaced by the top-level `callsign` setting, which holds only
-  the callsign (letters and digits). Add `/R`, `REPEATER`, or anything else in
-  the message itself. CW sends it as written; voice spells it out, so `W1XYZ`
-  plays the clips `W ONE X Y Z`.
-- **`voice:`** takes clip names separated by spaces, played back to back. `_`
-  inserts a pause of `audio.voice_gap_ms` and `_400` a 400 ms pause. Only `_`
-  followed solely by digits or nothing counts, so a clip named `_TEEN` is
-  unaffected.
-- **`cw:`** takes the text to send. Spaces are real Morse word gaps.
-- **`tone:`** takes notes played in order:
-
-  | You write | You get |
-  |---|---|
-  | `660:50` | 660 Hz for 50 ms |
-  | `500+700:100` | 500 Hz and 700 Hz together for 100 ms |
-  | `_30` | 30 ms of silence |
-  | `1200:60@0.9` | this note at level 0.9 instead of `audio.tone_level` |
-
-- **`|`** joins parts into one message.
-- A message can hold up to 32 elements, where each note counts as one and each
-  `cw:` or `voice:` part as one. A `voice:` part holds up to 32 words and pauses.
-
-**Tone catalog**: [`tones.conf`](tones.conf) is installed with `usrp-rc` and its
-tones are always available by name, e.g. `ct_link_on_message = yellow_jacket`. It's a
-readable text file listing each tone's notes and what it sounds like. To make
-your own tone, add it under `[messages]` in your config; using a catalog name
-replaces that tone. There's no limit on how many you define, and only the ones an event
-or schedule window names are kept after the startup check. A message or clip can be up to
-3 minutes long.
-
-**Name length**: message names, clip names, and anywhere you reference a
-message name (`ct_link_on_message`, `initial_ids`, etc.) are capped at 31 characters,
-and a longer value is a config error. This does not apply to `cw:` text.
-
-`access_mode` (top-level setting, default `cor`) is accepted but `cor_ctcss`
-has no functional effect in this build: the mmdvm link carries only
-start/end-of-transmission, so there's no independent CTCSS signal to gate
-on — CTCSS decode is MMDVM-Host's job (`[FM] CTCSSFrequency` / `AccessMode`).
-It's present for schema completeness and possible future use.
-
-## Running
+### Test from the source directory
 
 ```bash
 ./build/usrp-rc usrp-rc.conf.sample
-# or, once installed:
-sudo systemctl enable --now usrp-rc
-journalctl -u usrp-rc -f
 ```
 
-## Vocabulary
+The program operates in the foreground. It uses `tones.conf` and `vocab_8k/` from the
+source directory. To stop it, push Ctrl+C.
 
-`vocab_8k/` ships pre-built with the repo — a normal clone and build never
-needs any extra vocabulary tooling.
+> **CAUTION:** Stop the service before this test. The service and the test use the same
+> ports.
 
-`user_8k/` ships with the repo (and gets installed to
-`/usr/local/share/usrp-rc/user_8k/` — not `/etc/`, since these are data
-files, not configuration) ready for your own clips — no need to create it or
-guess permissions. To add a clip (or replace a stock one), drop an 8 kHz
-mono 16-bit WAV file in, matching `vocab_8k/`'s naming convention (the WAV
-filename, minus `.wav`, is the clip name used in `voice:` messages —
-see `[messages]` above). Files in `user_8k/` take priority over stock
-clips of the same name, so you can override one word without touching the
-shipped set. See
-[user_8k/README.md](user_8k/README.md) for the same detail in one place.
+## Voice clips
 
-## Not implemented (by design, v1)
+| Directory | Contents |
+| --- | --- |
+| `vocab_8k/` | Stock voice clips. They are in the repository. No other tools are necessary. |
+| `user_8k/` | Site voice clips. A clip in this directory replaces a stock clip with the same name. |
 
-No CM119/ALSA/hidraw, no Unix socket monitoring API, no CTCSS encode or
-software decode, no IAX2, and exactly two fixed ports (no multi-port linking).
+Clip requirements:
 
-## Upgrading
+- WAV file, 8 kHz, mono, 16-bit
+- 3 minutes maximum
+- The file name without `.wav` is the clip name.
 
-See [UPGRADE.md](UPGRADE.md) for what changes between versions.
+For the preparation of recordings, see [user_8k/README.md](user_8k/README.md). For the use
+of clips in messages, see [MANUAL.md](MANUAL.md).
 
-## Contributing / internals
+## Limits and exclusions
 
-See [DEVELOPMENT.md](DEVELOPMENT.md) for project origin, target-platform
-notes, and how to regenerate the built-in vocabulary from source audio.
+This version does not include:
+
+- CM119, ALSA or hidraw radio interfaces
+- A Unix socket interface for monitoring
+- CTCSS encode, or CTCSS decode in software
+- IAX2
+- More than two ports, or linking of more than one network port
+
+`access_mode = cor_ctcss` has no effect in this version. MMDVM-Host decodes CTCSS, and
+the mmdvm port sends only start and end markers.
+
+## Related documents
+
+| Document | Contents |
+| --- | --- |
+| [MANUAL.md](MANUAL.md) | Operation and settings reference: DTMF commands, messages, events, schedule and all settings |
+| [UPGRADE.md](UPGRADE.md) | Changes between versions |
+| [DEVELOPMENT.md](DEVELOPMENT.md) | Program internals, project origin and the rebuild of the stock vocabulary |
+| [user_8k/README.md](user_8k/README.md) | Preparation of voice clips |
+| [usrp-rc.conf.sample](usrp-rc.conf.sample) | All settings, with their defaults |

@@ -100,7 +100,7 @@ default_cw    = cw: {call}/R
 
 #[mmdvm]
 # Loopback link to MMDVM-Host's native FM Network protocol. usrp-rc takes the
-# place of G4KLX's fmgateway here -- do NOT run fmgateway as well. Requires
+# place of G4KLX's FMGateway here -- do NOT run FMGateway as well. Requires
 # [FM] LinkMode=1, and in MMDVM-Host.ini the ports are the reverse of these:
 #     [FM Network]
 #     Enable=1

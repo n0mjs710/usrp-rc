@@ -1,132 +1,213 @@
-# usrp-rc User Manual
+# usrp-rc Operation and Reference Manual
 
-`usrp-rc` is a repeater controller for an MMDVM-Host FM repeater with one network
-link. It handles IDs, courtesy tones, the time-out timer, messages, a schedule and
-DTMF commands.
+This manual applies to the `dtmf-control` branch of `usrp-rc`. For installation and
+MMDVM-Host integration, see [README.md](README.md).
 
-If you've run an ACC or Arcom controller, most of this will feel familiar, with one
-big difference: **you program it by editing a text file, not by sending DTMF
-sequences.** Stored speech and sound effects are ordinary WAV clips and text
-definitions, so there's no DVR to record or vocabulary table to look up.
+## Contents
 
-This manual covers the `dtmf-control` branch.
+1. [Introduction](#1-introduction)
+2. [Over-the-air operation](#2-over-the-air-operation)
+3. [Configuration file](#3-configuration-file)
+4. [Transmission cycle](#4-transmission-cycle)
+5. [Messages](#5-messages)
+6. [Events](#6-events)
+7. [Schedule](#7-schedule)
+8. [Link](#8-link)
+9. [DTMF control](#9-dtmf-control)
+10. [Usage statistics](#10-usage-statistics)
+11. [Settings reference](#11-settings-reference)
+12. [Configuration examples](#12-configuration-examples)
+13. [Log and troubleshooting](#13-log-and-troubleshooting)
 
-- **Part 1, [On the air](#part-1-on-the-air):** what a radio user needs. It can be
-  printed and handed out on its own.
-- **Part 2, [Setting up](#part-2-setting-up):** how the config file works, and a
-  working example.
-- **Part 3, [Features](#part-3-features):** messages, events, the schedule and usage
-  figures.
-- **Part 4, [Settings reference](#part-4-settings-reference):** every setting, with
-  its default and allowed range.
-- **Part 5, [Recipes and troubleshooting](#part-5-recipes-and-troubleshooting).**
-- **Appendices:** [the tone catalog](#appendix-a-tone-catalog) and
-  [the voice clips](#appendix-b-voice-clips).
+- [Appendix A: Tone catalog](#appendix-a-tone-catalog)
+- [Appendix B: Voice clips](#appendix-b-voice-clips)
 
 ---
 
-# Part 1: On the air
+## 1. Introduction
 
-## DTMF commands
+### 1.1 Scope
 
-DTMF has to be turned on with `enabled = true` under `[dtmf]`. These are the default
-codes, and your repeater's owner may have changed or turned off any of them.
+`usrp-rc` is a repeater controller for an MMDVM-Host FM repeater with one network link.
+It controls IDs, courtesy tones, the time-out timer, messages, a schedule and DTMF
+commands.
 
-| Enter | Command | What you hear |
+The operator programs `usrp-rc` with a text configuration file. DTMF programming is not
+used. Speech and sound effects are WAV clips and text definitions.
+
+### 1.2 Structure of this manual
+
+| Section | Contents | Reader |
+| --- | --- | --- |
+| 2 | DTMF commands and repeater sounds | Radio users. This section can be printed separately. |
+| 3 to 10 | Functions and their configuration | Repeater operators |
+| 11 | All settings, with defaults and ranges | Repeater operators |
+| 12 and 13 | Examples, log messages and fault isolation | Repeater operators |
+
+### 1.3 Terms
+
+| Term | Meaning |
+| --- | --- |
+| COR | Carrier operated relay. The signal that a station transmits. `usrp-rc` gets it from MMDVM-Host and from the link. |
+| Key-up | The start of a transmission into the repeater |
+| Kerchunk | A key-up shorter than `timers.kerchunk` |
+| Courtesy tone | The sound after a transmission. It shows that the next station can transmit. |
+| Hang | The time that the transmitter stays on after the courtesy tone |
+| Tail | The period from the end of a transmission to the end of the hang |
+| Message | A named sequence of voice, CW and tone audio |
+| Event | A setting that names the message for one occasion |
+| Window | A schedule line that changes events during a time period |
+
+### 1.4 Units
+
+- Settings in `[timers]` are in seconds.
+- Settings with names that end in `_ms` are in milliseconds.
+- Levels are multipliers. 1.0 is full scale.
+
+---
+
+## 2. Over-the-air operation
+
+### 2.1 DTMF commands
+
+These are the default codes. The repeater operator can change or disable each code. DTMF
+commands operate only if the operator sets `[dtmf] enabled = true`.
+
+| Code | Command | Reply |
 | --- | --- | --- |
 | `39` | Time | "Good morning, the time is seven thirty A M" |
-| `38` | Usage | "*n* key ups, *n* minutes": key-ups and minutes of traffic over the last 24 hours |
+| `38` | Usage | "*n* key ups, *n* minutes": key-ups and minutes of traffic in the last 24 hours |
 | `72` | Link on | "Link on" |
 | `73` | Link off | "Link off" |
-| `5` + digits | Pad test | Your digits read back, to check your radio's tones |
+| `5` + digits | Pad test | The digits. Use this command to test the DTMF tones of a radio. |
 
-Two keys have special jobs:
+### 2.2 Special keys
 
-| Key | Job |
+| Key | Function |
 | --- | --- |
-| `#` | Cancels what you've entered. You can carry on with a new command. |
-| `D` | Runs the command now, without waiting for you to unkey. Useful when a carrier won't drop. |
+| `#` | Cancels the digits entered. A new command can then be entered. |
+| `D` | Executes the command immediately. The repeater does not wait for the unkey. Use this key if a carrier does not drop. |
 
-## Entering a command
+### 2.3 Command entry
 
-1. Key up.
+Enter one command in each transmission.
+
+1. Key the radio.
 2. Enter the digits.
-3. Unkey.
+3. Unkey the radio.
 
-The reply plays in the tail, ahead of the courtesy tone. If anyone keys up during the
-reply, it stops.
+The reply plays after the unkey, before the courtesy tone. A key-up stops the reply.
 
-While you enter digits:
+During digit entry:
 
-- **You hear a beep on the repeater output** in place of your tones, about one beep a
-  second. The start of your first digit may get through as a short blip.
-- **Your transmission is cut off from the network** from the first digit until you
-  unkey. Neither your digits nor anything you say afterward goes out over the link.
-  Anything you said before the first digit has already gone.
+- The repeater transmits a beep in place of the DTMF tones. The beep occurs
+  approximately one time each second.
+- The start of the first digit can go out as a short blip.
+- The repeater does not send the transmission to the link. This starts at the first digit
+  and continues until the unkey. Audio before the first digit has already gone to the link.
 
-A sequence is dropped if:
+### 2.4 Discarded entries
 
-| What happened | Default limit |
+The repeater discards an entry for these conditions:
+
+| Condition | Default limit |
 | --- | --- |
-| A single tone was held too long | 5 seconds |
-| You paused too long between digits | 4 seconds; only the digits before the pause are lost |
-| You stayed keyed too long after the last digit | 8 seconds |
-| You entered too many digits | 32 |
+| One tone is too long | 5 seconds |
+| The pause between two digits is too long | 4 seconds. Only the digits before the pause are discarded. |
+| The transmission continues too long after the last digit | 8 seconds |
+| The entry has too many digits | 32 |
 
-If a sequence doesn't match any command, nothing happens: there's no error sound.
-Commands aren't accepted while the repeater is timed out.
+An entry that does not agree with a command has no effect. No error sound plays. The
+repeater does not accept commands when it is timed out.
 
-## Pad test
+### 2.5 Pad test
 
-Enter `5` and then any digits, and the repeater reads them back. `*` is read as
-"Sierra", and `A`, `B` and `C` as letters. `#` and `D` can't be read back because they
-cancel and enter.
+Enter `5` and then the digits to test. The repeater says the digits.
 
-## Sounds you may hear
+| Key | Reply |
+| --- | --- |
+| `0` to `9` | The digit |
+| `*` | "Sierra" |
+| `A`, `B`, `C` | The letter |
+| `#`, `D` | Not available. These keys cancel and execute. |
+
+### 2.6 Repeater sounds
 
 | Sound | Meaning |
 | --- | --- |
-| Courtesy tone | The last station has finished, and it's clear to transmit. On many repeaters, different tones show local traffic, network traffic and whether the link is on. |
-| Beeping | Someone is entering a DTMF command. |
-| Short falling tones | The time-out timer has cut off a long transmission. Unkey to reset it. |
+| Courtesy tone | The transmission has ended. The next station can transmit. Different tones can show local traffic, link traffic and link off. |
+| Beep, one time each second | A station enters a DTMF command. |
+| Short falling tones | The time-out timer stopped a long transmission. Unkey to reset the timer. |
 
 ---
 
-# Part 2: Setting up
+## 3. Configuration file
 
-## The config file
+### 3.1 Location
 
-The installed config is `/etc/usrp-rc/usrp-rc.conf`. `usrp-rc.conf.sample` in the repo
-lists every option.
+| File | Function |
+| --- | --- |
+| `/etc/usrp-rc/usrp-rc.conf` | Configuration |
+| `/etc/usrp-rc/usrp-rc.conf.sample` | All settings, with defaults and comments |
+
+### 3.2 Format
 
 ```ini
 # A comment
 callsign = W1XYZ
 
 [section]
-key = value   # a comment can go after a value
+key = value   # a comment after a value
 ```
 
-- Values don't take quotes.
-- Sections can be in any order.
-- **Leave a setting out to get its default.** Most sites need only a few lines.
-- An empty value (`tail_messages =`) means "none" or "off".
-- **Lists of choices use commas:** `mandatory_ids = id1,id2`.
-- **Sequences use spaces:** `voice: THISIS {call} REPEATER`.
+| Rule | Example |
+| --- | --- |
+| Values have no quotation marks. | `callsign = W1XYZ` |
+| Sections can be in any sequence. | |
+| A setting that is not in the file has its default value. | |
+| An empty value means "none" or "off". | `tail_messages =` |
+| Commas separate a list of choices. | `mandatory_ids = id1,id2` |
+| Spaces separate the items of a sequence. | `voice: THISIS {call} REPEATER` |
+| Settings before the first section are top-level settings. | `callsign`, `access_mode` |
 
-## Applying a change
+### 3.3 Apply a change
 
-Changes take effect when the service restarts, and always check them first:
+1. Edit the configuration:
 
-```bash
-sudo nano /etc/usrp-rc/usrp-rc.conf
-cd / && /usr/local/bin/usrp-rc --check /etc/usrp-rc/usrp-rc.conf
-sudo systemctl restart usrp-rc
-journalctl -u usrp-rc -f
-```
+   ```bash
+   sudo nano /etc/usrp-rc/usrp-rc.conf
+   ```
 
-`usrp-rc` refuses to start if the config has errors. `--check` reports all of them at
-once, by line number, and suggests a fix for many typos:
+2. Examine the configuration for errors:
+
+   ```bash
+   cd / && /usr/local/bin/usrp-rc --check /etc/usrp-rc/usrp-rc.conf
+   ```
+
+3. Correct all errors. Then do step 2 again.
+4. Restart the service:
+
+   ```bash
+   sudo systemctl restart usrp-rc
+   ```
+
+5. Monitor the log:
+
+   ```bash
+   journalctl -u usrp-rc -f
+   ```
+
+> **Note:** `usrp-rc` looks for `tones.conf`, `user_8k/` and `vocab_8k/` in the current
+> directory first. The service operates from `/`. Thus, do the check from `/`. A check from
+> a source directory examines the files in that directory, not the installed files.
+
+> **Note:** A change has effect only after a restart.
+
+### 3.4 Configuration errors
+
+`usrp-rc` does not start if the configuration has errors. `--check` shows all errors
+together, with line numbers. For many typing errors, it also shows the probable correct
+value:
 
 ```text
 config: line 12: timers.hnag: unknown setting (did you mean timers.hang?)
@@ -134,13 +215,9 @@ config: line 20: events.ct_link_on_message: no message named 'yelow_jacket' (did
 config: line 31: messages.my_voice: no voice clip named 'THSIS'
 ```
 
-The `cd /` matters. `usrp-rc` looks for `tones.conf` and its clip folders in the current
-directory before the installed copies, so checking from inside a source checkout tests
-that checkout's files instead of the ones the service will use.
+### 3.5 Example
 
-## A working example
-
-This is a complete config for a linked repeater with DTMF on:
+This configuration is complete for a linked repeater with DTMF commands:
 
 ```ini
 callsign = W1XYZ
@@ -166,40 +243,49 @@ my_voice = voice: THISIS {call} REPEATER
 my_cw    = cw: {call}/R
 ```
 
-For MMDVM-Host, set `[FM] LinkMode=1`. In `[FM Network]`, the ports are the mirror image
-of `[mmdvm]` here: `LocalPort` matches `rpt_port` and `GatewayPort` matches `local_port`.
-`usrp-rc` takes the place of `fmgateway`, so don't run both.
+---
 
-## What happens during a transmission
+## 4. Transmission cycle
 
-Most timers and events attach to one point in this cycle:
+Most timers and events start at one point in this cycle:
 
 ```text
- Carrier appears
-   |  Repeating. Shorter than timers.kerchunk: treated as a kerchunk and ignored.
-   |  Longer than timers.timeout: cut off (see below).
- Carrier drops
+ Carrier starts
+   |  The repeater repeats the audio.
+   |  Shorter than timers.kerchunk: kerchunk. No courtesy tone, no tail.
+   |  Longer than timers.timeout: time-out (see 6.3).
+ Carrier stops
    |  timers.ct_delay
- Replies and anxious ID play, if any are waiting
+ Replies and the anxious ID play, if they are pending.
    |
  Courtesy tone. The time-out timer resets here.
    |  timers.hang
- Tail message plays, if one is due
+ Tail message plays, if it is due.
    |
- Transmitter drops
+ Transmitter stops
 ```
 
-If someone keys up during the delay or hang, the repeater goes straight back to
-repeating, and the time-out timer carries on from where it was.
+A key-up during the delay or the hang starts repetition again. The time-out timer then
+continues from its last value.
+
+| Timer | Default | Function |
+| --- | --- | --- |
+| `kerchunk` | 0.5 s | Minimum carrier time for a full transmission |
+| `ct_delay` | 0.5 s | Time from carrier stop to the courtesy tone |
+| `hang` | 2.5 s | Time from the end of the courtesy tone to transmitter stop |
+| `timeout` | 180 s | Maximum transmission time |
+
+> **Note:** The log value `ptt: OFF ... duration` includes the carrier time, `ct_delay`,
+> the courtesy tone and `hang`.
 
 ---
 
-# Part 3: Features
+## 5. Messages
 
-## Messages
+### 5.1 Definition
 
-A message is a named piece of audio, defined under `[messages]`. It's made of `voice:`,
-`cw:` and `tone:` parts, joined with `|`:
+A message is a named sequence of audio in `[messages]`. It contains `voice:`, `cw:` and
+`tone:` parts. `|` joins the parts:
 
 ```ini
 [messages]
@@ -209,58 +295,54 @@ my_tone  = tone: 330:50 495:50 660:50
 my_mix   = voice: THISIS {call} | tone: 880:100 | cw: {call}/R
 ```
 
-### Voice
+### 5.2 Voice parts
 
-A list of clip names, played one after another. [Appendix B](#appendix-b-voice-clips)
-lists the clips that come with `usrp-rc`.
+A voice part is a list of clip names. The clips play in sequence. For the stock clips, see
+[Appendix B](#appendix-b-voice-clips).
 
-| You write | You get |
+| Item | Result |
 | --- | --- |
+| `REPEATER` | The clip `REPEATER` |
 | `_` | A pause of `audio.voice_gap_ms` (150 ms by default) |
 | `_400` | A pause of 400 ms |
-| `{call}` | Your callsign, spelled out: `W1XYZ` plays `W ONE X Y Z` |
+| `{call}` | The callsign, spelled: `W1XYZ` plays `W ONE X Y Z` |
+| `{time}` and other variables | See [5.5](#55-variables) |
 
-**Adding your own clips:** put an 8 kHz, mono, 16-bit WAV file in
-`/usr/local/share/usrp-rc/user_8k/`. The filename without `.wav` is the clip name. A clip
-there replaces a stock clip with the same name.
+### 5.3 CW parts
 
-`usrp-rc` applies no further equalization to your recordings; it only scales them by
-`audio.voice_level` and `audio.master_gain`.
+A CW part is the text to send. A space is a Morse word gap. `{call}` sends the callsign.
+Add other text in the message, for example `{call}/R`.
 
-Don't normalize clips to full scale. A recording peaking near 0 dBFS will be noticeably
-hotter than repeat audio, which sits well below full scale. MMDVM-Host's pre-emphasis also
-boosts high frequencies on the way to the transmitter, and a full-scale recording leaves
-no room for that. Leave generous headroom, start around -10 dBFS, and adjust by ear or on
-a deviation meter.
+`--check` shows each character that has no Morse code. The speed, pitch and level are in
+`[audio]`.
 
-### CW
+### 5.4 Tone parts
 
-The text to send, where spaces are real Morse word gaps. `{call}` sends your callsign,
-and you add anything else yourself, as in `{call}/R`. `--check` reports any character
-with no Morse code. Speed, pitch and level are under `[audio]`.
+The notes play from left to right:
 
-### Tones
-
-Notes played left to right:
-
-| You write | You get |
+| Item | Result |
 | --- | --- |
 | `660:50` | 660 Hz for 50 ms |
 | `500+700:100` | 500 Hz and 700 Hz together for 100 ms |
 | `_30` | 30 ms of silence |
-| `1200:60@0.9` | This note at level 0.9, instead of `audio.tone_level` |
+| `1200:60@0.9` | This note at level 0.9, in place of `audio.tone_level` |
 
-[Appendix A](#appendix-a-tone-catalog) lists ready-made tones you can use by name. To
-change one, define a message with the same name.
+| Value | Range |
+| --- | --- |
+| Frequency | 0 to 4000 Hz |
+| Duration of one note | 1 to 60000 ms |
+| Level | 0 to 2 |
 
-### Runtime variables
+For the tone catalog, see [Appendix A](#appendix-a-tone-catalog).
 
-These are worked out each time the message plays. Each one has to be its own word in a
-`voice:` part.
+### 5.5 Variables
+
+`usrp-rc` calculates each variable when the message plays. Each variable must be a
+separate word in a `voice:` part.
 
 | Variable | Speaks |
 | --- | --- |
-| `{time}` | The time in 12-hour form, such as "seven thirty" |
+| `{time}` | The time, 12-hour format, for example "seven thirty" |
 | `{ampm}` | "A M" or "P M" |
 | `{greeting}` | "morning" before 12:00, "afternoon" before 18:00, then "evening" |
 | `{day}` | The day of the week |
@@ -271,129 +353,194 @@ These are worked out each time the message plays. Each one has to be its own wor
 | `{minutes_day}` | Minutes of traffic in the last 24 hours |
 | `{minutes_week}` | Minutes of traffic in the last 7 days |
 
-`{time}`, `{ampm}` and `{greeting}` use the female `F_` clips, and the others use the
-standard voice. `{call}` is the only variable that also works in `cw:`.
+- `{time}`, `{ampm}` and `{greeting}` use the female `F_` clips. The other variables use
+  the standard voice.
+- `{call}` is the only variable that also operates in `cw:` parts.
+- The time and date come from the system clock and time zone of the computer. If the
+  computer uses UTC, the repeater also uses UTC.
 
-### Limits
+### 5.6 Site voice clips
+
+To add a clip, or to replace a stock clip:
+
+1. Prepare an 8 kHz, mono, 16-bit WAV file. Its maximum length is 3 minutes.
+2. Put the file in `/usr/local/share/usrp-rc/user_8k/`. The file name without `.wav` is
+   the clip name.
+3. Restart the service.
+
+A clip in `user_8k/` replaces a stock clip with the same name. Clip names are not
+case-sensitive.
+
+`usrp-rc` applies no equalization to clips. It changes only their level, with
+`audio.voice_level` and `audio.master_gain`.
+
+> **Note:** Do not normalize clips to full scale. A clip with peaks near 0 dBFS is
+> louder than repeat audio. MMDVM-Host pre-emphasis also increases high frequencies to the
+> transmitter. Start with peaks near -10 dBFS. Then adjust by ear or with a deviation meter.
+
+### 5.7 Limits
 
 | Item | Limit |
 | --- | --- |
-| Length of one message or clip | 3 minutes |
-| Parts in one message | 32, where each note counts as one and each `voice:` or `cw:` part as one |
+| Length of one message or one clip | 3 minutes |
+| Parts in one message | 32. Each note is one part. Each `voice:` or `cw:` part is one part. |
 | Words and pauses in one `voice:` part | 32 |
-| Message and clip names | 31 characters |
+| Message names and clip names | 31 characters |
+| Number of messages | No limit |
 
-### The clip check
+### 5.8 Validation
 
-Every time it starts, and on every `--check`, `usrp-rc` confirms that every clip each
-message could need exists, including the built-in replies. Variables are checked against
-everything they could ever say, so `{keyups_day}` needs `THOUSAND` even at 12 key-ups. If
-a clip is missing, `usrp-rc` names it and won't start. A message over 3 minutes stops it
-starting too. A clip over 3 minutes is logged and skipped, so it only matters if a message
-uses it.
+At each start and at each `--check`, `usrp-rc` makes sure that each clip for each message
+exists. This includes the built-in replies.
 
-Messages you've defined but not assigned are checked the same way, so a problem in one
-stops `usrp-rc` starting, even though it could never play.
+- For a variable, `usrp-rc` examines all values that the variable can speak. Thus,
+  `{keyups_day}` needs the clip `THOUSAND`, also at 12 key-ups.
+- A missing clip is an error. `usrp-rc` shows the clip name and does not start.
+- A message longer than 3 minutes is an error.
+- A clip longer than 3 minutes is not loaded. `usrp-rc` records this in the log. This is
+  an error only if a message uses the clip.
+- Messages that no event uses get the same validation. An error in such a message also
+  stops the start.
 
-The check can't hear audio, so listen to your new messages on the air.
+> **Note:** The validation cannot hear the audio. Listen to each new message on the air.
 
-### Unused messages
+### 5.9 Unused messages
 
-You can define as many messages as you like. Once they've passed the check, `usrp-rc` keeps
-only the ones that an `[events]` setting or a schedule window names, and the catalog tones
-you aren't using take up no memory. At startup and with `--check`, it reports both counts:
-`34 messages defined, 9 in use`.
+After validation, `usrp-rc` keeps only the messages that an `[events]` setting or a
+schedule window names. Unused messages and unused catalog tones use no memory. At start
+and at `--check`, `usrp-rc` shows the two quantities:
 
-## Events
+```text
+usrp-rc: 34 messages defined, 9 in use
+```
 
-Events connect occasions to messages, under `[events]`. Set one to a message name, or
-leave it empty to play nothing.
+---
 
-### IDs
+## 6. Events
 
-| Setting | When it plays |
+Each `[events]` setting names the message for one occasion. An empty setting plays
+nothing.
+
+### 6.1 Identification
+
+| Setting | Plays | Lists |
+| --- | --- | --- |
+| `initial_ids` | At the end of the first transmission when no ID timer operates | Yes |
+| `mandatory_ids` | When the ID timer (`timers.id_interval`) expires and the repeater is not in use | Yes |
+| `anxious_id` | In a tail during the last `timers.id_anxious` seconds before the ID timer expires. Thus, the ID does not have to key the transmitter later. | No |
+| `impolite_id` | When the ID timer expires during a transmission. The ID mixes with the conversation. CW plays at `audio.impolite_morse_level`. **Necessary.** | No |
+
+A setting with a list rotates through the list. Each ID is the next name in the list.
+
+#### ID rules
+
+1. A transmission makes an ID necessary.
+2. An ID of any type satisfies this requirement.
+3. When the ID timer expires, the repeater sends an ID only if one is necessary. If no ID
+   is necessary, the timer expires and nothing plays.
+4. If no transmission occurs after an ID, no new ID plays until the next transmission.
+
+Thus, a single key-up with an initial ID needs no other ID.
+
+If `initial_ids` is empty, the ID remains necessary after the first transmission. When
+the ID timer expires, the repeater sends one of these IDs, in this sequence of priority:
+
+1. The anxious ID, if a tail occurs in the anxious period
+2. The mandatory ID
+3. The impolite ID
+
+#### ID protection
+
+`impolite_id` is necessary. `usrp-rc` does not start without it.
+
+If `mandatory_ids` is empty when an ID is necessary, `impolite_id` plays in its place. The
+repeater keys the transmitter for this ID if necessary. `--check` shows a warning for an
+empty `mandatory_ids`.
+
+This protects ID integrity against configuration mistakes.
+
+> **CAUTION:** Do not use this protection as the ID configuration. Always set
+> `mandatory_ids`.
+
+`anxious_id` has no protection. If it is empty, the repeater waits for the mandatory ID.
+
+#### Key-up during an ID
+
+| ID type | Result of a key-up |
 | --- | --- |
-| `initial_ids` | At the end of the first transmission when no ID timer is running. Rotates through its list. |
-| `mandatory_ids` | When the ID timer (`timers.id_interval`) runs out and the repeater isn't busy. Rotates through its list. |
-| `anxious_id` | In a tail during the last `timers.id_anxious` seconds before the timer runs out, so the ID doesn't have to key up on its own later. |
-| `impolite_id` | When the timer runs out while someone is talking. It's mixed over the conversation, with CW at `audio.impolite_morse_level`. Required. |
+| Voice | The ID stops. The impolite ID plays in its place. |
+| CW | The ID continues under the repeated audio. |
 
-If nothing has been transmitted since the last ID, no new ID plays until someone uses the
-repeater again.
-
-**How IDs work:** any transmission means an ID is owed, and any ID clears that. When the
-timer runs out, the repeater sends an ID if one is owed, and otherwise stays quiet. That's
-why a single key-up followed by an initial ID needs nothing further: the station has already
-identified. With no initial ID, the ID is still owed when the timer runs out, so it goes out
-then, even if nothing else was transmitted. That's the anxious ID if a tail reaches it first,
-otherwise the mandatory ID, otherwise `impolite_id`.
-
-**ID safety net:** the station has to identify, so `impolite_id` is required, and `usrp-rc`
-won't start without it. If `mandatory_ids` is ever empty when an ID is due, `impolite_id`
-plays in its place, and the repeater keys up to send it if needed. This protects you from a
-config mistake. It isn't a way to set up IDs, so keep that list filled in. `--check` warns if
-it's empty. `anxious_id` has no such backup: without one, the repeater just waits for the
-mandatory ID.
-
-If someone keys up during a voice ID, the ID stops and the impolite ID plays instead. A
-CW ID carries on underneath.
-
-### Courtesy tones
+### 6.2 Courtesy tones
 
 | Setting | Plays after |
 | --- | --- |
-| `ct_link_on_message` | Local traffic with the link on. Also used with the link off, or no link, if `ct_link_off_message` is empty. |
+| `ct_link_on_message` | Local traffic with the link on. If `ct_link_off_message` is empty, also local traffic with the link off or with no link. |
 | `ct_link_off_message` | Local traffic with the link off |
-| `ct_link_message` | Traffic from the link. If this is empty, the tones above are used. |
+| `ct_link_message` | Link traffic. If this setting is empty, the two tones above apply. |
 
-A courtesy tone can be any message, so a voice clip works too. Using a different tone for
-link off shows the link's state to anyone listening.
+A courtesy tone can be any message, also a voice message. A different tone for link off
+shows the link state to listeners.
 
-### Time-out and other messages
+### 6.3 Time-out
 
-| Setting | When it plays |
+| Setting | Plays |
 | --- | --- |
-| `startup_message` | When `usrp-rc` starts |
-| `timeout_message` | When the time-out timer cuts off a transmission |
-| `timeout_cancel_message` | When that carrier finally drops and the repeater recovers |
-| `tail_messages` | See [tail messages](#tail-messages) |
-| `time_message` | Reply to the time command. Default `time_readback`. |
-| `stats_message` | Reply to the usage command. Default `stats_readback`. |
-| `link_on_message` | Reply to link on. Default `link_on_reply`. |
-| `link_off_message` | Reply to link off. Default `link_off_reply`. |
+| `timeout_message` | When the time-out timer stops a transmission |
+| `timeout_cancel_message` | When the carrier stops after a time-out, and the repeater operates again |
 
-An empty reply setting means the command still works but says nothing. To reword a reply,
-define a message with the built-in name:
+### 6.4 Command replies
+
+| Setting | Plays | Default |
+| --- | --- | --- |
+| `time_message` | Reply to the time command | `time_readback` |
+| `stats_message` | Reply to the usage command | `stats_readback` |
+| `link_on_message` | Reply to the link-on command | `link_on_reply` |
+| `link_off_message` | Reply to the link-off command | `link_off_reply` |
+
+If a reply setting is empty, the command operates without a reply.
+
+To change the words of a reply, define a message with the built-in name:
 
 ```ini
 [messages]
 stats_readback = voice: {keyups_week} KEY UP _S _ {minutes_week} MINUTES
 ```
 
-### Tail messages
+### 6.5 Startup message
 
-Set one or more messages in `tail_messages`, with commas between them. Each one that
-plays is the next in the list. It plays at the end of a hang, just before the transmitter
-drops, and never keys the transmitter on its own.
+`startup_message` plays one time when `usrp-rc` starts.
 
-| Setting | Behavior |
+### 6.6 Tail messages
+
+`tail_messages` is a list of messages. Commas separate the names. Each tail message is the
+next name in the list.
+
+A tail message plays at the end of a hang, immediately before the transmitter stops. A
+tail message never keys the transmitter.
+
+| Setting | Condition |
 | --- | --- |
-| `timers.tail_every = 10` | At least 10 tails since it last played. `1` means every tail, and `0` turns tail messages off. |
-| `timers.tail_min_interval = 60` | At least 60 seconds since it last started. `0` means no limit. |
+| `timers.tail_every` | Minimum number of tails since the last tail message. `1` is each tail. `0` disables tail messages. Default: 10. |
+| `timers.tail_min_interval` | Minimum number of seconds since the last tail message started. `0` is no limit. Default: 0. |
 
-Each time a hang ends, the message plays if both are met. Otherwise that tail ends
-normally. Nothing queues up, so it plays at most once per tail, however long it's been.
-If someone keys up over it, that still counts as played.
+At the end of each hang, the message plays if both conditions are true. If not, the tail
+ends as usual.
 
-For example, `tail_every = 1` with `tail_min_interval = 300` plays it at the end of a
-hang whenever at least five minutes have passed since it last started.
+- A tail message does not wait in a queue. It plays a maximum of one time in each tail.
+- If a key-up interrupts a tail message, the message counts as played.
 
-`tail_every` is 10 by default, so a tail message plays without further setup.
+Example: set `tail_every = 1` and `tail_min_interval = 300`. A tail message then plays
+at the end of a hang if 5 minutes have passed since the last tail message started.
 
-## The schedule
+---
 
-The schedule changes `[events]` settings during a time window. When the window closes,
-the settings go back on their own, so there's no second entry to write.
+## 7. Schedule
+
+### 7.1 Function
+
+A schedule window changes `[events]` settings for a time period. When the window closes,
+the settings go back to their configured values. No second line is necessary.
 
 ```ini
 [messages]
@@ -405,55 +552,54 @@ net_reminder = wed 07:00-19:25 tail_messages=net_tonight
 net_running  = wed 19:30-20:30 ct_link_on_message=net_ct ct_link_off_message=net_ct
 ```
 
-Each line is:
+### 7.2 Window format
 
 ```text
 name = DAYS HH:MM-HH:MM setting=value [setting=value ...]
 ```
 
-The name is yours to choose and appears in the log.
-
 | Part | Rule |
 | --- | --- |
-| Days | See below. Combine with commas and no spaces: `mon,wed,fri` or `1st-tue,3rd-tue`. |
-| Times | 24-hour, on the system clock and timezone. A window includes its start minute but not its end minute. |
-| Past midnight | A window that ends before it starts runs overnight and belongs to the day it started: `fri 22:00-02:00` is still open at 01:00 on Saturday. |
-| Settings | Any `[events]` setting except `startup_message`. An empty value turns it off: `tail_messages=`. Lists take commas and no spaces: `mandatory_ids=id1,id2`. Lists can also use `+=` and `-=`, described below. |
-| Overlaps | Settings apply in file order, so the later line wins. |
-| Limits | 32 windows, with up to 8 settings each. A single window can't run longer than 24 hours. |
+| Name | Any name. The log uses this name. |
+| Days | See [7.3](#73-days). Commas separate days, with no spaces: `mon,wed,fri` or `1st-tue,3rd-tue`. |
+| Times | 24-hour format. The window includes its start minute. It does not include its end minute. |
+| Midnight | If the end time is before the start time, the window continues past midnight. The window belongs to its start day: `fri 22:00-02:00` is open at 01:00 on Saturday. |
+| Settings | Any `[events]` setting, but not `startup_message`. An empty value disables the setting: `tail_messages=`. Lists use commas with no spaces: `mandatory_ids=id1,id2`. |
+| Overlaps | Windows apply in file sequence. The last line has priority. |
 
-**Days can be set by the week or by the calendar:**
+### 7.3 Days
 
-| You write | It matches |
+| Item | Matches |
 | --- | --- |
-| `sun` to `sat` | That day every week |
-| `daily`, `weekdays`, `weekends` | Those days every week |
-| `2nd-tue` | The 2nd Tuesday of each month. `1st` to `5th` work with any day. |
-| `15th` | The 15th of each month |
-| `last-day` | The last day of each month, whatever its length |
-| `dec-8` | December 8 every year |
+| `sun` to `sat` | That day each week |
+| `daily` | Each day |
+| `weekdays` | Monday to Friday |
+| `weekends` | Saturday and Sunday |
+| `2nd-tue` | The 2nd Tuesday of each month. `1st` to `5th` operate with each day of the week. |
+| `15th` | The 15th day of each month |
+| `last-day` | The last day of each month |
+| `dec-8` | December 8 of each year |
 
-A day that doesn't occur in a given month just doesn't match, so `5th-tue` skips months
-with four Tuesdays, and `31st` skips shorter months. `feb-29` plays in leap years. Up to 8
-calendar days can go in one window. `--check` rejects days that can't exist, like `6th-tue`
-or `feb-30`.
+- A day that does not occur in a month does not match. `5th-tue` does not match in a
+  month with four Tuesdays. `31st` does not match in a shorter month. `feb-29` matches in
+  leap years.
+- `--check` rejects a day that cannot exist, for example `6th-tue` or `feb-30`.
+- A date such as `dec-8` occurs on a different day of the week each year. For a meeting
+  on a weekday, update the date each year, or use a rule such as `2nd-tue`.
 
-A date repeats every year on whatever day of the week it lands on, so `dec-8` for a Tuesday
-meeting needs updating each year.
+### 7.4 List operators
 
-Windows take effect at the top of each minute. A restart in the middle of a window picks
-it straight back up, because the schedule works from the clock and saves nothing.
+These operators apply to `initial_ids`, `mandatory_ids` and `tail_messages`:
 
-**Changing a list:** `initial_ids`, `mandatory_ids` and `tail_messages` can be changed three
-ways. Each open window applies in file order, starting from the list in `[events]`.
-
-| You write | It does |
+| Item | Result |
 | --- | --- |
 | `tail_messages=a,b` | Replaces the list |
-| `tail_messages+=a` | Adds to the list, unless the name is already there |
-| `tail_messages-=a` | Removes from the list, if the name is there |
+| `tail_messages+=a` | Adds the name to the list, if the list does not contain it |
+| `tail_messages-=a` | Removes the name from the list, if the list contains it |
 
-Use `+=` and `-=` where windows can overlap, so they don't cancel each other out:
+The open windows apply in file sequence. They start from the list in `[events]`.
+
+Use `+=` and `-=` for windows that can overlap. Then the windows do not cancel each other:
 
 ```ini
 [messages]
@@ -471,17 +617,21 @@ meeting  = 2nd-wed 07:00-19:25 tail_messages+=club_meeting
 voice_id = weekends 00:00-23:59 mandatory_ids-=ident_cw
 ```
 
-On the 2nd Wednesday, the tail messages rotate through both. On other Wednesdays, only
-`net_tonight` plays. Lists can hold up to 8 names, and `--check` warns if `+=` could go past
-that, since any extras are left out.
+On the 2nd Wednesday, the tail messages rotate through both messages. On other Wednesdays,
+only `net_tonight` plays.
 
-**`-=` can't remove your last mandatory ID.** If it would, one ID stays in the rotation, and
-`--check` warns you. Setting `mandatory_ids=` empty leaves only the
-[ID safety net](#ids), and `--check` warns about that too. A window can change `impolite_id`
-but can't set it empty.
+#### Rules for mandatory IDs
 
-**Line order matters with `=`.** A general line after a specific one overrides it. In this
-order, `weekly` replaces `meeting` every time, so `meeting` never takes effect:
+- `-=` does not remove the last mandatory ID. One ID stays in the list. `--check` shows a
+  warning.
+- `mandatory_ids=` with an empty value leaves only the [ID protection](#id-protection).
+  `--check` shows a warning.
+- A window can change `impolite_id`. A window cannot set `impolite_id` to empty.
+
+#### Line sequence with `=`
+
+A general line after a specific line replaces the specific line. In this sequence, `weekly`
+replaces `meeting` each time. Thus, `meeting` has no effect:
 
 ```ini
 [messages]
@@ -495,10 +645,29 @@ weekly  = wed 19:00-21:00 ct_link_on_message=weekly_ct
 
 Put the most specific line last.
 
-**The clock is yours to keep right.** `usrp-rc` trusts the system clock and timezone.
+### 7.5 Timing
 
-**Testing a window:** add one that opens a couple of minutes from now and watch the log.
-At `log.level = info`, you'll see these:
+- Windows start and stop at the start of each minute.
+- The schedule uses the system clock and time zone. Keep the clock and time zone of the
+  computer correct.
+- The schedule stores no data. After a restart during a window, the window applies again
+  immediately.
+
+### 7.6 Limits
+
+| Item | Limit |
+| --- | --- |
+| Windows | 32 |
+| Settings in one window | 8 |
+| Calendar days in one window | 8 |
+| Names in a list | 8. `--check` shows a warning if `+=` can add more. Names after the eighth are not added. |
+| Length of one window | 24 hours |
+
+### 7.7 Test a window
+
+1. Add a window that opens 2 minutes after the current time.
+2. Apply the change. See [3.3](#33-apply-a-change).
+3. Monitor the log. At `log.level = info`, the log shows these lines:
 
 ```text
 schedule: 'net_reminder' started
@@ -506,26 +675,39 @@ tail: 'net_tonight'
 schedule: 'net_reminder' ended
 ```
 
-**Not yet possible:** `[timers]` and `[link]` settings can't be scheduled, so a window
-can't turn the link on or off. A change also can't stay in place with no end time. There's also no "last Friday" or
-one-time date.
+### 7.8 Functions not available
 
-## The link
+- A window cannot change `[timers]` or `[link]` settings. Thus, a window cannot turn the
+  link on or off.
+- A change without an end time is not available.
+- "Last Friday" and one-time dates are not available.
+
+---
+
+## 8. Link
 
 | Setting | Effect |
 | --- | --- |
-| `enabled = false` | This repeater has no link at all. `72` and `73` are ignored. |
-| `start_on = false` | The link is off at startup. `72` turns it on. |
+| `enabled = false` | The repeater has no link. `72` and `73` have no effect. |
+| `start_on = false` | The link is off at start. `72` turns it on. |
 
-While the link is off, nothing is sent to it and anything received from it is ignored.
-Link commands aren't saved: every restart goes back to `start_on`.
+- When the link is off, `usrp-rc` sends nothing to the link. It ignores all audio from
+  the link.
+- `usrp-rc` does not keep the link state after a restart. At each start, the link state
+  is the value of `start_on`.
+- To show the link state on the air, set a different `ct_link_off_message`. See
+  [6.2](#62-courtesy-tones).
+- At this time, each station can use `72` and `73`. A control operator level is planned.
+- At this time, `codec = opus` operates only with other tools from the same author.
 
-Anyone can use `72` and `73` for now. A control operator gate is planned.
+---
 
-## DTMF
+## 9. DTMF control
 
-Commands come from the repeater's receiver only. Tones from the link aren't decoded. See
-[Part 1](#part-1-on-the-air) for how they're entered.
+### 9.1 Function
+
+`usrp-rc` decodes DTMF from the repeater receiver only. It does not decode tones from the
+link. For command entry, see [section 2](#2-over-the-air-operation).
 
 ```ini
 [dtmf]
@@ -535,187 +717,237 @@ link_on_code = 1*72
 stats_code   =
 ```
 
-- Codes can use `0-9`, `*`, `A`, `B` and `C`, up to 7 characters. `#` and `D` are reserved
-  for cancel and enter.
-- An empty code turns that command off, as `stats_code` is above.
-- A whole code wins over the pad test prefix, so `51` could be a command even with prefix `5`.
-- DTMF isn't secure, since anyone listening can hear and repeat a code. Keep that in mind
-  when choosing which commands to leave on.
+### 9.2 Codes
 
-**Command levels:** these follow the ACC model of user, control operator and programming
-levels. Only user commands exist so far. The config file takes the place of programming
-mode.
+- A code can contain `0` to `9`, `*`, `A`, `B` and `C`. The maximum length is 7
+  characters.
+- `#` and `D` are not available in codes. They cancel and execute.
+- An empty code disables its command. In the example above, `stats_code` is empty.
+- A full code has priority over the pad test prefix. Thus, `51` can be a command, also
+  with prefix `5`.
 
-### Tuning
+> **Note:** DTMF gives no security. A station that monitors the repeater can hear a code
+> and use it. Select the enabled commands with this risk in mind.
 
-| If | Try |
+### 9.3 Command levels
+
+The commands follow the ACC model: user commands, control operator commands and
+programming commands. At this time, only user commands are available. The configuration
+file replaces DTMF programming. The programming level stays in the design for possible
+future use.
+
+### 9.4 Muting
+
+At the first valid tone, the repeater mutes the repeated audio. A beep replaces the
+audio: 100 ms on, 900 ms off, by default. The mute stops `mute_hang_ms` after the last
+tone. A new tone starts the mute again.
+
+If `audio.ste_delay_ms` is 0, the start of the first tone goes out before the mute
+starts. To prevent this blip, set `audio.ste_delay_ms` longer than `min_tone_ms`.
+
+### 9.5 Adjustment
+
+| Condition | Action |
 | --- | --- |
-| Voice sets off false digits | Raise `min_tone_ms` |
-| Radios with short tones get missed | Lower `min_tone_ms` (the minimum is 30) |
-| The first-tone blip bothers you | Set `audio.ste_delay_ms` to about 60 or more, which delays all repeated and link audio by that much |
-| The beeping goes on too long | Lower `mute_hang_ms`, keeping it longer than `ste_delay_ms` and shorter than `interdigit_ms` |
+| Voice causes false digits | Increase `min_tone_ms`. |
+| The repeater does not detect short tones from some radios | Decrease `min_tone_ms`. The minimum is 30. |
+| The first tone goes out as a blip | Set `audio.ste_delay_ms` longer than `min_tone_ms`, for example 60. This delays all repeated audio and link audio by the same time. |
+| The beep continues too long | Decrease `mute_hang_ms`. Keep it longer than `ste_delay_ms` and shorter than `interdigit_ms`. |
 
-At `log.level = info`, the log shows when a sequence starts and how it ended:
+### 9.6 Log
+
+At `log.level = info`, the log shows the start and the result of each entry:
 
 ```text
 dtmf: sequence started with '3'
 dtmf: '38': ACCEPTED command = usage
 ```
 
-The last line starts with one of three words:
-
-| Word | Meaning | Example |
+| Result | Meaning | Example |
 | --- | --- | --- |
-| `ACCEPTED` | The command ran | `'5123': ACCEPTED command = DTMF test + 123` |
-| `ERROR` | The entry finished but can't run | `'99': ERROR no command matched` |
-| `ABANDONED` | The entry was cut short | `'12#': ABANDONED user terminated` |
+| `ACCEPTED` | The command executed. | `'5123': ACCEPTED command = DTMF test + 123` |
+| `ERROR` | The entry is complete, but no command can execute. | `'99': ERROR no command matched` |
+| `ABANDONED` | The entry stopped before it was complete. | `'12#': ABANDONED user terminated` |
 
-An abandoned entry also says which timer ran out, if one did. `debug` also logs each digit
-and tones that were too short.
+An `ABANDONED` line also names the timer that expired, if a timer expired. At
+`log.level = debug`, the log also shows each digit and each tone that was too short.
 
-## Usage figures
+---
 
-`usrp-rc` counts key-ups and minutes of traffic, local or from the link, over a rolling
-week. Kerchunks and time spent timed out don't count. You can hear them with command `38`
-or the `{keyups_*}` and `{minutes_*}` variables.
+## 10. Usage statistics
 
-They're stored in `/var/local/usrp-rc/stats`, a small text file with one line for each
-hour that had activity:
+### 10.1 Function
+
+`usrp-rc` counts key-ups and minutes of traffic. Local traffic and link traffic both
+count. The count covers a rolling period of 7 days. Kerchunks and time-outs do not count.
+
+The usage command (`38`) and the `{keyups_*}` and `{minutes_*}` variables speak these
+values.
+
+### 10.2 Statistics file
+
+The default file is `/var/local/usrp-rc/stats`. It contains one line for each hour with
+traffic:
 
 ```text
 # usrp-rc usage: hour-since-epoch keyups seconds
 498279 3 2.4
 ```
 
-- **Saving:** every 15 minutes if anything changed, and on a clean shutdown. A power
-  failure loses at most that 15 minutes.
-- **Size:** it holds one week at most, up to 168 lines, and never grows past that.
-- **Damage:** a damaged file keeps the lines it can read.
-- **If it can't be written:** counting still works until the next restart, and a warning
-  is logged.
-- **Other locations:** set `file` under `[stats]`, or leave it empty to keep the figures
-  in memory only. The service can only write to `/var/local/usrp-rc`, so another location
-  also needs `ReadWritePaths` in the service file.
+| Item | Behavior |
+| --- | --- |
+| Save | Each 15 minutes if the values changed, and at each normal stop. A power failure loses a maximum of 15 minutes. |
+| Size | A maximum of 7 days, 168 lines. The file does not grow past this size. |
+| Damage | `usrp-rc` keeps the lines that it can read. |
+| Write failure | The count continues until the next restart. The log shows a warning. |
+| Other location | Set `[stats] file`. An empty value keeps the values in memory only. |
+
+> **Note:** The service can write only to `/var/local/usrp-rc`. A file in a different
+> location also needs a `ReadWritePaths` line in the service file.
 
 ---
 
-# Part 4: Settings reference
+## 11. Settings reference
 
-These are the defaults you get by leaving a setting out. Times are in seconds under
-`[timers]` and in milliseconds wherever the name ends in `_ms`. An out-of-range value is a
-config error.
+The default applies when a setting is not in the file. A value out of range is a
+configuration error.
 
-## Top level
+### 11.1 Top level
 
-These go above the first section.
+These settings go before the first section.
 
-| Setting | Default | Allowed | Meaning |
+| Setting | Default | Range | Function |
 | --- | --- | --- | --- |
-| `callsign` | none | Letters and digits | Used by `{call}`. Add `/R` or `REPEATER` in the message itself. |
-| `access_mode` | `cor` | `cor`, `cor_ctcss` | Currently no difference: CTCSS decode is set in MMDVM-Host. |
+| `callsign` | None | Letters and digits | Used by `{call}`. Add `/R` or `REPEATER` in the message. |
+| `access_mode` | `cor` | `cor`, `cor_ctcss` | No difference at this time. MMDVM-Host decodes CTCSS. |
 
-## `[log]`
+### 11.2 `[log]`
 
-| Setting | Default | Allowed | Meaning |
+| Setting | Default | Range | Function |
 | --- | --- | --- | --- |
-| `level` | `info` | `error`, `warn`, `info`, `debug` | How much is logged |
+| `level` | `info` | `error`, `warn`, `info`, `debug` | Quantity of log data |
 
-## `[mmdvm]`
+### 11.3 `[mmdvm]`
 
-The connection to MMDVM-Host on the same machine.
+The connection to MMDVM-Host on the same computer.
 
-| Setting | Default | Meaning |
+| Setting | Default | Function |
 | --- | --- | --- |
-| `local_address` | `127.0.0.1` | Address `usrp-rc` listens on |
-| `local_port` | `4810` | Port `usrp-rc` listens on. Equals `GatewayPort` in MMDVM-Host. |
-| `rpt_address` | `127.0.0.1` | Address of MMDVM-Host |
-| `rpt_port` | `3810` | Port of MMDVM-Host. Equals `LocalPort` in MMDVM-Host. |
+| `local_address` | `127.0.0.1` | Address on which `usrp-rc` receives. Equal to `GatewayAddress` in MMDVM-Host. |
+| `local_port` | `4810` | Port on which `usrp-rc` receives. Equal to `GatewayPort` in MMDVM-Host. |
+| `rpt_address` | `127.0.0.1` | Address of MMDVM-Host. Equal to `LocalAddress` in MMDVM-Host. |
+| `rpt_port` | `3810` | Port of MMDVM-Host. Equal to `LocalPort` in MMDVM-Host. |
 
-## `[link]`
+These settings have the same names and functions as `[Network]` in `FMGateway.ini`. Set
+the ports to agree with `MMDVM-Host.ini`. For the procedure, see
+[README.md](README.md#mmdvm-host-integration).
 
-| Setting | Default | Allowed | Meaning |
+### 11.4 `[link]`
+
+| Setting | Default | Range | Function |
 | --- | --- | --- | --- |
-| `enabled` | `true` | `true`, `false` | Whether this repeater has a link at all |
-| `start_on` | `true` | `true`, `false` | Whether the link is on at startup |
-| `remote_host` | none | | The USRP peer's address. Required when `enabled` is true. |
-| `remote_port` | `34001` | | The peer's port |
-| `local_port` | `34002` | | Port `usrp-rc` listens on |
-| `bind_address` | `0.0.0.0` | | Address `usrp-rc` listens on |
-| `codec` | `pcm` | `pcm`, `opus` | Link audio format |
-| `opus_bitrate` | `8000` | 4000-64000 | Used when `codec = opus` |
-| `opus_frame_ms` | `60` | 20, 40, 60 | Used when `codec = opus` |
+| `enabled` | `true` | `true`, `false` | The repeater has a link |
+| `start_on` | `true` | `true`, `false` | The link is on at start |
+| `remote_host` | None | | Address of the USRP peer. Necessary when `enabled` is true. |
+| `remote_port` | `34001` | | Port of the peer |
+| `local_port` | `34002` | | Port on which `usrp-rc` receives |
+| `bind_address` | `0.0.0.0` | | Address on which `usrp-rc` receives |
+| `codec` | `pcm` | `pcm`, `opus` | Audio format of the link |
+| `opus_bitrate` | `8000` | 4000-64000 | Applies when `codec = opus` |
+| `opus_frame_ms` | `60` | 20, 40, 60 | Applies when `codec = opus` |
 
-## `[timers]`
+### 11.5 `[timers]`
 
-| Setting | Default | Allowed | Meaning |
+| Setting | Default | Range | Function |
 | --- | --- | --- | --- |
-| `kerchunk` | `0.5` | 0-60 | A carrier shorter than this is ignored |
-| `ct_delay` | `0.5` | 0-60 | From carrier loss to the courtesy tone |
-| `hang` | `2.5` | 0-600 | How long the transmitter stays up after the courtesy tone |
-| `timeout` | `180` | 1-3600 | Time-out timer. Resets at the courtesy tone. |
-| `id_interval` | `600` | 1-86400 | ID timer. A warning is logged above the FCC's 10 minutes. |
-| `id_anxious` | `60` | 0-3600 | Anxious ID window before the timer runs out. Must be less than `id_interval`. |
-| `tail_every` | `10` | 0-1000 | Play `tail_messages` every this many tails; 0 is off |
-| `tail_min_interval` | `0` | 0-86400 | Play `tail_messages` no more often than this many seconds; 0 is no limit |
+| `kerchunk` | `0.5` | 0-60 | The repeater ignores a carrier shorter than this time. |
+| `ct_delay` | `0.5` | 0-60 | Time from carrier stop to the courtesy tone |
+| `hang` | `2.5` | 0-600 | Time that the transmitter stays on after the courtesy tone |
+| `timeout` | `180` | 1-3600 | Time-out timer. It resets at the courtesy tone. |
+| `id_interval` | `600` | 1-86400 | ID timer. A value above 600 (the FCC limit of 10 minutes) causes a warning. |
+| `id_anxious` | `60` | 0-3600 | Anxious ID period before the ID timer expires. Must be less than `id_interval`. |
+| `tail_every` | `10` | 0-1000 | Tails between tail messages. 0 disables tail messages. |
+| `tail_min_interval` | `0` | 0-86400 | Minimum seconds between tail messages. 0 is no limit. |
 
-## `[audio]`
+### 11.6 `[audio]`
 
-| Setting | Default | Allowed | Meaning |
+| Setting | Default | Range | Function |
 | --- | --- | --- | --- |
-| `master_gain` | `1.0` | 0-10 | Final multiplier on all controller audio. Set it once for your modulator's headroom. |
-| `morse_wpm` | `20` | 5-60 | CW speed |
-| `morse_pitch` | `700` | 100-3400 | CW pitch, in Hz |
+| `master_gain` | `1.0` | 0-10 | Last multiplier on all controller audio. Set it for the transmitter deviation. |
+| `morse_wpm` | `20` | 5-60 | CW speed, in words per minute |
+| `morse_pitch` | `700` | 100-3400 | CW frequency, in Hz |
 | `morse_level` | `0.9` | 0-2 | CW level |
-| `impolite_morse_level` | `0.3` | 0-2 | CW level when IDing over someone talking |
+| `impolite_morse_level` | `0.3` | 0-2 | CW level for an impolite ID |
 | `voice_level` | `0.9` | 0-2 | Voice clip level |
-| `tone_level` | `0.5` | 0-2 | Level for tones without their own `@LEVEL`, and for the DTMF beep |
-| `voice_gap_ms` | `150` | 0-10000 | Length of a bare `_` pause |
-| `ste_delay_ms` | `0` | 0-2000 | Delays repeated and link audio, for squelch tail elimination; 0 is off |
-| `lead_trim_ms` | `0` | 0-2000 | Mutes this much at the start of each transmission; 0 is off |
-| `pre_message_ms` | `0` | 0-10000 | Dead air after the transmitter keys, before CW or voice |
-| `post_message_ms` | `0` | 0-10000 | Dead air after audio ends, before the transmitter drops |
+| `tone_level` | `0.5` | 0-2 | Level of tones without `@LEVEL`, and of the DTMF beep |
+| `voice_gap_ms` | `150` | 0-10000 | Length of a `_` pause |
+| `ste_delay_ms` | `0` | 0-2000 | Delay of repeated audio and link audio, for squelch tail elimination. 0 is off. |
+| `lead_trim_ms` | `0` | 0-2000 | Mute at the start of each transmission. 0 is off. |
+| `pre_message_ms` | `0` | 0-10000 | Silence after the transmitter starts, before CW or voice |
+| `post_message_ms` | `0` | 0-10000 | Silence after the audio, before the transmitter stops |
 
-Levels above 1.0 are allowed but can clip.
+Levels above 1.0 are permitted, but they can cause clipping.
 
-## `[dtmf]`
+### 11.7 `[dtmf]`
 
-| Setting | Default | Allowed | Meaning |
+| Setting | Default | Range | Function |
 | --- | --- | --- | --- |
-| `enabled` | `false` | `true`, `false` | Turns DTMF commands on |
-| `pad_test_prefix` | `5` | Up to 7 keys | Pad test prefix; empty is off |
-| `time_code` | `39` | Up to 7 keys | Speak the time; empty is off |
-| `stats_code` | `38` | Up to 7 keys | Speak usage; empty is off |
-| `link_on_code` | `72` | Up to 7 keys | Link on; empty is off |
-| `link_off_code` | `73` | Up to 7 keys | Link off; empty is off |
-| `min_tone_ms` | `40` | 30-1000 | A tone must hold this long to count as a digit |
-| `max_tone_ms` | `5000` | 100-60000 | A tone held longer discards the sequence |
-| `interdigit_ms` | `4000` | 100-60000 | A longer gap discards the digits before it |
-| `end_of_tx_ms` | `8000` | 100-600000 | A longer gap from the last digit to unkey discards the sequence |
-| `mute_hang_ms` | `2000` | 0-60000 | Audio stays muted this long after the last tone. Must be less than `interdigit_ms`. |
-| `beep_hz` | `440` | 100-3400 | Beep pitch during the mute |
+| `enabled` | `false` | `true`, `false` | Enables DTMF commands |
+| `pad_test_prefix` | `5` | 7 keys maximum | Pad test prefix. Empty is off. |
+| `time_code` | `39` | 7 keys maximum | Time command. Empty is off. |
+| `stats_code` | `38` | 7 keys maximum | Usage command. Empty is off. |
+| `link_on_code` | `72` | 7 keys maximum | Link-on command. Empty is off. |
+| `link_off_code` | `73` | 7 keys maximum | Link-off command. Empty is off. |
+| `min_tone_ms` | `40` | 30-1000 | Minimum tone length for a digit |
+| `max_tone_ms` | `5000` | 100-60000 | A longer tone discards the entry. |
+| `interdigit_ms` | `4000` | 100-60000 | A longer pause discards the digits before it. |
+| `end_of_tx_ms` | `8000` | 100-600000 | A longer time from the last digit to the unkey discards the entry. |
+| `mute_hang_ms` | `2000` | 0-60000 | Mute time after the last tone. Must be less than `interdigit_ms`. |
+| `beep_hz` | `440` | 100-3400 | Beep frequency during the mute |
 | `beep_on_ms` | `100` | 0-10000 | Beep length |
-| `beep_off_ms` | `900` | 0-10000 | Gap between beeps |
+| `beep_off_ms` | `900` | 0-10000 | Time between beeps |
 
-## `[stats]`
+### 11.8 `[stats]`
 
-| Setting | Default | Meaning |
+| Setting | Default | Function |
 | --- | --- | --- |
-| `file` | `/var/local/usrp-rc/stats` | Where usage figures are kept; empty is memory only |
+| `file` | `/var/local/usrp-rc/stats` | Statistics file. Empty keeps the values in memory only. |
 
-## `[events]`, `[messages]` and `[schedule]`
+### 11.9 `[events]`
 
-See [Events](#events), [Messages](#messages) and [The schedule](#the-schedule). Up to 8
-names can go in `initial_ids`, `mandatory_ids` or `tail_messages`.
+All `[events]` settings are message names. Empty plays nothing.
+
+| Setting | Default | Lists | Section |
+| --- | --- | --- | --- |
+| `startup_message` | Empty | No | [6.5](#65-startup-message) |
+| `initial_ids` | Empty | Yes | [6.1](#61-identification) |
+| `mandatory_ids` | Empty | Yes | [6.1](#61-identification) |
+| `anxious_id` | Empty | No | [6.1](#61-identification) |
+| `impolite_id` | None. Necessary. | No | [6.1](#61-identification) |
+| `ct_link_on_message` | Empty | No | [6.2](#62-courtesy-tones) |
+| `ct_link_off_message` | Empty | No | [6.2](#62-courtesy-tones) |
+| `ct_link_message` | Empty | No | [6.2](#62-courtesy-tones) |
+| `timeout_message` | Empty | No | [6.3](#63-time-out) |
+| `timeout_cancel_message` | Empty | No | [6.3](#63-time-out) |
+| `tail_messages` | Empty | Yes | [6.6](#66-tail-messages) |
+| `time_message` | `time_readback` | No | [6.4](#64-command-replies) |
+| `stats_message` | `stats_readback` | No | [6.4](#64-command-replies) |
+| `link_on_message` | `link_on_reply` | No | [6.4](#64-command-replies) |
+| `link_off_message` | `link_off_reply` | No | [6.4](#64-command-replies) |
+
+A list holds a maximum of 8 names.
+
+### 11.10 `[messages]` and `[schedule]`
+
+See [section 5](#5-messages) and [section 7](#7-schedule).
 
 ---
 
-# Part 5: Recipes and troubleshooting
+## 12. Configuration examples
 
-## Recipes
+Add each example to the configuration. The message names are examples.
 
-Each of these is an addition to your own config. The names are examples.
-
-**Rotate voice and CW IDs**
+### 12.1 Rotate voice and CW IDs
 
 ```ini
 [events]
@@ -726,7 +958,7 @@ id_cw    = cw: {call}/R
 id_voice = voice: THISIS {call} REPEATER
 ```
 
-**Show the link's state in the courtesy tone**
+### 12.2 Show the link state with the courtesy tone
 
 ```ini
 [events]
@@ -735,7 +967,7 @@ ct_link_off_message = comet
 ct_link_message     = bumble_bee
 ```
 
-**Announce the time in the tail on weekends**
+### 12.3 Announce the time in the tail on weekends
 
 ```ini
 [messages]
@@ -745,14 +977,14 @@ weekend_time = voice: F_GOOD {greeting} _ F_THE F_TIME F_IS {time} {ampm}
 weekend_tail = weekends 08:00-20:00 tail_messages=weekend_time
 ```
 
-**Say the week's usage instead of the day's on command `38`**
+### 12.4 Speak the usage for 7 days with command `38`
 
 ```ini
 [messages]
 stats_readback = voice: {keyups_week} KEY UP _S _ {minutes_week} MINUTES
 ```
 
-**No tail messages overnight**
+### 12.5 Disable tail messages at night
 
 ```ini
 [events]
@@ -765,7 +997,7 @@ my_tail = voice: WELCOME TO {call}
 quiet_nights = daily 22:00-06:00 tail_messages=
 ```
 
-**Change the courtesy tone and ID during a net**
+### 12.6 Change the courtesy tone and the ID during a net
 
 ```ini
 [messages]
@@ -776,7 +1008,7 @@ net_id = voice: THISIS {call} NET
 net = wed 19:30-20:30 ct_link_on_message=net_ct ct_link_off_message=net_ct mandatory_ids=net_id
 ```
 
-**Bring the link up by hand only**
+### 12.7 Turn on the link only by command
 
 ```ini
 [link]
@@ -784,45 +1016,61 @@ remote_host = 127.0.0.1
 start_on    = false
 ```
 
-## Troubleshooting
+### 12.8 Delay the courtesy tone by 640 ms
 
-| Symptom | Likely cause |
-| --- | --- |
-| No response to DTMF | `[dtmf] enabled = true` is missing. The default is off. |
-| No DTMF in the log | Look for `dtmf: sequence started` with `log.level = info`. If there's nothing, lower `min_tone_ms` and try `debug` to see short tones. |
-| A sequence starts, but no reply | Read the `dtmf:` line that ends it, which says what matched or why it was abandoned. If a command matched, check whether its reply is set empty in `[events]`. |
-| `72` or `73` does nothing | Look for `link is not configured`, which means `link.enabled = false`. |
-| `usrp-rc` won't start | Run `--check` and work from the first error down. |
-| `events.impolite_id is required` | Set `impolite_id` under `[events]`. It's the ID of last resort if `mandatory_ids` is empty. |
-| `events.ct_message: renamed` | Change it to `ct_link_on_message`. |
-| `needs commas between names` | Change `id1 id2` to `id1,id2`. |
-| `a variable needs the voice clip` | That clip is missing. Run `sudo make install` to restore stock clips. |
-| A tail message never plays | Look for the warning about `tail_every` being 0. Otherwise, a quiet repeater may not have reached the `tail_every` count, or `tail_min_interval` may be holding it back. |
-| A window opens at the wrong time | Check the Pi's clock and timezone with `timedatectl`. |
-| Usage figures reset on restart | Look for `stats: can't save` in the log. Check that `/var/local/usrp-rc` exists and the service file is current, then run `sudo systemctl daemon-reload`. |
-| Audio from the link is missing | Check whether the link was turned off with `73`, or whether `start_on = false` is set. |
+Some courtesy tone specifications have a delay of 640 ms from squelch closure to the
+first tone:
 
-## Watching it work
+```ini
+[timers]
+ct_delay = 0.64
+```
+
+---
+
+## 13. Log and troubleshooting
+
+### 13.1 Log
 
 ```bash
 journalctl -u usrp-rc -f
 ```
 
 At `log.level = info`, the log shows state changes, IDs, tail messages, schedule windows
-and DTMF digits. Every message that plays is named, so it's the quickest way to find out
-why something did or didn't happen.
+and DTMF entries. The log names each message that plays. Use the log first to find the
+cause of a problem.
+
+### 13.2 Troubleshooting
+
+| Symptom | Probable cause | Action |
+| --- | --- | --- |
+| No response to DTMF | `[dtmf] enabled = true` is not set. The default is off. | Set `enabled = true`. |
+| No DTMF lines in the log | The decoder does not detect the tones. | At `log.level = info`, look for `dtmf: sequence started`. If it is not there, decrease `min_tone_ms`. At `log.level = debug`, look for short tones. |
+| An entry starts, but no reply plays | The command did not execute, or its reply is empty. | Read the `dtmf:` line at the end of the entry. If a command executed, make sure that its reply setting in `[events]` is not empty. |
+| `72` or `73` has no effect | `link.enabled = false` | Look for `link is not configured` in the log. |
+| `usrp-rc` does not start | Configuration error | Do `--check`. Correct the errors from the first error down. |
+| `events.impolite_id is required` | `impolite_id` is not set. | Set `impolite_id` in `[events]`. |
+| `events.ct_message: renamed` | Old setting name | Change it to `ct_link_on_message`. |
+| `needs commas between names` | Spaces separate list names. | Change `id1 id2` to `id1,id2`. |
+| `a variable needs the voice clip` | A stock clip is missing. | Do `sudo make install` to install the missing stock clips. |
+| A tail message does not play | `tail_every` is 0, or the conditions are not true. | Look for the `tail_every` warning. On a quiet repeater, the `tail_every` count can be not yet reached. `tail_min_interval` can also prevent the message. |
+| A window opens at the wrong time | The clock or the time zone is wrong. | Examine the clock and time zone with `timedatectl`. |
+| Usage statistics reset at restart | `usrp-rc` cannot write the file. | Look for `stats: can't save` in the log. Make sure that `/var/local/usrp-rc` exists and the service file is current. Then do `sudo systemctl daemon-reload`. |
+| No audio from the link | The link is off. | Look for `73` in the log, or for `start_on = false`. |
 
 ---
 
-# Appendix A: Tone catalog
+## Appendix A: Tone catalog
 
-Any of these can be used by name, as in `ct_link_on_message = yellow_jacket`. They live in
-`tones.conf`, which is replaced on upgrade, so don't edit it. To change one, define a
-message with the same name in your config.
+Use these tones by name, for example `ct_link_on_message = yellow_jacket`. The tones are in
+`tones.conf`. An upgrade replaces this file.
 
-**One note or chord**
+> **Note:** Do not edit `tones.conf`. To change a tone, define a message with the same
+> name in the configuration.
 
-| Name | Notes | Sounds like |
+### One note or chord
+
+| Name | Notes | Sound |
 | --- | --- | --- |
 | `honk` | `500+700:100` | Short, low two-note horn |
 | `beep` | `880:100` | Plain high beep |
@@ -833,64 +1081,64 @@ message with the same name in your config.
 | `quindar_on` | `2525:250` | Apollo-style high tone, start of a transmission |
 | `quindar_off` | `2475:250` | Apollo-style high tone, end of a transmission |
 
-**Rising**
+### Rising
 
-| Name | Notes | Sounds like |
+| Name | Notes | Sound |
 | --- | --- | --- |
-| `yellow_jacket` | `330:50 495:50 660:50` | Three quick rising notes |
-| `bumble_bee` | `330:100 495:100 660:100` | Same notes as yellow_jacket, twice as slow |
-| `ascending` | `500:50 750:50 1000:50` | Three quick rising notes, higher |
-| `comet` | `500:100 500:100 750:100` | Two low notes, then a higher one |
-| `stardust` | `750:125 880:80 880+1200:80` | Rising, ending on a bright chord |
+| `yellow_jacket` | `330:50 495:50 660:50` | Three fast rising notes |
+| `bumble_bee` | `330:100 495:100 660:100` | The notes of `yellow_jacket`, at half speed |
+| `ascending` | `500:50 750:50 1000:50` | Three fast rising notes, higher |
+| `comet` | `500:100 500:100 750:100` | Two low notes, then a higher note |
+| `stardust` | `750:125 880:80 880+1200:80` | Rising, with a bright chord at the end |
 
-**Falling**
+### Falling
 
-| Name | Notes | Sounds like |
+| Name | Notes | Sound |
 | --- | --- | --- |
-| `descending` | `1000:50 750:50 500:50` | Three quick falling notes |
-| `hornet` | `660:50 500:50 385:50` | Three quick falling notes, lower |
-| `wasp` | `660:100 500:100 385:100` | Same notes as hornet, twice as slow |
+| `descending` | `1000:50 750:50 500:50` | Three fast falling notes |
+| `hornet` | `660:50 500:50 385:50` | Three fast falling notes, lower |
+| `wasp` | `660:100 500:100 385:100` | The notes of `hornet`, at half speed |
 | `tumbleweed` | `1000:20 800:20 600:20` | Very fast falling chirp |
-| `shooting_star` | `800:100 800:100 540:100` | Two notes, then a lower one |
+| `shooting_star` | `800:100 800:100 540:100` | Two notes, then a lower note |
 | `doorbell` | `800:75 400:50` | Ding-dong |
 | `doorbell_chord` | `1450+725:75 725+360:50` | Ding-dong in octave chords |
 
-**Up and down**
+### Up and down
 
-| Name | Notes | Sounds like |
+| Name | Notes | Sound |
 | --- | --- | --- |
-| `fire_fly` | `1000+1200:120 1200+1400:80 600+800:100` | Chord rises, then drops low |
+| `fire_fly` | `1000+1200:120 1200+1400:80 600+800:100` | A chord rises, then drops low |
 | `moonbounce` | `1000+800:50 800:50 600:50 1500:50` | Falls, then jumps high |
 | `chirp_chomp` | `1500:20 1250:20 1000:20 750:20 500:20 2550:20` | Very fast fall, then a high blip |
 | `dunce_cap` | `440+500:200 440+350:200` | Two long, low chords, falling |
 
-**Repeated, with gaps**
+### Repeated, with gaps
 
-| Name | Notes | Sounds like |
+| Name | Notes | Sound |
 | --- | --- | --- |
-| `nextel_beep` | `1760:30 _30 1760:30 _30 1760:30` | Three quick high chirps |
-| `function_complete` | `480+1200:40 _40 480+1200:40` | Two quick two-note chirps |
-| `function_complete_2` | `900:60 _60 900:60` | Two quick beeps |
+| `nextel_beep` | `1760:30 _30 1760:30 _30 1760:30` | Three fast high chirps |
+| `function_complete` | `480+1200:40 _40 480+1200:40` | Two fast two-note chirps |
+| `function_complete_2` | `900:60 _60 900:60` | Two fast beeps |
 
-**Warnings**
+### Warnings
 
-| Name | Notes | Sounds like |
+| Name | Notes | Sound |
 | --- | --- | --- |
 | `timeout_warn` | `1200:60@0.9 _20 1000:60@0.9 _20 800:60@0.9` | Loud, three falling notes |
 
-For a tone spec that calls for a 640 ms delay from squelch closure to the first tone,
-set `timers.ct_delay = 0.64`.
+---
 
-# Appendix B: Voice clips
+## Appendix B: Voice clips
 
-These 623 clips come with `usrp-rc`, in `/usr/local/share/usrp-rc/vocab_8k/`. Clip
-names aren't case-sensitive: `repeater` and `REPEATER` are the same clip.
+`usrp-rc` includes 623 clips in `/usr/local/share/usrp-rc/vocab_8k/`. Clip names are not
+case-sensitive: `repeater` and `REPEATER` are the same clip.
 
-- **`F_` clips** are the female voice used by the time variables.
-- **Clips starting with `_`** are word endings, such as `_S` and `_TEEN`. They're treated as
-  clips, not pauses, because a pause is `_` followed only by digits.
+| Clip type | Function |
+| --- | --- |
+| `F_` clips | Female voice. The time variables use these clips. |
+| Clips that start with `_` | Word endings, for example `_S` and `_TEEN`. They are clips, not pauses. A pause is `_` with only digits after it. |
 
-**Standard voice**
+### Standard voice
 
 ```text
 A ABEAM ABORT ABOUT ABOVE ACCELERATED ACKNOWLEDGE ACTION ADJUST ADVANCED
@@ -946,7 +1194,7 @@ WEDNESDAY WELCOME WEST WHISKEY WHITE WILL WIND WINDOWS WITH WRONG X XRAY Y
 YANKEE YELLOW YESTERDAY YOU YOUR Z ZED ZERO ZONE ZULU _ED _ER _S _TEEN _TH _TY
 ```
 
-**Female voice**
+### Female voice
 
 ```text
 F_AFTERNOON F_A_M F_EIGHT F_EIGHTEEN F_ELEVEN F_EVENING F_FIFTEEN F_FIFTY
