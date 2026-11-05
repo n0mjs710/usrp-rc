@@ -1,28 +1,29 @@
 # usrp-rc — Repeater Controller for MMDVM-Host
 
 A compiled C daemon that runs on the same SBC as MMDVM-Host (FM analog mode)
-and acts as both the repeater controller and network bridge. It replaces a
-separate AllStar node or remote controller process with a single
+and acts as both the repeater controller and network bridge. It replaces
+FMGateway and the control functions in MMDVM-Host with a single,
 single-threaded, no-dependency binary.
 
-`usrp-rc` has two ports, each speaking the native protocol of what's on the
-other end:
+`usrp-rc` has two ports, each speaking their native protocol:
 
 - **mmdvm** — MMDVM-Host's **FM Network** protocol, on loopback (the
   "repeater" side). `usrp-rc` takes the place of G4KLX's `fmgateway` here;
-  you do not run `fmgateway` as well.
-- **link** — **USRP** PCM or Opus to/from a `rusrp` peer, `usrp-reflector`,
-  or any ASL-compatible endpoint (the network side)
+  you must not run `fmgateway` as well.
+- **link** — **USRP** PCM or Opus to/from a suitable reflector or hub,
+  or any ASL-compatible endpoint (the network side) in USRP mode. Opus
+  is only (currently) supported with other tools from this author..
 
 Between those two ports sits a full repeater controller — IDs, courtesy
-tones, hang timer, timeout, squelch tail elimination, CW/voice/tone
-messages — generated entirely locally, with no network dependency for
-controller behavior.
+tones, hang timer, timeout, squelch tail elimination, CW/voice/tone/tail
+messages, clock/calendar scheduler, DTMF control — generated entirely
+locally, with no network dependency for controller behavior (i.e. a remote
+ASL server).
 
 > **Note on the mmdvm-side protocol.** Earlier development connected to
-> MMDVM-Host over USRP. MMDVM-Host's 2026 restructuring removed native USRP
+> MMDVMHost over USRP. MMDVM-Host's 2026 restructuring removed native USRP
 > support and moved FM to its own tagged protocol plus a separate gateway
-> program, so `usrp-rc` now speaks that protocol directly. Audio parameters
+> program. `usrp-rc` speaks that protocol directly. Audio parameters
 > are unchanged (8 kHz, 20 ms frames); only the framing on the loopback
 > differs. The link side is unaffected and still USRP.
 
@@ -39,17 +40,16 @@ MMDVM-Host (loopback)                  usrp-rc                    Network
 ```
 
 - **COR** is derived from MMDVM-Host's explicit start/end-of-transmission
-  markers — no hardware GPIO, no hidraw. MMDVM-Host handles all radio
-  hardware and CTCSS decode.
+  markers. MMDVM-Host handles all radio hardware and CTCSS encode/decode.
 - **STE** (squelch tail elimination) delays mmdvm-RX audio by `ste_delay_ms`
   before repeating it, on *both* the local mmdvm-TX repeat leg and the
   link-TX uplink, so the squelch-crash tail at the end of a transmission
-  is dropped rather than repeated or forwarded. Key-up/unkey signaling is
-  not delayed — only the audio is, with silence filling the gap until the
-  delay line catches up.
+  and DTMF blips are dropped rather than repeated or forwarded. Key-up/unkey
+  signaling is not delayed — only the audio is, with silence filling the gap
+  until the delay line catches up.
 - **Leading-edge trim** mutes the first `lead_trim_ms` of mmdvm-RX audio in
   each transmission, on the same two legs, for the noise MMDVM-Host can
-  pass just before the carrier is fully up. The trimmed span goes out as
+  pass before the carrier audio is actually up. The trimmed span goes out as
   silence, so it adds no latency and doesn't shift frame timing.
 - The repeater controller treats keyup from *either* port as access: a
   network caller opens the repeater exactly like a local radio caller, and
@@ -92,12 +92,12 @@ remote_host = 127.0.0.1
 remote_port = 41001
 
 [events]
-initial_ids     = my_voice
-mandatory_ids   = my_cw
-impolite_id     = my_cw
-ct_link_on_message      = yellow_jacket
-ct_link_message = bumble_bee
-timeout_message = timeout_warn
+initial_ids          = my_voice
+mandatory_ids        = my_cw,my_voice
+impolite_id          = my_cw
+ct_link_on_message   = yellow_jacket
+ct_link_message      = bumble_bee
+timeout_message      = timeout_warn
 
 [messages]
 my_voice = voice: THISIS {call} REPEATER
@@ -165,8 +165,9 @@ GatewayPort=4810     ; must equal usrp-rc's local_port
 Two more requirements on the MMDVM-Host side:
 
 - **`[FM] LinkMode=1`.** This strips MMDVM-Host and the modem of their own
-  kerchunk / hang / courtesy-tone / ID logic so `usrp-rc` owns the repeater.
-  Without it you get two controllers fighting each other.
+  kerchunk / hang / courtesy-tone / ID  and other "repeater controller" logic
+  so `usrp-rc` owns the repeater. Without it you get two controllers fighting
+  each other.
 - **Do not run `fmgateway`.** `usrp-rc` occupies that role. Running both
   means two programs bound to the same gateway port.
 
@@ -175,6 +176,7 @@ Two more requirements on the MMDVM-Host side:
 ```ini
 [link]
 enabled     = true
+start_on    = true
 remote_host = 127.0.0.1
 remote_port = 41001
 local_port  = 34002
@@ -183,7 +185,7 @@ codec       = pcm     # pcm or opus (narrowband SILK, 8 kHz)
 
 Set `enabled = false` to run as a standalone local repeater with no network
 bridge at all — no link socket is created, and nothing else in `[link]`
-matters.
+matters. set `on_start = true` to connect the link at startup.
 
 ### `[audio]` — levels and padding
 
@@ -206,17 +208,17 @@ Mirrors standard analog repeater controller terminology: `hang`, `ct_delay`,
 the end of a hang. It never keys the transmitter on its own:
 
 - `tail_every = 10` plays it on every 10th tail, just before the carrier drops.
-  A keyup cuts it off, and that still counts as played.
-- `tail_min_interval = 60` plays it no more often than every 60 seconds, however
-  often the count comes up.
+  A keyup terminates the message immediately.
+- `tail_min_interval = 60` plays it no more often than every 60 seconds, even if the
+  count threshold is reached.
 
-Each time a hang ends, the message plays if both are met, counted from when it last
-started. Otherwise that tail ends normally. Nothing queues up.
+Each time a hang ends, the message plays if both conditions are met, counted from
+the last tail message start. Otherwise that tail ends normally.
 
 ### `[dtmf]` — over-the-air commands
 
-Off unless you set `enabled = true`. DTMF is decoded from the repeater
-receiver only; tones from the link are not decoded.
+Must be enabled with `enabled = true`. DTMF is decoded from the repeater receiver only;
+tones from the link are not decoded.
 
 ```ini
 [dtmf]
@@ -224,9 +226,11 @@ enabled         = true
 pad_test_prefix = 5
 ```
 
-Commands follow the three-tier structure of ACC controllers: user commands,
-control operator commands behind a prefix, and programming behind an unlock.
-Only the user tier has commands so far. Programming is done in this file.
+Commands follow the three-tier structure used by ACC: user commands,
+control operator commands behind a prefix, and programming commands behind an unlock.
+Only user tier command have been include to date. Programming is achieved in the
+configuration file; at this point there is no need for a DTMF programming tier, 
+though it has been retained as a placeholder for potential future use.
 
 | Command | Enter | Result |
 | --- | --- | --- |
@@ -236,20 +240,24 @@ Only the user tier has commands so far. Programming is done in this file.
 | Link on | `72` | connects the link; says "link on" |
 | Link off | `73` | disconnects the link; says "link off" |
 
-All of these codes can be changed with `pad_test_prefix`, `time_code`, `stats_code`,
-`link_on_code` and `link_off_code`. An empty value turns that command off.
+All codes can be remapped in the dumf configuration stanza, e.g. `pad_test_prefix`,
+`time_code`, `stats_code`, `link_on_code` and `link_off_code`. An empty value turns
+the command off.
 
-While the link is off, nothing is sent to it and anything received from it is
-ignored. It returns to `[link] start_on` (true by default) when `usrp-rc` restarts.
-To hear the difference on the air, set `ct_link_off_message` under `[events]`: local
-traffic gets that courtesy tone while the link is off, and `ct_link_on_message` while it's on.
+As of today, state is not held across restarts of usrp-rc. For example, it returns
+to `[link] start_on` (true by default) when `usrp-rc` restarts. To identify the link
+status over the air without an interrogation command, different courtesy tones may
+be set to indicate whether the link is on or off. in the `[events]` stand set
+`ct_link_off_message` and `ct_link_on_message`.
 
-The time comes from the system clock and timezone, which are yours to keep right.
+The time comes from the system clock and timezone, which depend on the operating
+system of the computer – be aware, if the host computer is set to zulu time, then
+the repeater controller will use zulu time.
 
-Enter a command in one transmission, then unkey. Over the air:
+One command may be entered and evaluated at a time. Over the air:
 
-- `D` evaluates what you've entered without waiting for the unkey, for when a
-  carrier won't drop.
+- Normally loss of COR terminates a command string.
+- `D` suffix (e.g. `73D`)evaluates what you've entered without waiting for the unkey.
 - `#` cancels what you've entered so far, and you can carry on with a new command.
 
 While you enter digits:
@@ -257,14 +265,14 @@ While you enter digits:
 - The first valid tone mutes repeat audio, replacing it with a beep (100 ms on,
   900 ms off by default). The mute releases `mute_hang_ms` after the last tone,
   and a later tone starts it again. With `audio.ste_delay_ms` at 0, the start of
-  the first tone is repeated before it can be muted. A delay of about 60 ms or
-  more hides it, as long as `mute_hang_ms` is longer than the delay.
-- The first valid tone also ends the transmission on the link, and the link stays
-  down until you unkey, so neither the digits nor anything you say afterward goes
-  out over the network. Audio from before the first tone has already gone.
+  the first tone is repeated before it can be muted. As long as `min_tone_ms` in
+  the `[dtmf]` stanza is shorter than `ste_delay_ms`, DTMF "blips" will not be heard.
+- The first valid tone also terminates link transmission, and the link stays
+  down until you unkey. Neither the digits nor anything you say afterward goes
+  out over the network.
 
-A reply plays in the tail, ahead of the courtesy tone, and keying up interrupts
-it. Commands aren't accepted during a timeout lockout.
+A reply plays after COR loss and before the courtesy tone. Keying on top of a response
+interrupts it. Commands aren't accepted when the repeater is timed out.
 
 A sequence is discarded if a tone is held past `max_tone_ms`, if digits are more
 than `interdigit_ms` apart (only what came before the gap is lost), or if the
