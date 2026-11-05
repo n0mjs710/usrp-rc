@@ -331,8 +331,9 @@ static void pace_tick(app_t *a, uint64_t now)
 
 static void mmdvm_key_edge(app_t *a, uint64_t now)
 {
-    a->link_tx_ended = !a->link_up;
-    if (a->link_up) {
+    bool to_link = a->link_up && !port_repeater_down(a->port);
+    a->link_tx_ended = !to_link;
+    if (to_link) {
         send_link_key(a, true);
         LOGI("link: KEY -> peer\n");
     }
@@ -389,6 +390,42 @@ static void reply_with_message(app_t *a, const char *name)
     port_queue_reply(a->port, r.samples, r.n);
 }
 
+/* Repeater down survives a restart, so a power cut doesn't quietly put a repeater back
+ * on the air that its operator took off. */
+static void save_repeater_state(app_t *a, bool down)
+{
+    const char *path = a->cfg.state.file;
+    if (!path[0])
+        return;
+    char tmp[300];
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    FILE *fp = fopen(tmp, "w");
+    bool ok = fp && fprintf(fp, "repeater = %s\n", down ? "down" : "up") > 0;
+    if (fp)
+        ok = fclose(fp) == 0 && ok;
+    if (!ok || rename(tmp, path) != 0) {
+        LOGW("state: can't save %s: %s\n", path, strerror(errno));
+        unlink(tmp);
+    }
+}
+
+static bool load_repeater_down(const app_t *a)
+{
+    const char *path = a->cfg.state.file;
+    if (!path[0])
+        return false;
+    FILE *fp = fopen(path, "r");
+    if (!fp)
+        return false;
+    char line[64];
+    bool down = false;
+    while (fgets(line, sizeof(line), fp))
+        if (strncmp(line, "repeater = down", 15) == 0)
+            down = true;
+    fclose(fp);
+    return down;
+}
+
 static void run_command(app_t *a, const command_t *c)
 {
     switch (c->type) {
@@ -421,6 +458,20 @@ static void run_command(app_t *a, const command_t *c)
     case COMMAND_NO_LINK:
         reply_with_message(a, a->events.link_none_message);
         break;
+    case COMMAND_REPEATER: {
+        bool down = c->digits[0] == '0';
+        const char *name = down ? a->events.repeater_down_message : a->events.repeater_up_message;
+        rendered_audio_t r = {0};
+        if (name[0])
+            r = message_render(&a->cfg, a->vocab, name, -1.0);
+        port_set_repeater_down(a->port, down, r.samples, r.n, monotonic_ms());
+        if (down) {
+            link_tx_end(a);
+            link_rx_end(a, monotonic_ms());
+        }
+        save_repeater_state(a, down);
+        break;
+    }
     }
 }
 
@@ -429,12 +480,25 @@ static void mmdvm_unkey_edge(app_t *a, uint64_t now)
     ste_reset(a->ste);
     link_tx_end(a);
 
-    /* Before the port sees the unkey, so a reply is in place when the tail starts. */
+    /* Before the port sees the unkey, so a reply is in place when the tail starts.
+     * Timed out, a command has to end in D: an unkey doesn't enter it. */
     command_t c;
-    if (a->cmd && command_session_end_of_tx(a->cmd, &c))
-        run_command(a, &c);
+    bool have = false;
+    if (a->cmd && port_local_timed_out(a->port))
+        command_session_end_of_tx_discard(a->cmd, "timed out, a command must end with D");
+    else if (a->cmd)
+        have = command_session_end_of_tx(a->cmd, &c);
     a->link_tx_ended = false;
 
+    /* Repeater up/down acts on the repeater as a whole, so it follows the unkey; a reply
+     * goes first so it's in place when the tail starts. */
+    if (have && c.type == COMMAND_REPEATER) {
+        port_on_mmdvm_keyup(a->port, false, now);
+        run_command(a, &c);
+        return;
+    }
+    if (have)
+        run_command(a, &c);
     port_on_mmdvm_keyup(a->port, false, now);
 }
 
@@ -456,8 +520,17 @@ static void mmdvm_unkey_edge(app_t *a, uint64_t now)
  * single FMD datagram can now yield zero, one, or more of these. */
 static void mmdvm_rx_frame(app_t *a, const int16_t frame_in[160], uint64_t now)
 {
-    if (!port_mmdvm_gate_open(a->port))
+    /* Timed out, the receiver is still heard for commands ending in D, but its
+     * audio goes nowhere. */
+    if (!port_mmdvm_gate_open(a->port)) {
+        if (port_local_timed_out(a->port) || port_repeater_down(a->port)) {
+            link_tx_end(a);
+            command_t c;
+            if (a->cmd && command_session_frame(a->cmd, frame_in, &c))
+                run_command(a, &c);
+        }
         return;
+    }
 
     /* Ahead of the delay line, so with STE on the mute beats the tone out. */
     bool muted = false;
@@ -851,6 +924,8 @@ int main(int argc, char *argv[])
     a->link_up = a->cfg.link.enabled && a->cfg.link.start_on;
     /* With no link at all, there's no "link off" for the courtesy tone to show. */
     port_set_link_up(a->port, a->link_up || !a->cfg.link.enabled);
+    if (load_repeater_down(a))
+        port_restore_repeater_down(a->port);
 
     if (ste_create(&a->ste, a->cfg.audio.ste_delay_ms, a->cfg.audio.lead_trim_ms) != 0) {
         LOGE("usrp-rc: failed to init STE buffer\n");

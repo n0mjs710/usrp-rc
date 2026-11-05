@@ -11,7 +11,7 @@ typedef enum {
     PORT_PENDING,   /* reserved for cor_ctcss; unreachable in v1 (single keyup bit) */
     PORT_ACTIVE,
     PORT_TAIL,
-    PORT_TIMEOUT,
+    PORT_TIMEOUT,   /* nothing repeated, and a source is timed out until it unkeys */
 } port_state_t;
 
 typedef enum {
@@ -44,7 +44,7 @@ void port_on_link_keyup(port_t *p, bool active, uint64_t now);
 
 /* Queue a spoken command reply. It plays in the tail after the transmission, ahead
  * of the courtesy tone, and a new keyup interrupts it. Takes ownership of samples.
- * Dropped if the port is timed out. */
+ * In TIMEOUT it plays at once on its own transmission, without receiver audio. */
 void port_queue_reply(port_t *p, int16_t *samples, size_t n);
 
 /* Point the port at the events currently in force, which the schedule can change.
@@ -62,10 +62,23 @@ void     port_check_timers(port_t *p, uint64_t now);
 bool port_ptt(const port_t *p);
 
 /* Forwarding gates: whether main.c should currently be repeating audio
- * received on that port out to the *other* port. Both are false during
- * TIMEOUT (repeater locked out). */
+ * received on that port out to the *other* port. A timed-out source's gate is
+ * closed until it unkeys; the other source carries on. */
 bool port_mmdvm_gate_open(const port_t *p);   /* mmdvm RX -> repeat + STE to link */
 bool port_link_gate_open(const port_t *p);    /* link RX -> mmdvm TX (mmdvm has priority) */
+
+/* Repeater down cuts every path through the repeater: local repeat, local to link,
+ * and link to local. The receiver is still decoded for commands. Going down, the
+ * reply plays and the station identifies; coming up, the reply plays. Both take
+ * ownership of the reply, which may be NULL. */
+void port_set_repeater_down(port_t *p, bool down, int16_t *reply, size_t n, uint64_t now);
+/* Down at startup, from the saved state: nothing is transmitted. Call before port_start. */
+void port_restore_repeater_down(port_t *p);
+bool port_repeater_down(const port_t *p);
+
+/* The local receiver is timed out: its audio goes nowhere, but DTMF commands
+ * ending in D are still accepted. */
+bool port_local_timed_out(const port_t *p);
 
 /* Pulls the next 160-sample controller-audio frame (CT/hang-silence/ID/
  * timeout messages) for the mmdvm TX pacing timer. Returns false (nothing

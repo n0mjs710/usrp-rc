@@ -42,8 +42,17 @@ struct port {
     uint64_t      cor_up_ms;
     port_source_t last_source;
 
-    double        tot_used_s;
-    uint64_t      tot_start_ms;
+    /* Time-out timers, one for each source. The local timer resets at the courtesy
+     * tone and when a local station takes over from the link. The link timer resets
+     * each time the link unkeys, as link stations can't hear the courtesy tone. */
+    double        local_tot_used_s;
+    uint64_t      local_tot_start_ms;
+    bool          local_timed_out;
+    bool          link_timed_out;
+
+    /* Repeater down: no path through the repeater. The receiver is still decoded
+     * for commands. */
+    bool          down;
 
     int  id_rot_initial;
     int  id_rot_mandatory;
@@ -60,7 +69,8 @@ struct port {
     /* timers — absolute monotonic ms deadlines; 0 = not armed */
     uint64_t hang_deadline;
     uint64_t ct_delay_deadline;
-    uint64_t timeout_deadline;
+    uint64_t local_timeout_deadline;
+    uint64_t link_timeout_deadline;
     uint64_t id_deadline;
     uint64_t id_sub_deadline;
     uint64_t pad_deadline;
@@ -169,7 +179,17 @@ static void ctrl_buf_pull_frame(port_t *p, int16_t out[160], uint64_t now)
 
 /* ── misc helpers ───────────────────────────────────────────────────────── */
 
-static bool cor_active(const port_t *p) { return p->mmdvm_active || p->link_active; }
+/* A timed-out source no longer counts as active: it's neither repeated nor holds the
+ * repeater up. */
+static bool local_active(const port_t *p) { return !p->down && p->mmdvm_active && !p->local_timed_out; }
+static bool link_active(const port_t *p)  { return !p->down && p->link_active && !p->link_timed_out; }
+static bool cor_active(const port_t *p)   { return local_active(p) || link_active(p); }
+
+/* Where the repeater rests when nothing is being repeated. */
+static port_state_t rest_state(const port_t *p)
+{
+    return p->local_timed_out || p->link_timed_out ? PORT_TIMEOUT : PORT_IDLE;
+}
 
 static void set_ptt(port_t *p, bool active, uint64_t now, const char *reason)
 {
@@ -233,17 +253,8 @@ static void port_transition(port_t *p, port_state_t new_state, uint64_t now)
     port_state_t old = p->state;
     p->state = new_state;
 
-    if (new_state == PORT_ACTIVE) {
-        p->tot_start_ms = now;
-        p->timeout_deadline = now + (uint64_t)(
-            (p->cfg->timers.timeout - p->tot_used_s > 0.0
-                ? p->cfg->timers.timeout - p->tot_used_s : 0.0) * 1000.0);
-    } else if (old == PORT_ACTIVE && new_state == PORT_TAIL) {
-        p->tot_used_s += (double)(now - p->tot_start_ms) / 1000.0;
-        p->timeout_deadline = 0;
-    } else if (new_state == PORT_TIMEOUT) {
-        p->tot_used_s = 0.0;
-    }
+    if (new_state == PORT_IDLE)
+        p->local_tot_used_s = 0.0;
 
     if (new_state == PORT_ACTIVE) {
         p->tx_activity = true;
@@ -631,6 +642,10 @@ static void startup_render_message(port_t *p, uint64_t now)
 
 void port_start(port_t *p, uint64_t now)
 {
+    if (p->down) {
+        LOGI("port: repeater down — no startup message\n");
+        return;
+    }
     if (!p->ev->startup_message[0]) {
         LOGI("port: no startup_message configured — starting quietly in IDLE\n");
         return;
@@ -691,7 +706,7 @@ static void on_ct_delay(port_t *p, uint64_t now)
 
     queue_message(p, courtesy_tone(p), -1.0);
 
-    p->tot_used_s = 0.0;
+    p->local_tot_used_s = 0.0;
     if (ctrl_buf_playing(p))
         p->ctrl.on_drain = ct_after_drain;
     else
@@ -706,8 +721,9 @@ static void tail_finish(port_t *p, uint64_t now)
         return;
     set_ptt(p, false, now, "tail-message-done");
     if (p->state == PORT_TAIL) {
-        LOGI("state: TAIL -> IDLE  (tail message done)\n");
-        port_transition(p, PORT_IDLE, now);
+        port_state_t rest = rest_state(p);
+        LOGI("state: TAIL -> %s  (tail message done)\n", rest == PORT_TIMEOUT ? "TIMEOUT" : "IDLE");
+        port_transition(p, rest, now);
     }
 }
 
@@ -757,15 +773,31 @@ static void on_hang(port_t *p, uint64_t now)
             return;
     }
 
-    LOGI("state: TAIL -> IDLE  (hang expired)\n");
+    port_state_t rest = rest_state(p);
+    LOGI("state: TAIL -> %s  (hang expired)\n", rest == PORT_TIMEOUT ? "TIMEOUT" : "IDLE");
     set_ptt(p, false, now, "hang-expired");
-    port_transition(p, PORT_IDLE, now);
+    port_transition(p, rest, now);
 }
 
-static void on_timeout(port_t *p, uint64_t now)
+static void on_timeout(port_t *p, port_source_t source, uint64_t now)
 {
-    p->timeout_deadline = 0;
-    LOGW("state: -> TIMEOUT  (tx time exceeded)\n");
+    if (source == SRC_LOCAL) {
+        p->local_timeout_deadline = 0;
+        p->local_timed_out        = true;
+        p->local_tot_used_s       = 0.0;
+    } else {
+        p->link_timeout_deadline = 0;
+        p->link_timed_out        = true;
+    }
+    const char *src = source == SRC_LOCAL ? "local" : "link";
+
+    /* The other source carries on being repeated. */
+    if (cor_active(p)) {
+        LOGW("timeout: %s timed out; repeating %s only until it unkeys\n",
+             src, source == SRC_LOCAL ? "link" : "local");
+        return;
+    }
+    LOGW("state: -> TIMEOUT  (%s tx time exceeded)\n", src);
     port_transition(p, PORT_TIMEOUT, now);
     ctrl_buf_clear(p);
     reply_discard(p);
@@ -807,7 +839,7 @@ static void cor_active_edge(port_t *p, port_source_t source, uint64_t now)
         : "rf-fwd";
     LOGI("cor: ACTIVE  source=%s  -> %s\n", src, action);
 
-    if (p->state == PORT_IDLE || p->state == PORT_TAIL) {
+    if (p->state == PORT_IDLE || p->state == PORT_TAIL || p->state == PORT_TIMEOUT) {
         set_ptt(p, true, now, source == SRC_LOCAL ? "repeat" : "link-fwd");
         port_transition(p, PORT_ACTIVE, now);
     }
@@ -824,13 +856,12 @@ static void cor_idle_edge(port_t *p, port_source_t source, uint64_t now)
         if (p->state == PORT_ACTIVE && duration_s < p->cfg->timers.kerchunk && !p->reply) {
             LOGD("cor: kerchunk (%.1fs < %.1fs)  — ignored\n",
                     duration_s, p->cfg->timers.kerchunk);
-            p->timeout_deadline    = 0;
-            p->tot_used_s          = 0.0;
+            p->local_tot_used_s    = 0.0;
             p->initial_id_pending  = false;
             if (p->id_deadline == 0)
                 schedule_id(p, now);
             set_ptt(p, false, now, "kerchunk");
-            port_transition(p, PORT_IDLE, now);
+            port_transition(p, rest_state(p), now);
         } else {
             if (p->activity_cb)
                 p->activity_cb(p->activity_arg, duration_s);
@@ -842,49 +873,231 @@ static void cor_idle_edge(port_t *p, port_source_t source, uint64_t now)
                 schedule_ct_delay(p, now);
             }
         }
-    } else if (p->state == PORT_TIMEOUT) {
-        LOGI("state: TIMEOUT -> TAIL  (recovered)\n");
-        set_ptt(p, true, now, "timeout-recovery");
-        port_transition(p, PORT_TAIL, now);
-        do_timeout_recovery(p, now);
     }
+}
+
+/* A timed-out source has unkeyed. Recovery plays once nothing is timed out and nothing
+ * else is being repeated. */
+static void timeout_released(port_t *p, port_source_t source, uint64_t now)
+{
+    LOGI("timeout: %s released\n", source == SRC_LOCAL ? "local" : "link");
+    if (p->state != PORT_TIMEOUT || p->local_timed_out || p->link_timed_out)
+        return;
+    LOGI("state: TIMEOUT -> TAIL  (recovered)\n");
+    set_ptt(p, true, now, "timeout-recovery");
+    port_transition(p, PORT_TAIL, now);
+    do_timeout_recovery(p, now);
+}
+
+static void start_local_timer(port_t *p, uint64_t now)
+{
+    double limit = p->cfg->timers.timeout;
+    p->local_tot_start_ms = now;
+    if (limit <= 0.0) {
+        p->local_timeout_deadline = 0;
+        return;
+    }
+    double left = limit - p->local_tot_used_s;
+    p->local_timeout_deadline = now + (uint64_t)((left > 0.0 ? left : 0.0) * 1000.0);
 }
 
 void port_on_mmdvm_keyup(port_t *p, bool active, uint64_t now)
 {
     bool old_combined = cor_active(p);
+    bool released = !active && p->local_timed_out;
+
+    if (active && p->down) {
+        p->local_timeout_deadline = 0;
+    } else if (active) {
+        /* A local station taking over from the link starts with a full timer. */
+        if (p->link_active || p->last_source == SRC_LINK)
+            p->local_tot_used_s = 0.0;
+        start_local_timer(p, now);
+    } else {
+        if (!p->local_timed_out && p->mmdvm_active)
+            p->local_tot_used_s += (double)(now - p->local_tot_start_ms) / 1000.0;
+        p->local_timeout_deadline = 0;
+        p->local_timed_out = false;
+    }
     p->mmdvm_active = active;
+
+    /* The courtesy tone goes with whichever source was active last. */
     if (active)
         p->last_source = SRC_LOCAL;
+    else if (link_active(p))
+        p->last_source = SRC_LINK;
+
     bool new_combined = cor_active(p);
     if (new_combined != old_combined) {
         if (new_combined) cor_active_edge(p, SRC_LOCAL, now);
         else              cor_idle_edge(p, SRC_LOCAL, now);
     }
+    if (released)
+        timeout_released(p, SRC_LOCAL, now);
 }
 
 void port_on_link_keyup(port_t *p, bool active, uint64_t now)
 {
     bool old_combined = cor_active(p);
+    bool released = !active && p->link_timed_out;
+
+    if (active) {
+        double limit = p->cfg->timers.link_timeout;
+        p->link_timeout_deadline = limit > 0.0 && !p->down ? now + (uint64_t)(limit * 1000.0) : 0;
+    } else {
+        p->link_timeout_deadline = 0;
+        p->link_timed_out = false;
+    }
     p->link_active = active;
+
     if (active)
         p->last_source = SRC_LINK;
+    else if (local_active(p))
+        p->last_source = SRC_LOCAL;
+
     bool new_combined = cor_active(p);
     if (new_combined != old_combined) {
         if (new_combined) cor_active_edge(p, SRC_LINK, now);
         else              cor_idle_edge(p, SRC_LINK, now);
     }
+    if (released)
+        timeout_released(p, SRC_LINK, now);
+}
+
+static void timeout_reply_after_drain(port_t *p, uint64_t now)
+{
+    if (p->state == PORT_TIMEOUT)
+        set_ptt(p, false, now, "timeout-reply-done");
 }
 
 void port_queue_reply(port_t *p, int16_t *samples, size_t n)
 {
     reply_discard(p);
-    if (p->state == PORT_TIMEOUT || !samples || n == 0) {
+    /* Down, only the up/down command itself transmits. */
+    if (!samples || n == 0 || p->down) {
+        if (p->down && samples)
+            LOGI("port: repeater down, no reply\n");
         free(samples);
+        return;
+    }
+    /* Timed out, nothing is being repeated, so there's no tail to wait for: key up,
+     * reply and drop back. Receiver audio stays off. */
+    if (p->state == PORT_TIMEOUT) {
+        p->tx_activity = true;
+        set_ptt(p, true, 0, "timeout-reply");
+        ctrl_buf_queue(p, samples, n);
+        free(samples);
+        p->ctrl.on_drain = timeout_reply_after_drain;
         return;
     }
     p->reply     = samples;
     p->reply_len = n;
+}
+
+/* ── repeater down / up ────────────────────────────────────────────────── */
+
+static void down_after_drain(port_t *p, uint64_t now)
+{
+    set_ptt(p, false, now, "repeater-down");
+    p->tx_activity = false;
+    schedule_id(p, now);
+}
+
+static void up_after_drain(port_t *p, uint64_t now)
+{
+    if (p->state == PORT_IDLE)
+        set_ptt(p, false, now, "repeater-up");
+}
+
+/* Stop everything in progress: down supersedes any transmission, tail or time-out. */
+static void quiesce(port_t *p, uint64_t now)
+{
+    p->hang_deadline = p->ct_delay_deadline = 0;
+    p->local_timeout_deadline = p->link_timeout_deadline = 0;
+    p->local_timed_out = p->link_timed_out = false;
+    p->local_tot_used_s = 0.0;
+    p->pad_deadline = 0;
+    p->pad_cont = NULL;
+    p->initial_id_pending = false;
+    p->anxious_id_armed = false;
+    p->id_deadline = p->id_sub_deadline = 0;
+    p->impolite_id_playing = false;
+    p->mix_len = p->mix_pos = 0;
+    p->mix_on_drain = NULL;
+    p->id_epoch++;
+    reply_discard(p);
+    ctrl_buf_clear(p);
+    port_transition(p, PORT_IDLE, now);
+}
+
+void port_set_repeater_down(port_t *p, bool down, int16_t *reply, size_t n, uint64_t now)
+{
+    if (down) {
+        bool was_down = p->down;
+        p->down = true;
+        quiesce(p, now);
+        LOGW("port: repeater DOWN%s\n", was_down ? " (already down)" : "");
+
+        /* The reply is a transmission, so the station identifies on its way down,
+         * and then nothing more is owed. */
+        if (!(reply && n) && !p->tx_activity) {
+            free(reply);
+            return;
+        }
+        set_ptt(p, true, now, "repeater-down");
+        if (reply && n)
+            ctrl_buf_queue(p, reply, n);
+        const char *id = mandatory_id_next(p);
+        if (id) {
+            if (p->ev->n_mandatory_ids > 0)
+                p->id_rot_mandatory = (p->id_rot_mandatory + 1) % p->ev->n_mandatory_ids;
+            LOGI("id: mandatory  '%s'  (repeater going down)\n", id);
+            queue_message(p, id, -1.0);
+        }
+        p->ctrl.on_drain = down_after_drain;
+        free(reply);
+        return;
+    }
+
+    bool was_down = p->down;
+    p->down = false;
+    LOGW("port: repeater UP%s\n", was_down ? "" : " (already up)");
+    if (was_down)
+        quiesce(p, now);
+
+    /* A station still keyed (a command ended with D) is repeated at once, and the
+     * reply waits for its tail like any other. */
+    if (cor_active(p)) {
+        if (p->mmdvm_active)
+            start_local_timer(p, now);
+        if (p->link_active && p->cfg->timers.link_timeout > 0.0)
+            p->link_timeout_deadline = now + (uint64_t)(p->cfg->timers.link_timeout * 1000.0);
+        cor_active_edge(p, p->mmdvm_active ? SRC_LOCAL : SRC_LINK, now);
+        port_queue_reply(p, reply, n);
+        return;
+    }
+    if (!reply || !n) {
+        free(reply);
+        return;
+    }
+    p->tx_activity = true;
+    if (p->id_deadline == 0)
+        schedule_id(p, now);
+    set_ptt(p, true, now, "repeater-up");
+    ctrl_buf_queue(p, reply, n);
+    free(reply);
+    p->ctrl.on_drain = up_after_drain;
+}
+
+void port_restore_repeater_down(port_t *p)
+{
+    p->down = true;
+    LOGW("port: repeater is DOWN, as it was before the restart\n");
+}
+
+bool port_repeater_down(const port_t *p)
+{
+    return p->down;
 }
 
 void port_set_events(port_t *p, const config_events_t *events)
@@ -902,7 +1115,7 @@ void port_set_link_up(port_t *p, bool up)
 uint64_t port_next_deadline_ms(const port_t *p)
 {
     uint64_t candidates[] = {
-        p->ct_delay_deadline, p->hang_deadline, p->timeout_deadline,
+        p->ct_delay_deadline, p->hang_deadline, p->local_timeout_deadline, p->link_timeout_deadline,
         p->id_sub_deadline, p->id_deadline, p->pad_deadline,
     };
     uint64_t min = 0;
@@ -919,8 +1132,10 @@ void port_check_timers(port_t *p, uint64_t now)
         on_ct_delay(p, now);
     if (p->hang_deadline && now >= p->hang_deadline)
         on_hang(p, now);
-    if (p->timeout_deadline && now >= p->timeout_deadline)
-        on_timeout(p, now);
+    if (p->local_timeout_deadline && now >= p->local_timeout_deadline)
+        on_timeout(p, SRC_LOCAL, now);
+    if (p->link_timeout_deadline && now >= p->link_timeout_deadline)
+        on_timeout(p, SRC_LINK, now);
     if (p->id_sub_deadline && now >= p->id_sub_deadline) {
         p->id_sub_deadline  = 0;
         p->anxious_id_armed = true;
@@ -942,12 +1157,17 @@ bool port_ptt(const port_t *p) { return p->ptt; }
 
 bool port_mmdvm_gate_open(const port_t *p)
 {
-    return p->mmdvm_active && p->state != PORT_TIMEOUT;
+    return local_active(p);
 }
 
 bool port_link_gate_open(const port_t *p)
 {
-    return p->link_active && !p->mmdvm_active && p->state != PORT_TIMEOUT;
+    return link_active(p) && !local_active(p);
+}
+
+bool port_local_timed_out(const port_t *p)
+{
+    return p->local_timed_out;
 }
 
 bool port_ctrl_pull(port_t *p, int16_t out[160], uint64_t now)

@@ -953,6 +953,239 @@ static bool scenario_usage_counting(config_t *base, vocab_cache_t *vocab)
     return ok;
 }
 
+/* Audible controller audio from now until the transmitter drops. */
+static int audible_ms_until_idle(port_t *p)
+{
+    int ms = 0;
+    for (int t = 0; t < 8000 && port_ptt(p); t += TICK_MS)
+        if (tick(p))
+            ms += TICK_MS;
+    return ms;
+}
+
+static bool scenario_ct_follows_last_active(config_t *base, vocab_cache_t *vocab)
+{
+    printf("\n[15] the courtesy tone goes with the source that was active last\n");
+    bool ok = true;
+    config_t cfg = *base;
+    cfg.timers.id_interval = 3600.0;
+    cfg.events.n_initial_ids = 0;
+    snprintf(cfg.events.ct_link_on_message, CFG_NAME_STR, "id_cw");   /* long: local */
+    snprintf(cfg.events.ct_link_message, CFG_NAME_STR, "ct_tone");    /* short: link */
+
+    port_t *p = fresh_port(&cfg, vocab);
+    port_on_link_keyup(p, true, g_now);
+    wait_ms(p, 1000);
+    key_local(p, true);
+    wait_ms(p, 500);
+    key_local(p, false);
+    wait_ms(p, 1000);
+    port_on_link_keyup(p, false, g_now);
+    int link_last = audible_ms_until_idle(p);
+    port_destroy(p);
+
+    p = fresh_port(&cfg, vocab);
+    key_local(p, true);
+    wait_ms(p, 1000);
+    port_on_link_keyup(p, true, g_now);
+    wait_ms(p, 500);
+    port_on_link_keyup(p, false, g_now);
+    wait_ms(p, 1000);
+    key_local(p, false);
+    int local_last = audible_ms_until_idle(p);
+    port_destroy(p);
+
+    CHECK(link_last > 0 && link_last < 200, "local keyed over the link, link ended last: link tone (%d ms)", link_last);
+    CHECK(local_last > 400, "link keyed over a local station, local ended last: local tone (%d ms)", local_last);
+    printf(ok ? "[15] PASS\n" : "[15] FAIL\n");
+    return ok;
+}
+
+static void link_key(port_t *p, bool active) { port_on_link_keyup(p, active, g_now); }
+
+static config_t timeout_cfg(const config_t *base)
+{
+    config_t cfg = *base;
+    cfg.timers.timeout      = 10.0;
+    cfg.timers.link_timeout = 10.0;
+    cfg.timers.ct_delay     = 0.5;
+    cfg.timers.id_interval  = 3600.0;
+    cfg.events.n_initial_ids = 0;
+    return cfg;
+}
+
+/* Runs `script` against a fresh port with stderr captured; true if it timed out. */
+#define RUN_CAPTURED(cfgp, body) do { \
+        p = fresh_port(cfgp, vocab); cap_start(); body; log = cap_stop(); \
+    } while (0)
+
+static bool scenario_timeout_per_source(config_t *base, vocab_cache_t *vocab)
+{
+    printf("\n[16] local and link have their own time-out timers\n");
+    bool ok = true;
+    config_t cfg = timeout_cfg(base);
+    port_t *p;
+    char *log;
+
+    RUN_CAPTURED(&cfg, {
+        link_key(p, true); wait_ms(p, 12000);
+        CHECK(!port_link_gate_open(p) && !port_ptt(p), "a link held past link_timeout is muted and the transmitter drops");
+        link_key(p, false); wait_until_idle(p, 8000);
+    });
+    CHECK(strstr(log, "link tx time exceeded") && strstr(log, "recovered"), "... and recovers when the link unkeys");
+    free(log); port_destroy(p);
+
+    RUN_CAPTURED(&cfg, {
+        link_key(p, true); wait_ms(p, 7000);
+        key_local(p, true); wait_ms(p, 4000);
+        key_local(p, false); link_key(p, false); wait_until_idle(p, 8000);
+    });
+    CHECK(!strstr(log, "local tx time exceeded") && !strstr(log, "local timed out"),
+          "a local station keyed over 7 s of link isn't charged for it");
+    CHECK(strstr(log, "link timed out; repeating local only") != NULL,
+          "... though the link, keyed 11 s in all, times out under the local station");
+    free(log); port_destroy(p);
+
+    RUN_CAPTURED(&cfg, {
+        for (int i = 0; i < 3; i++) { link_key(p, true); wait_ms(p, 4000); link_key(p, false); wait_ms(p, 300); }
+        wait_until_idle(p, 8000);
+    });
+    CHECK(!strstr(log, "TIMEOUT"), "link stations 4 s each, 0.3 s apart, don't time out: each link unkey resets");
+    free(log); port_destroy(p);
+
+    RUN_CAPTURED(&cfg, {
+        for (int i = 0; i < 3; i++) { key_local(p, true); wait_ms(p, 4000); key_local(p, false); wait_ms(p, 300); }
+        wait_until_idle(p, 8000);
+    });
+    CHECK(strstr(log, "local tx time exceeded") != NULL, "local stations that don't wait for the courtesy tone still time out");
+    free(log); port_destroy(p);
+
+    RUN_CAPTURED(&cfg, {
+        for (int i = 0; i < 3; i++) { key_local(p, true); wait_ms(p, 4000); key_local(p, false); wait_ms(p, 1500); }
+        wait_until_idle(p, 8000);
+    });
+    CHECK(!strstr(log, "TIMEOUT"), "local stations that wait for the courtesy tone don't");
+    free(log); port_destroy(p);
+
+    RUN_CAPTURED(&cfg, {
+        link_key(p, true); wait_ms(p, 8000);
+        link_key(p, false); key_local(p, true); wait_ms(p, 8000);
+        key_local(p, false); wait_until_idle(p, 8000);
+    });
+    CHECK(!strstr(log, "TIMEOUT"), "a local station taking over as the link drops gets a full timer");
+    free(log); port_destroy(p);
+
+    RUN_CAPTURED(&cfg, {
+        link_key(p, true); wait_ms(p, 11000);
+        key_local(p, true); wait_ms(p, 20);
+        CHECK(port_mmdvm_gate_open(p) && port_ptt(p), "with the link stuck and timed out, a local station is repeated");
+        wait_ms(p, 3000); key_local(p, false);
+        wait_ms(p, 3000);
+        CHECK(!port_ptt(p), "... and after its tail, the transmitter drops while the link is still stuck");
+        link_key(p, false); wait_until_idle(p, 8000);
+    });
+    CHECK(strstr(log, "recovered") != NULL, "... and it recovers when the link finally unkeys");
+    free(log); port_destroy(p);
+
+    RUN_CAPTURED(&cfg, {
+        key_local(p, true); wait_ms(p, 11000);
+        CHECK(!port_mmdvm_gate_open(p) && port_local_timed_out(p), "a stuck local carrier times out and goes nowhere");
+        link_key(p, true); wait_ms(p, 20);
+        CHECK(port_link_gate_open(p) && port_ptt(p), "... while link traffic is still repeated");
+        wait_ms(p, 2000); link_key(p, false); wait_ms(p, 3000);
+        CHECK(!port_ptt(p), "... and after the link's tail, the transmitter drops");
+        int16_t *reply = calloc(800, sizeof(int16_t));
+        for (int i = 0; i < 800; i++) reply[i] = 1000;
+        port_queue_reply(p, reply, 800);
+        CHECK(port_ptt(p) && !port_mmdvm_gate_open(p), "a reply while timed out keys up without receiver audio");
+        wait_ms(p, 400);
+        CHECK(!port_ptt(p), "... and drops back once it has played");
+        key_local(p, false); wait_until_idle(p, 8000);
+    });
+    CHECK(strstr(log, "recovered") != NULL, "... and it recovers when the local carrier drops");
+    free(log); port_destroy(p);
+
+    config_t off = cfg;
+    off.timers.timeout = 0.0;
+    off.timers.link_timeout = 0.0;
+    RUN_CAPTURED(&off, {
+        key_local(p, true); wait_ms(p, 20000); key_local(p, false);
+        link_key(p, true); wait_ms(p, 20000); link_key(p, false);
+        wait_until_idle(p, 8000);
+    });
+    CHECK(!strstr(log, "TIMEOUT"), "a time-out of 0 is off, for either source");
+    free(log); port_destroy(p);
+
+    printf(ok ? "[16] PASS\n" : "[16] FAIL\n");
+    return ok;
+}
+
+static int16_t *test_reply(size_t n)
+{
+    int16_t *r = calloc(n, sizeof(int16_t));
+    for (size_t i = 0; i < n; i++) r[i] = 1000;
+    return r;
+}
+
+static bool scenario_repeater_down(config_t *base, vocab_cache_t *vocab)
+{
+    printf("\n[17] repeater down cuts every path through the repeater\n");
+    bool ok = true;
+    config_t cfg = timeout_cfg(base);
+    port_t *p;
+    char *log;
+
+    RUN_CAPTURED(&cfg, {
+        key_local(p, true); wait_ms(p, 2000); key_local(p, false);      /* an ID is owed */
+        wait_ms(p, 300);
+        port_set_repeater_down(p, true, test_reply(800), 800, g_now);
+        CHECK(port_ptt(p), "going down keys up for the reply");
+        wait_until_idle(p, 8000);
+    });
+    CHECK(strstr(log, "repeater going down") != NULL, "... and identifies on the way down");
+    free(log);
+
+    cap_start();
+    key_local(p, true); wait_ms(p, 20);
+    CHECK(!port_ptt(p) && !port_mmdvm_gate_open(p), "down, local traffic isn't repeated (or sent to the link)");
+    port_on_link_keyup(p, true, g_now); wait_ms(p, 20);
+    CHECK(!port_ptt(p) && !port_link_gate_open(p), "down, link traffic isn't repeated");
+    wait_ms(p, 15000);
+    CHECK(!port_ptt(p), "down, nothing times out or keys up, however long the carriers");
+    port_queue_reply(p, test_reply(800), 800);
+    CHECK(!port_ptt(p), "down, other commands' replies don't transmit");
+    port_on_link_keyup(p, false, g_now);
+    key_local(p, false);
+    wait_ms(p, 6000);
+    CHECK(!port_ptt(p), "down, the ID timer doesn't key up: nothing is owed");
+    log = cap_stop();
+    CHECK(!strstr(log, "id: "), "... and no ID plays");
+    free(log);
+
+    port_set_repeater_down(p, false, test_reply(800), 800, g_now);
+    CHECK(port_ptt(p), "coming up keys up for the reply");
+    wait_until_idle(p, 8000);
+    key_local(p, true); wait_ms(p, 20);
+    CHECK(port_mmdvm_gate_open(p) && port_ptt(p), "up again, local traffic is repeated");
+    key_local(p, false); wait_until_idle(p, 8000);
+    port_destroy(p);
+
+    /* Up from a command ended with D: the station is still keyed and is repeated. */
+    p = fresh_port(&cfg, vocab);
+    port_restore_repeater_down(p);
+    key_local(p, true); wait_ms(p, 500);
+    CHECK(!port_ptt(p), "restored down at startup, nothing is repeated");
+    port_set_repeater_down(p, false, test_reply(800), 800, g_now);
+    wait_ms(p, 20);
+    CHECK(port_mmdvm_gate_open(p) && port_ptt(p), "up while still keyed: the station is repeated at once");
+    key_local(p, false);
+    CHECK(wait_until_idle(p, 8000), "... and the tail finishes normally");
+    port_destroy(p);
+
+    printf(ok ? "[17] PASS\n" : "[17] FAIL\n");
+    return ok;
+}
+
 /* ── driver ───────────────────────────────────────────────────────────── */
 
 int main(void)
@@ -988,6 +1221,9 @@ int main(void)
         scenario_usage_counting,
         scenario_tail_message_rotation,
         scenario_empty_mandatory_uses_impolite,
+        scenario_ct_follows_last_active,
+        scenario_timeout_per_source,
+        scenario_repeater_down,
     };
     int n = (int)(sizeof(scenarios) / sizeof(scenarios[0]));
 

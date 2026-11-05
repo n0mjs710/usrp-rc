@@ -46,7 +46,9 @@ static void clear_digits(command_session_t *s)
  *   Programming: a stub for now. The config file is the programming interface;
  *                a DTMF unlock would go here if a use for one turns up.
  *   Control op:  no commands yet. They'll sit behind a definable prefix.
- *   User:        the pad test, time, usage figures, link on, link off and link status.
+ *   User:        the pad test, time, usage figures, link on, link off, link status,
+ *                and repeater down/up (its code plus 0 or 1; no code by default, as
+ *                anyone could use it until the control operator tier exists).
  */
 static bool evaluate(command_session_t *s, command_t *out)
 {
@@ -84,6 +86,17 @@ static bool evaluate(command_session_t *s, command_t *out)
         LOGI("dtmf: '%s': ACCEPTED command = %s\n", s->digits, CODES[i].name);
         out->type = CODES[i].type;
         out->digits[0] = '\0';
+        clear_digits(s);
+        return true;
+    }
+
+    size_t rlen = strlen(d->repeater_code);
+    if (rlen && (size_t)s->ndigits == rlen + 1 && strncmp(s->digits, d->repeater_code, rlen) == 0
+        && (s->digits[rlen] == '0' || s->digits[rlen] == '1')) {
+        out->type = COMMAND_REPEATER;
+        out->digits[0] = s->digits[rlen];
+        out->digits[1] = '\0';
+        LOGI("dtmf: '%s': ACCEPTED command = repeater %s\n", s->digits, out->digits[0] == '1' ? "up" : "down");
         clear_digits(s);
         return true;
     }
@@ -183,6 +196,19 @@ bool command_session_frame(command_session_t *s, const int16_t frame[160], comma
     return terminated && evaluate(s, out);
 }
 
+static void reset_for_next_tx(command_session_t *s)
+{
+    dtmf_decoder_reset(s->decoder);
+    clear_digits(s);
+    s->now_ms = 0;
+    s->last_digit_ms = 0;
+    s->last_tone_ms = 0;
+    s->tone_rejected = false;
+    s->muted = false;
+    s->link_cut = false;
+    s->beep_pos = 0;
+}
+
 bool command_session_end_of_tx(command_session_t *s, command_t *out)
 {
     bool have = false;
@@ -197,17 +223,16 @@ bool command_session_end_of_tx(command_session_t *s, command_t *out)
             have = evaluate(s, out);
         }
     }
-
-    dtmf_decoder_reset(s->decoder);
-    clear_digits(s);
-    s->now_ms = 0;
-    s->last_digit_ms = 0;
-    s->last_tone_ms = 0;
-    s->tone_rejected = false;
-    s->muted = false;
-    s->link_cut = false;
-    s->beep_pos = 0;
+    reset_for_next_tx(s);
     return have;
+}
+
+void command_session_end_of_tx_discard(command_session_t *s, const char *why)
+{
+    if (s->ndigits > 0)
+        LOGI("dtmf: '%s': ABANDONED %s\n", s->digits, why);
+    clear_digits(s);
+    reset_for_next_tx(s);
 }
 
 bool command_session_muted(const command_session_t *s)

@@ -24,6 +24,7 @@ typedef enum {
     COMMAND_LINK_ON,
     COMMAND_LINK_OFF,
     COMMAND_LINK_STATUS,
+    COMMAND_REPEATER,   /* digits: "0" = down, "1" = up */
     COMMAND_NO_LINK,    /* a link command on a repeater with no link */
 } command_type_t;
 
@@ -44,6 +45,9 @@ bool command_session_frame(command_session_t *s, const int16_t frame[160], comma
 /* The transmission ended: evaluate what was entered and start clean for the next
  * one. Returns true if a valid command was entered. */
 bool command_session_end_of_tx(command_session_t *s, command_t *out);
+
+/* The transmission ended, but nothing entered may run: start clean, logging why. */
+void command_session_end_of_tx_discard(command_session_t *s, const char *why);
 
 /* Should repeat audio be replaced right now? Set from the first valid tone until
  * the mute hang expires with no further tone. */

@@ -42,6 +42,8 @@ see [MANUAL.md](MANUAL.md).
 | Reply to link commands when the repeater has no link | `[events]` `link_none_message` |
 | Tail messages, which rotate through a list | `[events]` `tail_messages` |
 | Minimum time between tail messages | `[timers]` `tail_min_interval` |
+| Separate time-out for link traffic | `[timers]` `link_timeout` |
+| Repeater down and up by DTMF (no code by default) | `[dtmf]` `repeater_code` |
 | Settings that change by time and day | `[schedule]` section |
 | Different location for usage statistics, or memory only | `[stats]` `file` |
 
@@ -56,6 +58,7 @@ command.
 | `72` | Turns the link on | `link_on_code` |
 | `73` | Turns the link off | `link_off_code` |
 | `70` | Says the link state, without a change | `link_status_code` |
+| Not set | Repeater down (code + 0) and up (code + 1) | `repeater_code` |
 
 ### Changes in operation
 
@@ -69,5 +72,13 @@ command.
 - `make install` now replaces all stock voice clips in `vocab_8k/`, and removes stock
   clips that are no longer in the repository. Before, it did not replace clips that
   existed. Move any changed stock clips to `user_8k/` before the installation.
+- Local and link traffic have separate time-out timers. `timeout` now applies to local
+  traffic only. `link_timeout` (default 180) applies to link traffic and resets each time
+  the link unkeys. Both accept 0 for off.
+- A time-out stops only the source that timed out. A stuck link no longer locks out local
+  stations. During a local time-out, link traffic is repeated, and commands that end with
+  `D` are accepted.
+- The courtesy tone is for the source that was active last. Before, it was for the source
+  that keyed up last.
 - The courtesy tone after an impolite ID now follows the same rules as other tails.
   Before, it was always the local tone, also after link traffic.

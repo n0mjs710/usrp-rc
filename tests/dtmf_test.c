@@ -305,6 +305,19 @@ static void test_commands(void)
         check("an empty code turns its command off", !command_session_end_of_tx(r.s, &c));
         strcpy(s_cfg.dtmf.time_code, "39");
 
+        press_all(&r, "110");
+        check("no repeater code by default", !command_session_end_of_tx(r.s, &c));
+        strcpy(s_cfg.dtmf.repeater_code, "11");
+        press_all(&r, "110");
+        check("repeater code + 0 is down", command_session_end_of_tx(r.s, &c) && c.type == COMMAND_REPEATER && c.digits[0] == '0');
+        press_all(&r, "111");
+        check("repeater code + 1 is up", command_session_end_of_tx(r.s, &c) && c.type == COMMAND_REPEATER && c.digits[0] == '1');
+        press_all(&r, "112");
+        check("any other argument does nothing", !command_session_end_of_tx(r.s, &c));
+        press_all(&r, "11");
+        check("the code alone does nothing", !command_session_end_of_tx(r.s, &c));
+        strcpy(s_cfg.dtmf.repeater_code, "");
+
         strcpy(s_cfg.dtmf.time_code, "51");
         press_all(&r, "51");
         check("a whole code wins over the pad test prefix",

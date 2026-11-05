@@ -45,6 +45,7 @@ void config_defaults(config_t *cfg)
     cfg->timers.ct_delay    = 0.5;
     cfg->timers.kerchunk    = 0.5;
     cfg->timers.timeout     = 180.0;
+    cfg->timers.link_timeout = 180.0;
     cfg->timers.id_interval = 600.0;
     cfg->timers.id_anxious  = 60.0;
     cfg->timers.tail_every  = 10;
@@ -73,9 +74,12 @@ void config_defaults(config_t *cfg)
     strncpy(cfg->events.time_message, "time_readback", sizeof(cfg->events.time_message) - 1);
     strncpy(cfg->events.stats_message, "stats_readback", sizeof(cfg->events.stats_message) - 1);
     strncpy(cfg->stats.file, "/var/local/usrp-rc/stats", sizeof(cfg->stats.file) - 1);
+    strncpy(cfg->state.file, "/var/local/usrp-rc/state", sizeof(cfg->state.file) - 1);
     strncpy(cfg->events.link_on_message, "link_on_reply", sizeof(cfg->events.link_on_message) - 1);
     strncpy(cfg->events.link_off_message, "link_off_reply", sizeof(cfg->events.link_off_message) - 1);
     strncpy(cfg->events.link_none_message, "link_none_reply", sizeof(cfg->events.link_none_message) - 1);
+    strncpy(cfg->events.repeater_up_message, "repeater_up_reply", sizeof(cfg->events.repeater_up_message) - 1);
+    strncpy(cfg->events.repeater_down_message, "repeater_down_reply", sizeof(cfg->events.repeater_down_message) - 1);
 
     cfg->access_mode = ACCESS_COR;
 
@@ -165,7 +169,8 @@ static const field_t FIELDS[] = {
     DBL("timers", "hang",        timers.hang, 0, 600),
     DBL("timers", "ct_delay",    timers.ct_delay, 0, 60),
     DBL("timers", "kerchunk",    timers.kerchunk, 0, 60),
-    DBL("timers", "timeout",     timers.timeout, 1, 3600),   /* 0 would time out instantly */
+    DBL("timers", "timeout",     timers.timeout, 0, 3600),   /* 0 = off */
+    DBL("timers", "link_timeout", timers.link_timeout, 0, 3600),
     DBL("timers", "id_interval", timers.id_interval, 1, 86400),
     DBL("timers", "id_anxious",  timers.id_anxious, 0, 3600),
     INT("timers", "tail_every",  timers.tail_every, 0, 1000),
@@ -186,8 +191,10 @@ static const field_t FIELDS[] = {
     STR("dtmf",  "link_on_code",  dtmf.link_on_code),
     STR("dtmf",  "link_off_code", dtmf.link_off_code),
     STR("dtmf",  "link_status_code", dtmf.link_status_code),
+    STR("dtmf",  "repeater_code", dtmf.repeater_code),
 
     STR("stats", "file", stats.file),
+    STR("state", "file", state.file),
 
     STR("events", "startup_message",        events.startup_message),
     NAMES("initial_ids",   events.initial_ids,   events.n_initial_ids),
@@ -203,6 +210,8 @@ static const field_t FIELDS[] = {
     STR("events", "link_on_message",        events.link_on_message),
     STR("events", "link_off_message",       events.link_off_message),
     STR("events", "link_none_message",      events.link_none_message),
+    STR("events", "repeater_up_message",    events.repeater_up_message),
+    STR("events", "repeater_down_message",  events.repeater_down_message),
     STR("events", "timeout_message",        events.timeout_message),
     STR("events", "timeout_cancel_message", events.timeout_cancel_message),
 };
@@ -212,7 +221,7 @@ static const field_t FIELDS[] = {
 #define SCHEDULE_SECTION "schedule"
 
 static const char *const SECTIONS[] = {
-    "log", "mmdvm", "link", "audio", "timers", "dtmf", "stats", "events", MESSAGES_SECTION, SCHEDULE_SECTION, NULL,
+    "log", "mmdvm", "link", "audio", "timers", "dtmf", "stats", "state", "events", MESSAGES_SECTION, SCHEDULE_SECTION, NULL,
 };
 
 static const char *const ELEM_TYPES[] = {"cw", "voice", "tone", NULL};
@@ -1019,6 +1028,8 @@ static void load_builtin_messages(config_t *cfg)
         {"link_on_reply",  "LINK ON"},
         {"link_off_reply", "LINK OFF"},
         {"link_none_reply", "NO LINK SERVICE"},
+        {"repeater_up_reply", "REPEATER UP"},
+        {"repeater_down_reply", "REPEATER DOWN"},
         {"stats_readback", "{keyups_day} KEY UP _S _ {minutes_day} MINUTES"},
     };
     for (size_t i = 0; i < sizeof(BUILTIN) / sizeof(BUILTIN[0]); i++) {
@@ -1420,6 +1431,7 @@ static void validate(const entries_t *es, const config_t *cfg)
         {"link_on_code",    offsetof(config_dtmf_t, link_on_code)},
         {"link_off_code",   offsetof(config_dtmf_t, link_off_code)},
         {"link_status_code", offsetof(config_dtmf_t, link_status_code)},
+        {"repeater_code",   offsetof(config_dtmf_t, repeater_code)},
     };
     for (size_t i = 0; i < sizeof(CODES) / sizeof(CODES[0]); i++) {
         const char *code = (const char *)&cfg->dtmf + CODES[i].offset;
@@ -1428,6 +1440,16 @@ static void validate(const entries_t *es, const config_t *cfg)
         for (size_t j = 0; j < i; j++)
             if (code[0] && strcmp(code, (const char *)&cfg->dtmf + CODES[j].offset) == 0)
                 cfg_err("dtmf.%s: '%s' is already used by dtmf.%s\n", CODES[i].key, code, CODES[j].key);
+    }
+    /* The repeater command is its code plus 0 or 1, so those can't be other codes. */
+    if (cfg->dtmf.repeater_code[0]) {
+        for (int arg = 0; arg < 2; arg++) {
+            char full[CFG_DTMF_PREFIX_STR + 2];
+            snprintf(full, sizeof(full), "%s%d", cfg->dtmf.repeater_code, arg);
+            for (size_t j = 0; j + 1 < sizeof(CODES) / sizeof(CODES[0]); j++)
+                if (strcmp(full, (const char *)&cfg->dtmf + CODES[j].offset) == 0)
+                    cfg_err("dtmf.repeater_code: '%s' is already used by dtmf.%s\n", full, CODES[j].key);
+        }
     }
     if (cfg->dtmf.mute_hang_ms >= cfg->dtmf.interdigit_ms)
         cfg_err("dtmf.mute_hang_ms (%d) must be less than dtmf.interdigit_ms (%d)\n",
@@ -1461,6 +1483,10 @@ static void validate(const entries_t *es, const config_t *cfg)
      * that's already an unknown-setting error. */
     if (ev->n_mandatory_ids == 0)
         LOGW("config: events.mandatory_ids is empty -- mandatory IDs will use events.impolite_id\n");
+    if (cfg->timers.timeout == 0.0)
+        LOGW("config: timers.timeout is 0: a local carrier can hold the transmitter on with no limit\n");
+    if (cfg->link.enabled && cfg->timers.link_timeout == 0.0)
+        LOGW("config: timers.link_timeout is 0: the link can hold the transmitter on with no limit\n");
     if (cfg->timers.id_interval > 600.0)
         LOGW("config: timers.id_interval is %g s, longer than the FCC 10-minute limit\n",
              cfg->timers.id_interval);

@@ -79,6 +79,10 @@ A key-up on either port gives access to the repeater. A link station opens the r
 the same as a local station. Link traffic gets its own courtesy tone, `ct_link_message`.
 Thus, listeners can hear the source of the traffic.
 
+Local traffic has priority over link traffic. During a local transmission, the repeater
+does not transmit link audio. For details, see [MANUAL.md](MANUAL.md#82-traffic-priority),
+section 8.2.
+
 ### Squelch tail elimination
 
 `audio.ste_delay_ms` delays local receive audio. The delay applies to the repeat path and
@@ -141,7 +145,7 @@ frame timing.
 | `/usr/local/share/usrp-rc/user_8k/` | Site voice clips |
 | `/usr/local/share/usrp-rc/toml2conf.py` | Converter for old configurations |
 | `/usr/local/lib/systemd/system/usrp-rc.service` | systemd service |
-| `/var/local/usrp-rc/` | Usage statistics |
+| `/var/local/usrp-rc/` | Usage statistics and the repeater down state |
 
 > **Note:** `make install` does not replace a configuration file that exists. If no
 > configuration exists, it copies the sample to `usrp-rc.conf`.

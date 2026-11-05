@@ -46,6 +46,8 @@ timeout_message = timeout_warn
 #link_on_message        = link_on_reply
 #link_off_message       = link_off_reply
 #link_none_message      = link_none_reply # link commands when link.enabled = false
+#repeater_up_message    = repeater_up_reply
+#repeater_down_message  = repeater_down_reply   # an ID always follows it
 
 [messages]
 # Your own messages, by name, for use in [events] above.
@@ -133,7 +135,8 @@ default_cw    = cw: {call}/R
 #hang        = 2.5     # PTT holdoff after the courtesy tone
 #ct_delay    = 0.5     # from RX loss to courtesy tone
 #kerchunk    = 0.5     # minimum COR hold to respond (anti-kerchunk)
-#timeout     = 180     # time-out timer (TOT) transmit cutoff
+#timeout     = 180     # local time-out timer (TOT); resets at the courtesy tone; 0 = off
+#link_timeout = 180    # link time-out timer; resets each time the link unkeys; 0 = off
 #id_interval = 600     # mandatory ID interval (FCC: at most 10 minutes)
 #id_anxious  = 60      # sneak an anxious ID this far before the deadline
 #tail_every  = 10      # play events.tail_messages every this many tails; 0 = off
@@ -142,6 +145,9 @@ default_cw    = cw: {call}/R
 #[stats]
 # Where usage figures survive a restart. Empty = keep them in memory only.
 #file = /var/local/usrp-rc/stats
+
+#[state]
+#file = /var/local/usrp-rc/state   # keeps repeater down across a restart; empty = not kept
 
 #[dtmf]
 # Over-the-air DTMF commands from the repeater receiver. Off by default.
@@ -160,3 +166,4 @@ default_cw    = cw: {call}/R
 #link_on_code    = 72
 #link_off_code   = 73
 #link_status_code = 70   # says link on or link off, without a change
+#repeater_code   =        # + 0 = repeater down, + 1 = up. Empty = off: anyone could use it

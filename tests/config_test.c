@@ -55,7 +55,9 @@ static const test_case_t CASES[] = {
     {"bad log level",       BASE "[log]\nlevel = loud\n", "log.level: 'loud' is not valid"},
 
     {"negative hang",       BASE "[timers]\nhang = -5.0\n", "timers.hang: -5 is out of range"},
-    {"zero timeout",        BASE "[timers]\ntimeout = 0.0\n", "timers.timeout: 0 is out of range"},
+    {"negative timeout",    BASE "[timers]\ntimeout = -1\n", "timers.timeout: -1 is out of range"},
+    {"timeouts can be off", BASE "[timers]\ntimeout = 0\nlink_timeout = 0\n", NULL},
+    {"link timeout range",  BASE "[timers]\nlink_timeout = 4000\n", "timers.link_timeout: 4000 is out of range"},
     {"nan rejected",        BASE "[timers]\nhang = nan\n", "is out of range"},
     {"absurd gain",         BASE "[audio]\nmaster_gain = 50.0\n", "audio.master_gain: 50 is out of range"},
     {"negative wpm",        BASE "[audio]\nmorse_wpm = -3\n", "audio.morse_wpm: -3 is out of range"},
@@ -82,6 +84,8 @@ static const test_case_t CASES[] = {
     {"variable joined to a word", BASE "[messages]\na = voice: {time}Z\n", "unknown placeholder '{time}Z'"},
     {"dtmf code uses D",    BASE "[dtmf]\ntime_code = 3D\n", "dtmf.time_code: '3D' can only use"},
     {"dtmf code used twice", BASE "[dtmf]\nlink_on_code = 39\n", "dtmf.link_on_code: '39' is already used by dtmf.time_code"},
+    {"repeater code clash",  BASE "[dtmf]\nrepeater_code = 7\n", "dtmf.repeater_code: '70' is already used by dtmf.link_status_code"},
+    {"repeater code",        BASE "[dtmf]\nrepeater_code = 11\n", NULL},
     {"dtmf codes can be off", BASE "[dtmf]\ntime_code =\nlink_on_code =\nlink_off_code =\n", NULL},
     {"ct dangling",         BASE "[events]\nct_link_off_message = nope\n", "events.ct_link_off_message: no message named 'nope'"},
 
@@ -251,7 +255,7 @@ int main(void)
     }
 
     printf("[2] one pass reports every problem, not just the first\n");
-    int rc = load_text(BASE "[timers]\nhnag = 1.0\ntimeout = 0.0\n[events]\nct_link_on_message = nope\n");
+    int rc = load_text(BASE "[timers]\nhnag = 1.0\ntimeout = -1\n[events]\nct_link_on_message = nope\n");
     check("load fails", rc != 0);
     check("reports the unknown key", strstr(s_log, "line 4: timers.hnag") != NULL);
     check("reports the bad range", strstr(s_log, "line 5: timers.timeout") != NULL);
@@ -304,13 +308,13 @@ int main(void)
     rc = load_text(BASE);
     const config_elem_t *catalog = element("yellow_jacket", 2);
     check("available without being in the config", rc == 0 && catalog && catalog->freq1 == 660 && catalog->ms == 50);
-    check("all 28 tones and 5 built-in replies loaded", s_cfg.nmessages == 33);
+    check("all 28 tones and 7 built-in replies loaded", s_cfg.nmessages == 35);
     check("loud warning keeps its own level", element("timeout_warn", 0) && element("timeout_warn", 0)->amp == 0.9);
 
     rc = load_text(BASE "[messages]\nyellow_jacket = tone: 100:10\nmine = tone: 200:20\n");
     const config_message_t *over = config_find_message(&s_cfg, "yellow_jacket");
     check("same name replaces the catalog tone", rc == 0 && over && over->nelements == 1 && over->elements[0].freq1 == 100);
-    check("replacing doesn't add a message, a new tone does", s_cfg.nmessages == 34);
+    check("replacing doesn't add a message, a new tone does", s_cfg.nmessages == 36);
 
     printf("[6] shipped configs load\n");
     check("usrp-rc.conf.sample", capture_load("usrp-rc.conf.sample") == 0);
@@ -609,6 +613,7 @@ int main(void)
             "startup_message", "initial_ids", "mandatory_ids", "anxious_id", "impolite_id",
             "ct_link_on_message", "ct_link_message", "ct_link_off_message", "tail_messages",
             "time_message", "stats_message", "link_on_message", "link_off_message", "link_none_message",
+            "repeater_up_message", "repeater_down_message",
             "timeout_message", "timeout_cancel_message",
         };
         #define MSGS BASE "[messages]\nkeep = cw: A\ndrop = cw: B\n"
@@ -646,7 +651,7 @@ int main(void)
         char many[4096] = BASE "[messages]\n";
         for (int i = 0; i < 70; i++)
             snprintf(many + strlen(many), sizeof(many) - strlen(many), "m%d = cw: A\n", i);
-        check("no limit on how many are defined", load_text(many) == 0 && s_cfg.nmessages == 103);
+        check("no limit on how many are defined", load_text(many) == 0 && s_cfg.nmessages == 105);
     }
 
     printf("[11] clips and messages over 3 minutes\n");

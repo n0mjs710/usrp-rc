@@ -120,8 +120,10 @@ The repeater discards an entry for these conditions:
 
 If the repeater has no link, `70`, `72` and `73` reply "No link service".
 
-An entry that does not agree with a command has no effect. No error sound plays. The
-repeater does not accept commands when it is timed out.
+An entry that does not agree with a command has no effect. No error sound plays.
+
+When the repeater has timed out a local transmission, it accepts a command only if the
+command ends with `D`. An unkey does not enter the command. See [6.3](#63-time-out).
 
 ### 2.5 Pad test
 
@@ -141,6 +143,7 @@ Enter `5` and then the digits to test. The repeater says the digits.
 | Courtesy tone | The transmission has ended. The next station can transmit. Different tones can show local traffic, link traffic and link off. |
 | Beep, one time each second | A station enters a DTMF command. |
 | Short falling tones | The time-out timer stopped a long transmission. Unkey to reset the timer. |
+| "Repeater" replies with no repeated audio | The repeater is timed out. A command that ends with `D` gets a reply. |
 
 ---
 
@@ -256,7 +259,8 @@ Most timers and events start at one point in this cycle:
  Carrier starts
    |  The repeater repeats the audio.
    |  Shorter than timers.kerchunk: kerchunk. No courtesy tone, no tail.
-   |  Longer than timers.timeout: time-out (see 6.3).
+   |  Longer than timers.timeout (local) or timers.link_timeout (link):
+   |  time-out (see 6.3).
  Carrier stops
    |  timers.ct_delay
  Replies and the anxious ID play, if they are pending.
@@ -268,15 +272,17 @@ Most timers and events start at one point in this cycle:
  Transmitter stops
 ```
 
-A key-up during the delay or the hang starts repetition again. The time-out timer then
-continues from its last value.
+A local key-up during the delay or the hang starts repetition again. The local time-out
+timer then continues from its last value. A link key-up always starts the link time-out
+timer from zero.
 
 | Timer | Default | Function |
 | --- | --- | --- |
 | `kerchunk` | 0.5 s | Minimum carrier time for a full transmission |
 | `ct_delay` | 0.5 s | Time from carrier stop to the courtesy tone |
 | `hang` | 2.5 s | Time from the end of the courtesy tone to transmitter stop |
-| `timeout` | 180 s | Maximum transmission time |
+| `timeout` | 180 s | Maximum local transmission time |
+| `link_timeout` | 180 s | Maximum link transmission time |
 
 > **Note:** The log value `ptt: OFF ... duration` includes the carrier time, `ct_delay`,
 > the courtesy tone and `hang`.
@@ -487,10 +493,44 @@ shows the link state to listeners.
 
 ### 6.3 Time-out
 
+Local traffic and link traffic have separate time-out timers. A value of 0 disables a
+timer.
+
+| Timer | Setting | Resets |
+| --- | --- | --- |
+| Local | `timers.timeout` | At the courtesy tone. Also when a local station keys up during link traffic, or immediately after it. |
+| Link | `timers.link_timeout` | Each time the link unkeys. Link stations cannot hear the courtesy tone. |
+
+A local station that keys up before the courtesy tone does not reset the local timer.
+Thus, local stations must wait for the courtesy tone.
+
+When a timer expires, the repeater stops the audio from that source until the source
+unkeys:
+
+| Source timed out | Other source |
+| --- | --- |
+| Local | Link traffic is repeated. Local audio does not go to the link. |
+| Link | Local traffic is repeated as usual. |
+
+If neither source is repeated, the repeater plays `timeout_message` and the transmitter
+stops. When the timed-out source unkeys, the repeater plays `timeout_cancel_message` and
+operates again.
+
+During a local time-out, the repeater continues to decode DTMF from the receiver:
+
+- A command must end with `D`. The carrier of a timed-out station does not drop, thus
+  an unkey cannot enter the command. An entry without `D` is discarded at the unkey.
+- All commands are available.
+- The repeater keys the transmitter for the reply. It does not repeat the receiver audio.
+
+> **CAUTION:** With `link_timeout = 0`, a link that stays keyed holds the transmitter on
+> with no limit. Use this value only for a link with a continuous stream, for example a
+> remote base. `--check` shows a warning for each timer set to 0.
+
 | Setting | Plays |
 | --- | --- |
-| `timeout_message` | When the time-out timer stops a transmission |
-| `timeout_cancel_message` | When the carrier stops after a time-out, and the repeater operates again |
+| `timeout_message` | When a time-out stops the transmission |
+| `timeout_cancel_message` | When the timed-out source unkeys, and the repeater operates again |
 
 ### 6.4 Command replies
 
@@ -501,6 +541,8 @@ shows the link state to listeners.
 | `link_on_message` | Reply to the link-on command | `link_on_reply` |
 | `link_off_message` | Reply to the link-off command | `link_off_reply` |
 | `link_none_message` | Reply to a link command when the repeater has no link | `link_none_reply` |
+| `repeater_up_message` | Reply to repeater up | `repeater_up_reply` |
+| `repeater_down_message` | Reply to repeater down. An ID follows it. | `repeater_down_reply` |
 
 The link-status command replies with `link_on_message` or `link_off_message`.
 
@@ -692,6 +734,8 @@ schedule: 'net_reminder' ended
 
 ## 8. Link
 
+### 8.1 Link state
+
 | Setting | Effect |
 | --- | --- |
 | `enabled = false` | The repeater has no link. `70`, `72` and `73` reply with `link_none_message`: "No link service". |
@@ -706,6 +750,27 @@ schedule: 'net_reminder' ended
   See [6.2](#62-courtesy-tones).
 - At this time, each station can use `72` and `73`. A control operator level is planned.
 - At this time, `codec = opus` operates only with other tools from the same author.
+
+### 8.2 Traffic priority
+
+Local traffic has priority over link traffic.
+
+| Condition | Result |
+| --- | --- |
+| A local station transmits during link traffic | The repeater repeats the local station. The link audio stops. |
+| Link traffic arrives during a local transmission | The repeater does not transmit the link audio. |
+| The local station unkeys and link traffic continues | The repeater transmits the link audio again. |
+
+- During a local transmission, `usrp-rc` sends the local audio to the link, also when link
+  traffic arrives at the same time.
+- The repeater stays in one transmission while either source is active. The tail starts
+  when both sources have stopped.
+- The courtesy tone is for the source that was active last.
+- Each source has its own time-out timer. A local station that keys up during link
+  traffic starts with a full timer. See [6.3](#63-time-out).
+- `usrp-rc` operates the link as full duplex. It sends local audio to the link and
+  receives link audio at the same time. The system at the other end of the link is the
+  arbiter of simultaneous traffic. Its behavior is not controlled by `usrp-rc`.
 
 ---
 
@@ -779,6 +844,39 @@ dtmf: '38': ACCEPTED command = usage
 
 An `ABANDONED` line also names the timer that expired, if a timer expired. At
 `log.level = debug`, the log also shows each digit and each tone that was too short.
+
+### 9.7 Repeater down and up
+
+The repeater command takes the repeater out of service and puts it back. Enter the code,
+then `0` or `1`:
+
+| Entry | Result | Reply |
+| --- | --- | --- |
+| Code + `0` | Repeater down | "Repeater down", then an ID |
+| Code + `1` | Repeater up | "Repeater up" |
+
+`repeater_code` is empty by default. Thus, the command is off until the operator sets a
+code.
+
+> **CAUTION:** At this time, each station can use each command. A station that hears the
+> code can take the repeater out of service. Set a code only if this risk is acceptable.
+> A control operator level is planned.
+
+When the repeater is down:
+
+- No audio goes through the repeater: no local repeat, no local audio to the link, and
+  no link audio to the transmitter.
+- The repeater continues to decode DTMF from the receiver. Commands operate as usual,
+  but only the repeater command transmits a reply.
+- No courtesy tones, tail messages, IDs or time-outs occur.
+- The down state stays after a restart. It is kept in `[state] file`. The startup message
+  does not play.
+
+The reply "Repeater down" is a transmission. Thus, the repeater sends a mandatory ID
+immediately after it. No other ID is then necessary while the repeater is down.
+
+If a station enters code + `1` with `D` and stays keyed, the repeater repeats that
+station immediately. The reply plays in its tail.
 
 ---
 
@@ -871,7 +969,8 @@ the ports to agree with `MMDVM-Host.ini`. For the procedure, see
 | `kerchunk` | `0.5` | 0-60 | The repeater ignores a carrier shorter than this time. |
 | `ct_delay` | `0.5` | 0-60 | Time from carrier stop to the courtesy tone |
 | `hang` | `2.5` | 0-600 | Time that the transmitter stays on after the courtesy tone |
-| `timeout` | `180` | 1-3600 | Time-out timer. It resets at the courtesy tone. |
+| `timeout` | `180` | 0-3600 | Local time-out timer. It resets at the courtesy tone. 0 is off. |
+| `link_timeout` | `180` | 0-3600 | Link time-out timer. It resets each time the link unkeys. 0 is off. |
 | `id_interval` | `600` | 1-86400 | ID timer. A value above 600 (the FCC limit of 10 minutes) causes a warning. |
 | `id_anxious` | `60` | 0-3600 | Anxious ID period before the ID timer expires. Must be less than `id_interval`. |
 | `tail_every` | `10` | 0-1000 | Tails between tail messages. 0 disables tail messages. |
@@ -907,6 +1006,7 @@ Levels above 1.0 are permitted, but they can cause clipping.
 | `link_on_code` | `72` | 7 keys maximum | Link-on command. Empty is off. |
 | `link_off_code` | `73` | 7 keys maximum | Link-off command. Empty is off. |
 | `link_status_code` | `70` | 7 keys maximum | Link-status command. Empty is off. |
+| `repeater_code` | Empty | 7 keys maximum | Repeater command: code + `0` is down, code + `1` is up. Empty is off. See [9.7](#97-repeater-down-and-up). |
 | `min_tone_ms` | `40` | 30-1000 | Minimum tone length for a digit |
 | `max_tone_ms` | `5000` | 100-60000 | A longer tone discards the entry. |
 | `interdigit_ms` | `4000` | 100-60000 | A longer pause discards the digits before it. |
@@ -922,7 +1022,13 @@ Levels above 1.0 are permitted, but they can cause clipping.
 | --- | --- | --- |
 | `file` | `/var/local/usrp-rc/stats` | Statistics file. Empty keeps the values in memory only. |
 
-### 11.9 `[events]`
+### 11.9 `[state]`
+
+| Setting | Default | Function |
+| --- | --- | --- |
+| `file` | `/var/local/usrp-rc/state` | Keeps the repeater down state after a restart. Empty does not keep it. |
+
+### 11.10 `[events]`
 
 All `[events]` settings are message names. Empty plays nothing.
 
@@ -944,10 +1050,12 @@ All `[events]` settings are message names. Empty plays nothing.
 | `link_on_message` | `link_on_reply` | No | [6.4](#64-command-replies) |
 | `link_off_message` | `link_off_reply` | No | [6.4](#64-command-replies) |
 | `link_none_message` | `link_none_reply` | No | [6.4](#64-command-replies) |
+| `repeater_up_message` | `repeater_up_reply` | No | [6.4](#64-command-replies) |
+| `repeater_down_message` | `repeater_down_reply` | No | [6.4](#64-command-replies) |
 
 A list holds a maximum of 8 names.
 
-### 11.10 `[messages]` and `[schedule]`
+### 11.11 `[messages]` and `[schedule]`
 
 See [section 5](#5-messages) and [section 7](#7-schedule).
 
@@ -1067,6 +1175,7 @@ cause of a problem.
 | A window opens at the wrong time | The clock or the time zone is wrong. | Examine the clock and time zone with `timedatectl`. |
 | Usage statistics reset at restart | `usrp-rc` cannot write the file. | Look for `stats: can't save` in the log. Make sure that `/var/local/usrp-rc` exists and the service file is current. Then do `sudo systemctl daemon-reload`. |
 | No audio from the link | The link is off. | Look for `73` in the log, or for `start_on = false`. |
+| The repeater does not repeat anything | The repeater is down. | Look for `repeater DOWN` in the log. Enter the repeater code + `1`. To clear it without DTMF, stop the service, change `repeater = down` to `up` in `/var/local/usrp-rc/state`, and start the service. |
 
 ---
 

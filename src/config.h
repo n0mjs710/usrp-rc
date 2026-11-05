@@ -116,7 +116,8 @@ typedef struct {
     double hang;
     double ct_delay;
     double kerchunk;
-    double timeout;
+    double timeout;        /* local; 0 = off */
+    double link_timeout;   /* link; resets each time the link unkeys; 0 = off */
     double id_interval;
     double id_anxious;
 } config_timers_t;
@@ -140,6 +141,7 @@ typedef struct {
     char link_on_code[CFG_DTMF_PREFIX_STR];
     char link_off_code[CFG_DTMF_PREFIX_STR];
     char link_status_code[CFG_DTMF_PREFIX_STR];
+    char repeater_code[CFG_DTMF_PREFIX_STR];     /* + 0 = down, + 1 = up; empty by default */
 } config_dtmf_t;
 
 typedef struct {
@@ -160,6 +162,8 @@ typedef struct {
     char link_on_message[CFG_NAME_STR];
     char link_off_message[CFG_NAME_STR];
     char link_none_message[CFG_NAME_STR];      /* link commands when there's no link */
+    char repeater_up_message[CFG_NAME_STR];
+    char repeater_down_message[CFG_NAME_STR];
     char timeout_message[CFG_NAME_STR];
     char timeout_cancel_message[CFG_NAME_STR];
 } config_events_t;
@@ -176,6 +180,10 @@ typedef struct {
 typedef struct {
     char file[256];   /* where usage survives a restart; empty = memory only */
 } config_stats_t;
+
+typedef struct {
+    char file[256];   /* where repeater down survives a restart; empty = not kept */
+} config_state_t;
 
 #define CFG_MAX_SCHEDULE      32
 #define CFG_MAX_SCHEDULE_SETS 8
@@ -229,6 +237,7 @@ typedef struct {
     config_events_t  events;
     config_dtmf_t    dtmf;
     config_stats_t   stats;
+    config_state_t   state;
     access_mode_t    access_mode;
     config_log_t     log;
 
