@@ -139,7 +139,11 @@ static void load_dir(struct vocab_cache *vc, const char *dir)
             continue;   /* earlier directory already provided this clip */
 
         char path[768];
-        snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
+        int w = snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
+        if (w < 0 || (size_t)w >= sizeof(path)) {
+            LOGE("vocab: path too long: %s/%s\n", dir, ent->d_name);
+            continue;
+        }
 
         int16_t *samples;
         size_t   n;
