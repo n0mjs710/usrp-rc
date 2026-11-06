@@ -45,6 +45,11 @@ see the installed version, enter `usrp-rc --version`.
 
 7. If the repeater plays tail messages, set `[timers]` `tail_every`. The default is now
    0, which disables tail messages. The old default was 10.
+8. If DTMF commands are enabled, examine the codes. Each code must now be 2 to 7 keys.
+   Only `pad_test_prefix` can be 1 key. No code can start with `pad_test_prefix` or
+   `regen_code`, because these two take each key after them, also `#` and `D`, until
+   the unkey. With the default prefix `5`, change each code that starts with `5`.
+   `--check` shows each code to change.
 
 ### New functions
 
@@ -54,6 +59,7 @@ see [MANUAL.md](MANUAL.md).
 | Function | Setting |
 | --- | --- |
 | DTMF commands | `[dtmf]` `enabled = true` |
+| DTMF regen: send DTMF over the air and over the link | `[dtmf]` `regen_code` |
 | Link off at start | `[link]` `start_on = false` |
 | Different courtesy tone when the link is off | `[events]` `ct_link_off_message` |
 | Reply to link commands when the repeater has no link | `[events]` `link_none_message` |

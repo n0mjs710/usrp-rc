@@ -89,7 +89,8 @@ commands operate only if the operator sets `[dtmf] enabled = true`.
 | `72` | Link on | "Link on" |
 | `73` | Link off | "Link off" |
 | `70` | Link status | "Link on" or "Link off". The link state does not change. |
-| `5` + digits | Pad test | The digits. Use this command to test the DTMF tones of a radio. |
+| `5` + keys | Pad test | The keys. Use this command to test the DTMF tones of a radio. |
+| Code + keys | DTMF regen | The keys, as new DTMF tones. No code by default. See [2.6](#26-dtmf-regen). |
 
 ### 2.2 Special keys
 
@@ -97,6 +98,12 @@ commands operate only if the operator sets `[dtmf] enabled = true`.
 | --- | --- |
 | `#` | Cancels the digits entered. A new command can then be entered. |
 | `D` | Executes the command immediately. The repeater does not wait for the unkey. Use this key if a carrier does not drop. |
+
+After the pad test prefix or the regen code, `#` and `D` are keys like the others. They
+do not cancel or execute. Only the unkey ends the entry. To stop the entry, pause for
+more than 4 seconds. The repeater discards the keys before the pause, and a new command
+can then be entered. Or stay keyed for more than 8 seconds after the last key, then
+unkey.
 
 ### 2.3 Command entry
 
@@ -133,19 +140,41 @@ An entry that does not agree with a command has no effect. No error sound plays.
 
 When the repeater has timed out a local transmission, it accepts a command only if the
 command ends with `D`. An unkey does not enter the command. See [6.3](#63-time-out).
+Thus, the pad test and DTMF regen are not available then.
 
 ### 2.5 Pad test
 
-Enter `5` and then the digits to test. The repeater says the digits.
+Enter `5` and then the keys to test, then unkey. The repeater says the keys.
 
 | Key | Reply |
 | --- | --- |
 | `0` to `9` | The digit |
 | `*` | "Sierra" |
-| `A`, `B`, `C` | The letter |
-| `#`, `D` | Not available. These keys cancel and execute. |
+| `#` | "P" |
+| `A`, `B`, `C`, `D` | The letter |
 
-### 2.6 Repeater sounds
+### 2.6 DTMF regen
+
+Enter the regen code and then the keys to send, then unkey. The repeater transmits the
+keys as new, clean DTMF tones. All 16 keys are available, also `#` and `D`.
+
+| Link | The tones go to |
+| --- | --- |
+| On | The repeater transmitter and the link |
+| Off, or no link | The repeater transmitter only |
+
+Use this command to send DTMF commands to the system at the other end of the link, for
+example an AllStarLink node. The repeater does not send the tones that the station
+enters. It sends only the new tones.
+
+- The repeater sends only the sequence of keys. Each tone has the same length and the
+  same gap, as set by the operator. The length of the entered tones has no effect.
+- On the repeater, the tones play after the unkey, before the courtesy tone, as a
+  command reply.
+- A local transmission that starts while the tones go to the link is not sent to the
+  link.
+
+### 2.7 Repeater sounds
 
 | Sound | Meaning |
 | --- | --- |
@@ -745,7 +774,8 @@ A window can change each setting in these sections:
 
 - `[timers]`
 - `[audio]`, but not `ste_delay_ms` or `lead_trim_ms`
-- `[dtmf]`, but not `enabled`, `min_tone_ms` or the `beep_` settings
+- `[dtmf]`, but not `enabled`, `min_tone_ms`, the `beep_` settings or the `regen_`
+  settings
 - `[events]`, but not `startup_message`
 
 The other settings take effect only at startup. `--check` rejects them in a window.
@@ -861,12 +891,14 @@ stats_code   =
 
 ### 9.2 Codes
 
-- A code can contain `0` to `9`, `*`, `A`, `B` and `C`. The maximum length is 7
-  characters.
+- A code can contain `0` to `9`, `*`, `A`, `B` and `C`.
+- The length of a code is 2 to 7 keys. The pad test prefix can also be 1 key, for the
+  `5` that most controllers use.
 - `#` and `D` are not available in codes. They cancel and execute.
 - An empty code disables its command. In the example above, `stats_code` is empty.
-- A full code has priority over the pad test prefix. Thus, `51` can be a command, also
-  with prefix `5`.
+- The pad test prefix and the regen code take each key after them, to the unkey. Thus,
+  no other code can start with one of them. With the default prefix `5`, no code can
+  start with `5`. `--check` shows each code that does.
 
 > **Note:** DTMF gives no security. A station that monitors the repeater can hear a code
 > and use it. Select the enabled commands with this risk in mind.
@@ -895,6 +927,8 @@ starts. To prevent this blip, set `audio.ste_delay_ms` longer than `min_tone_ms`
 | The repeater does not detect short tones from some radios | Decrease `min_tone_ms`. The minimum is 30. |
 | The first tone goes out as a blip | Set `audio.ste_delay_ms` longer than `min_tone_ms`, for example 60. This delays all repeated audio and link audio by the same time. |
 | The beep continues too long | Decrease `mute_hang_ms`. Keep it longer than `ste_delay_ms` and shorter than `interdigit_ms`. |
+| The system at the other end of the link misses the first regen tone | Increase `regen_lead_ms`. |
+| The system at the other end of the link misses regen tones | Increase `regen_tone_ms` and `regen_gap_ms`, or change `regen_level`. |
 
 ### 9.6 Log
 
@@ -908,6 +942,7 @@ dtmf: '38': ACCEPTED command = usage
 | Result | Meaning | Example |
 | --- | --- | --- |
 | `ACCEPTED` | The command executed. | `'5123': ACCEPTED command = DTMF test + 123` |
+| | | `'69*3': ACCEPTED command = regen *3` |
 | `ERROR` | The entry is complete, but no command can execute. | `'99': ERROR no command matched` |
 | | A link command on a repeater with no link. The reply is "No link service". | `'70': ERROR command = link status, no link service` |
 | `ABANDONED` | The entry stopped before it was complete. | `'12#': ABANDONED user terminated` |
@@ -947,6 +982,36 @@ immediately after it. No other ID is then necessary while the repeater is down.
 
 If a station enters code + `1` with `D` and stays keyed, the repeater repeats that
 station immediately. The reply plays in its tail.
+
+### 9.8 DTMF regen
+
+`regen_code` is empty by default. Thus, the command is off until the operator sets a
+code. For use, see [2.6](#26-dtmf-regen).
+
+```ini
+[dtmf]
+enabled    = true
+regen_code = 69
+```
+
+> **CAUTION:** Each station that hears the code can send DTMF to the system at the other
+> end of the link. Set a code only if this risk is acceptable.
+
+| Setting | Default | Function |
+| --- | --- | --- |
+| `regen_tone_ms` | `100` | Length of each tone |
+| `regen_gap_ms` | `100` | Silence between tones |
+| `regen_lead_ms` | `200` | Silence on the link before the first tone. Some decoders do not detect a tone that starts at the key-up. |
+| `regen_level` | `0.5` | Level of the tones. The two frequencies of each tone have the same level. |
+
+- These settings take effect only at startup. A schedule window cannot change them.
+- `audio.master_gain` applies to the tones on the repeater transmitter. It does not
+  apply to the tones on the link.
+- The tones on the link do not wait for the tones on the transmitter. They start
+  immediately after the unkey.
+- The log shows `link: KEY -> peer (DTMF)` at the start and `link: DTMF sent` at the
+  end. Link off, repeater down or a stop of `usrp-rc` stops the tones. The log then shows
+  `link: DTMF cut short`.
 
 ---
 
@@ -1071,13 +1136,18 @@ Levels above 1.0 are permitted, but they can cause clipping.
 | Setting | Default | Range | Function |
 | --- | --- | --- | --- |
 | `enabled` | `false` | `true`, `false` | Enables DTMF commands |
-| `pad_test_prefix` | `5` | 7 keys maximum | Pad test prefix. Empty is off. |
-| `time_code` | `39` | 7 keys maximum | Time command. Empty is off. |
-| `stats_code` | `38` | 7 keys maximum | Usage command. Empty is off. |
-| `link_on_code` | `72` | 7 keys maximum | Link-on command. Empty is off. |
-| `link_off_code` | `73` | 7 keys maximum | Link-off command. Empty is off. |
-| `link_status_code` | `70` | 7 keys maximum | Link-status command. Empty is off. |
-| `repeater_code` | Empty | 7 keys maximum | Repeater command: code + `0` is down, code + `1` is up. Empty is off. See [9.7](#97-repeater-down-and-up). |
+| `pad_test_prefix` | `5` | 1-7 keys | Pad test prefix. Empty is off. |
+| `time_code` | `39` | 2-7 keys | Time command. Empty is off. |
+| `stats_code` | `38` | 2-7 keys | Usage command. Empty is off. |
+| `link_on_code` | `72` | 2-7 keys | Link-on command. Empty is off. |
+| `link_off_code` | `73` | 2-7 keys | Link-off command. Empty is off. |
+| `link_status_code` | `70` | 2-7 keys | Link-status command. Empty is off. |
+| `repeater_code` | Empty | 2-7 keys | Repeater command: code + `0` is down, code + `1` is up. Empty is off. See [9.7](#97-repeater-down-and-up). |
+| `regen_code` | Empty | 2-7 keys | DTMF regen: code + keys to send. Empty is off. See [9.8](#98-dtmf-regen). |
+| `regen_tone_ms` | `100` | 40-1000 | Regen tone length |
+| `regen_gap_ms` | `100` | 40-1000 | Silence between regen tones |
+| `regen_lead_ms` | `200` | 0-2000 | Silence on the link before the first regen tone |
+| `regen_level` | `0.5` | 0-1 | Regen tone level |
 | `min_tone_ms` | `40` | 30-1000 | Minimum tone length for a digit |
 | `max_tone_ms` | `5000` | 100-60000 | A longer tone discards the entry. |
 | `interdigit_ms` | `4000` | 100-60000 | A longer pause discards the digits before it. |

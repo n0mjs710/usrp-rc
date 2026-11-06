@@ -21,6 +21,7 @@ struct command_session {
     char digits[COMMAND_MAX_DIGITS + 1];
     int  ndigits;
     bool overflowed;
+    bool capturing;         /* past a pad test or regen code: every key counts, to unkey */
     bool tone_rejected;     /* the current tone outlasted max_tone_ms */
     int  last_digit_ms;     /* when the last digit started */
     int  last_tone_ms;      /* when a tone was last heard; drives the mute hang */
@@ -39,6 +40,7 @@ static void clear_digits(command_session_t *s)
     s->ndigits = 0;
     s->digits[0] = '\0';
     s->overflowed = false;
+    s->capturing = false;
 }
 
 /* Match what was entered against the commands, highest tier first:
@@ -47,8 +49,8 @@ static void clear_digits(command_session_t *s)
  *                a DTMF unlock would go here if a use for one turns up.
  *   Control op:  no commands yet. They'll sit behind a definable prefix.
  *   User:        the pad test, time, usage figures, link on, link off, link status,
- *                and repeater down/up (its code plus 0 or 1; no code by default, as
- *                anyone could use it until the control operator tier exists).
+ *                DTMF regen, and repeater down/up (its code plus 0 or 1; no code by
+ *                default, as anyone could use it until the control operator tier exists).
  */
 static bool evaluate(command_session_t *s, command_t *out)
 {
@@ -101,6 +103,15 @@ static bool evaluate(command_session_t *s, command_t *out)
         return true;
     }
 
+    size_t glen = strlen(d->regen_code);
+    if (glen && strncmp(s->digits, d->regen_code, glen) == 0 && s->digits[glen]) {
+        out->type = COMMAND_REGEN;
+        snprintf(out->digits, sizeof(out->digits), "%s", s->digits + glen);
+        LOGI("dtmf: '%s': ACCEPTED command = regen %s\n", s->digits, out->digits);
+        clear_digits(s);
+        return true;
+    }
+
     const char *prefix = d->pad_test_prefix;
     size_t plen = strlen(prefix);
 
@@ -119,22 +130,22 @@ static bool evaluate(command_session_t *s, command_t *out)
 
 static void on_digit(command_session_t *s, char digit, bool *terminated)
 {
-    if (digit == '#') {
+    if (s->ndigits > 0 && s->now_ms - s->last_digit_ms > s->cfg->dtmf.interdigit_ms) {
+        LOGI("dtmf: '%s': ABANDONED inter-digit timer exceeded\n", s->digits);
+        clear_digits(s);
+    }
+
+    if (!s->capturing && digit == '#') {
         /* ACC's cancel: forget everything entered so far this transmission. */
         if (s->ndigits > 0)
             LOGI("dtmf: '%s#': ABANDONED user terminated\n", s->digits);
         clear_digits(s);
         return;
     }
-    if (digit == 'D') {
+    if (!s->capturing && digit == 'D') {
         /* ACC's forced enter, for when a carrier won't drop on its own. */
         *terminated = true;
         return;
-    }
-
-    if (s->ndigits > 0 && s->now_ms - s->last_digit_ms > s->cfg->dtmf.interdigit_ms) {
-        LOGI("dtmf: '%s': ABANDONED inter-digit timer exceeded\n", s->digits);
-        clear_digits(s);
     }
 
     if (s->ndigits == 0)
@@ -146,6 +157,16 @@ static void on_digit(command_session_t *s, char digit, bool *terminated)
         s->digits[s->ndigits] = '\0';
     } else {
         s->overflowed = true;
+    }
+
+    /* The pad test and regen read every key after their code, # and D included,
+     * so only the unkey ends them. */
+    const config_dtmf_t *d = &s->cfg->dtmf;
+    if (!s->capturing && !s->overflowed
+        && ((d->pad_test_prefix[0] && strcmp(s->digits, d->pad_test_prefix) == 0)
+            || (d->regen_code[0] && strcmp(s->digits, d->regen_code) == 0))) {
+        s->capturing = true;
+        LOGD("dtmf: '%s': every key to the unkey counts\n", s->digits);
     }
 }
 
@@ -268,6 +289,7 @@ const char *command_digit_clip(char digit)
     case 'C': return "C";
     case 'D': return "D";
     case '*': return "SIERRA";
+    case '#': return "P";
     default:  return NULL;
     }
 }

@@ -4,6 +4,7 @@
  * Run from the repo root. */
 #include "../src/dtmf.h"
 #include "../src/command.h"
+#include "../src/tone.h"
 #include "../src/config.h"
 #include "../src/vocab.h"
 #include "../src/log.h"
@@ -257,6 +258,30 @@ static const char *end(session_run_t *r)
     return out;
 }
 
+/* Regen tones, fed straight to the decoder: every key comes back, in order. */
+static void test_generator(void)
+{
+    printf("\ngenerator\n");
+
+    const char *keys = "123A456B789C*0#D";
+    size_t n;
+    int16_t *t = tone_render_dtmf(keys, 200, 100, 100, 0.5, &n);
+    check("length is lead + tones + gaps between", n == 8 * (200 + 16 * 100 + 15 * 100));
+
+    decode_run_t r = new_run();
+    int16_t frame[160] = {0};
+    for (size_t i = 0; i < n + 160 * 10; i += 160) {
+        for (size_t j = 0; j < 160; j++)
+            frame[j] = i + j < n ? t[i + j] : 0;
+        decode_frame(frame, &r);
+    }
+    r.on[r.non] = 0;
+    check("every key decodes, in order", strcmp(r.on, keys) == 0);
+    check("the lead is silent", t[0] == 0 && t[8 * 200 - 1] == 0);
+    dtmf_decoder_destroy(r.d);
+    free(t);
+}
+
 static void test_commands(void)
 {
     printf("\ncommands\n");
@@ -318,22 +343,42 @@ static void test_commands(void)
         check("the code alone does nothing", !command_session_end_of_tx(r.s, &c));
         strcpy(s_cfg.dtmf.repeater_code, "");
 
-        strcpy(s_cfg.dtmf.time_code, "51");
-        press_all(&r, "51");
-        check("a whole code wins over the pad test prefix",
-              command_session_end_of_tx(r.s, &c) && c.type == COMMAND_TIME);
-        strcpy(s_cfg.dtmf.time_code, "39");
+        press_all(&r, "69*31234");
+        check("no regen code by default", !command_session_end_of_tx(r.s, &c));
+        strcpy(s_cfg.dtmf.regen_code, "69");
+        press_all(&r, "69*31234");
+        check("regen sends everything after its code",
+              command_session_end_of_tx(r.s, &c) && c.type == COMMAND_REGEN && strcmp(c.digits, "*31234") == 0);
+        r.got = 0;
+        press_all(&r, "69#1D");
+        check("... # and D included, with no early entry", r.got == 0
+              && command_session_end_of_tx(r.s, &c) && c.type == COMMAND_REGEN && strcmp(c.digits, "#1D") == 0);
+        press_all(&r, "69");
+        check("the regen code alone does nothing", !command_session_end_of_tx(r.s, &c));
+        strcpy(s_cfg.dtmf.regen_code, "");
     }
 
-    press_all(&r, "5999#5123");
+    press_all(&r, "39#5123");
     check("# cancels, and a command can follow", strcmp(end(&r), "123") == 0);
-    press_all(&r, "5999#");
+    press_all(&r, "39#");
     check("# at the end leaves nothing", strcmp(end(&r), "") == 0);
 
+    {
+        command_t c;
+        r.got = 0;
+        press_all(&r, "39D");
+        check("D forces evaluation mid-transmission", r.got == 1 && r.cmd.type == COMMAND_TIME);
+        check("... and nothing is left for the unkey", !command_session_end_of_tx(r.s, &c));
+    }
+
+    press_all(&r, "51#2D");
+    check("after the pad test prefix, # and D are read back", strcmp(end(&r), "1#2D") == 0);
     r.got = 0;
-    press_all(&r, "5123D");
-    check("D forces evaluation mid-transmission", r.got == 1 && strcmp(r.cmd.digits, "123") == 0);
-    check("... and nothing is left for the unkey", strcmp(end(&r), "") == 0);
+    press_all(&r, "512");
+    play(&SILENCE, 4500, session_frame, &r);
+    press_all(&r, "39D");
+    check("a pause over the interdigit time abandons a pad test", r.got == 1 && r.cmd.type == COMMAND_TIME);
+    end(&r);
 
     press(&r, '5');
     play(&SILENCE, 4500, session_frame, &r);
@@ -476,7 +521,7 @@ static void test_clips(void)
     check("digits", strcmp(command_digit_clip('0'), "ZERO") == 0 && strcmp(command_digit_clip('9'), "NINE") == 0);
     check("letters", strcmp(command_digit_clip('A'), "A") == 0);
     check("star is Sierra", strcmp(command_digit_clip('*'), "SIERRA") == 0);
-    check("# has no clip", command_digit_clip('#') == NULL);
+    check("pound is P", strcmp(command_digit_clip('#'), "P") == 0);
 }
 
 int main(void)
@@ -486,6 +531,7 @@ int main(void)
     config_defaults(&s_cfg);
 
     test_decoder();
+    test_generator();
     test_commands();
     test_speech_false_detects();
     test_clips();

@@ -63,6 +63,13 @@ The detector taps received audio ahead of the STE delay in `mmdvm_rx_frame()`.
 Replies go through `port_queue_reply()` and play from the courtesy tone delay,
 the same slot the anxious ID uses.
 
+The pad test and regen codes switch `command.c` into capturing: every key after
+them, `#` and `D` included, goes into the entry until the unkey, which is why
+`check_consistency()` won't let another code start with either. Regen's link copy
+is the only controller audio that goes to the link. `main.c` keys the link and paces
+it on its own 20 ms deadline (`regen_tick()`), independent of the port's tail, and a
+local transmission that starts meanwhile isn't sent to the link.
+
 The reference controllers are the ACC RC-96 (command structure and behavior) and
 the Arcom RC-210 (mute timer, tail message triggers). Their macro sets, patches,
 and multi-port routing are deliberately not the model here.

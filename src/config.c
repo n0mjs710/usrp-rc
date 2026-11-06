@@ -62,6 +62,10 @@ void config_defaults(config_t *cfg)
     cfg->dtmf.beep_hz       = 440;
     cfg->dtmf.beep_on_ms    = 100;
     cfg->dtmf.beep_off_ms   = 900;
+    cfg->dtmf.regen_tone_ms = 100;
+    cfg->dtmf.regen_gap_ms  = 100;
+    cfg->dtmf.regen_lead_ms = 200;
+    cfg->dtmf.regen_level   = 0.5;
     /* ACC's own defaults where they exist: pad test 5, time is demo prefix 3 + 9,
      * link is prefix 7 + 2 (receive/transmit) or 3 (off). */
     strncpy(cfg->dtmf.pad_test_prefix, "5", sizeof(cfg->dtmf.pad_test_prefix) - 1);
@@ -192,6 +196,11 @@ static const field_t FIELDS[] = {
     STR("dtmf",  "link_off_code", dtmf.link_off_code),
     STR("dtmf",  "link_status_code", dtmf.link_status_code),
     STR("dtmf",  "repeater_code", dtmf.repeater_code),
+    STR("dtmf",  "regen_code",    dtmf.regen_code),
+    INT("dtmf",  "regen_tone_ms", dtmf.regen_tone_ms, 40, 1000),
+    INT("dtmf",  "regen_gap_ms",  dtmf.regen_gap_ms, 40, 1000),
+    INT("dtmf",  "regen_lead_ms", dtmf.regen_lead_ms, 0, 2000),
+    DBL("dtmf",  "regen_level",   dtmf.regen_level, 0, 1),
 
     STR("stats", "file", stats.file),
     STR("state", "file", state.file),
@@ -1196,6 +1205,8 @@ static const char *not_schedulable(const field_t *f)
     static const char *const STARTUP_SECTIONS[] = {"", "log", "mmdvm", "link", "stats", "state", NULL};
     static const char *const STARTUP_KEYS[] = {
         "dtmf.enabled", "dtmf.min_tone_ms", "dtmf.beep_hz", "dtmf.beep_on_ms", "dtmf.beep_off_ms",
+        "dtmf.regen_code", "dtmf.regen_tone_ms", "dtmf.regen_gap_ms", "dtmf.regen_lead_ms",
+        "dtmf.regen_level",
         "audio.ste_delay_ms", "audio.lead_trim_ms", NULL,
     };
     if (strcmp(f->section, "events") == 0 && strcmp(f->key, "startup_message") == 0)
@@ -1563,9 +1574,11 @@ static void check_consistency(const config_t *cfg)
 {
     const config_events_t *ev = &cfg->events;
 
-    /* # and D are the cancel and enter keys, so a code could never be typed. */
+    /* # and D are the cancel and enter keys, so a code could never be typed. The
+     * repeater code goes last: the check after this loop relies on it. */
     static const struct { const char *key; size_t offset; } CODES[] = {
         {"pad_test_prefix", offsetof(config_dtmf_t, pad_test_prefix)},
+        {"regen_code",      offsetof(config_dtmf_t, regen_code)},
         {"time_code",       offsetof(config_dtmf_t, time_code)},
         {"stats_code",      offsetof(config_dtmf_t, stats_code)},
         {"link_on_code",    offsetof(config_dtmf_t, link_on_code)},
@@ -1573,21 +1586,38 @@ static void check_consistency(const config_t *cfg)
         {"link_status_code", offsetof(config_dtmf_t, link_status_code)},
         {"repeater_code",   offsetof(config_dtmf_t, repeater_code)},
     };
-    for (size_t i = 0; i < sizeof(CODES) / sizeof(CODES[0]); i++) {
+    enum { NCODES = sizeof(CODES) / sizeof(CODES[0]), NCAPTURE = 2 };
+    for (size_t i = 0; i < NCODES; i++) {
         const char *code = (const char *)&cfg->dtmf + CODES[i].offset;
         if (code[strspn(code, "0123456789*ABC")])
             cfg_err(WHERE_FMT "dtmf.%s: '%s' can only use 0-9, *, A, B and C\n", WHERE_ARGS, CODES[i].key, code);
+        /* Only the pad test may be one key, as 5 is on nearly every controller. */
+        if (i > 0 && strlen(code) == 1)
+            cfg_err(WHERE_FMT "dtmf.%s: '%s' must be at least 2 keys\n", WHERE_ARGS, CODES[i].key, code);
         for (size_t j = 0; j < i; j++)
             if (code[0] && strcmp(code, (const char *)&cfg->dtmf + CODES[j].offset) == 0)
                 cfg_err(WHERE_FMT "dtmf.%s: '%s' is already used by dtmf.%s\n", WHERE_ARGS,
                         CODES[i].key, code, CODES[j].key);
+    }
+    /* The pad test and regen take every key after their code, so no other code can
+     * start with one. */
+    for (size_t i = 0; i < NCAPTURE; i++) {
+        const char *cap = (const char *)&cfg->dtmf + CODES[i].offset;
+        if (!cap[0])
+            continue;
+        for (size_t j = 0; j < NCODES; j++) {
+            const char *code = (const char *)&cfg->dtmf + CODES[j].offset;
+            if (j != i && strcmp(code, cap) != 0 && strncmp(code, cap, strlen(cap)) == 0)
+                cfg_err(WHERE_FMT "dtmf.%s: '%s' starts with dtmf.%s '%s', which takes every key after it\n",
+                        WHERE_ARGS, CODES[j].key, code, CODES[i].key, cap);
+        }
     }
     /* The repeater command is its code plus 0 or 1, so those can't be other codes. */
     if (cfg->dtmf.repeater_code[0]) {
         for (int arg = 0; arg < 2; arg++) {
             char full[CFG_DTMF_PREFIX_STR + 2];
             snprintf(full, sizeof(full), "%s%d", cfg->dtmf.repeater_code, arg);
-            for (size_t j = 0; j + 1 < sizeof(CODES) / sizeof(CODES[0]); j++)
+            for (size_t j = 0; j + 1 < NCODES; j++)
                 if (strcmp(full, (const char *)&cfg->dtmf + CODES[j].offset) == 0)
                     cfg_err(WHERE_FMT "dtmf.repeater_code: '%s' is already used by dtmf.%s\n", WHERE_ARGS,
                             full, CODES[j].key);

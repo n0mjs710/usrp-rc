@@ -11,6 +11,8 @@
 #include "command.h"
 #include "schedule.h"
 #include "stats.h"
+#include "tone.h"
+#include "sbuf.h"
 #include "util.h"
 #include "log.h"
 #include "version.h"
@@ -86,6 +88,11 @@ typedef struct {
     uint32_t link_tx_seq;
     bool     link_tx_ended;   /* nothing more goes to the link this transmission */
     bool     link_up;         /* off by DTMF command: no audio to or from the link */
+
+    int16_t *regen;           /* DTMF regen on its way to the link; NULL = none */
+    size_t   regen_len;
+    size_t   regen_pos;
+    uint64_t regen_deadline;
 
     uint64_t mmdvm_watchdog_deadline;
     uint64_t link_watchdog_deadline;
@@ -333,6 +340,10 @@ static void pace_tick(app_t *a, uint64_t now)
 static void mmdvm_key_edge(app_t *a, uint64_t now)
 {
     bool to_link = a->link_up && !port_repeater_down(a->port);
+    if (to_link && a->regen) {
+        LOGI("link: still sending DTMF, this transmission stays local\n");
+        to_link = false;
+    }
     a->link_tx_ended = !to_link;
     if (to_link) {
         send_link_key(a, true);
@@ -341,14 +352,9 @@ static void mmdvm_key_edge(app_t *a, uint64_t now)
     port_on_mmdvm_keyup(a->port, true, now);
 }
 
-/* End this transmission's uplink: pad out any partial Opus frame and unkey. */
-static void link_tx_end(app_t *a)
+/* Pad out any partial Opus frame and unkey. */
+static void link_uplink_close(app_t *a)
 {
-    if (a->link_tx_ended)
-        return;
-    a->link_tx_ended = true;
-    if (a->link_sock < 0)
-        return;
     if (a->cfg.link.codec == LINK_CODEC_OPUS && a->opus_accum_n > 0) {
         int frame_samples = opus_codec_frame_samples(a->opus);
         memset(a->opus_accum + a->opus_accum_n, 0,
@@ -358,6 +364,55 @@ static void link_tx_end(app_t *a)
     }
     send_link_key(a, false);
     LOGI("link: UNKEY -> peer\n");
+}
+
+/* End this transmission's uplink. */
+static void link_tx_end(app_t *a)
+{
+    if (a->link_tx_ended)
+        return;
+    a->link_tx_ended = true;
+    if (a->link_sock >= 0)
+        link_uplink_close(a);
+}
+
+/* Regen goes to the link on its own 20 ms clock, as the receiver has unkeyed and the
+ * repeater may not be transmitting yet. */
+static void regen_stop(app_t *a, const char *why)
+{
+    if (!a->regen)
+        return;
+    LOGI("link: DTMF %s\n", why);
+    free(a->regen);
+    a->regen = NULL;
+    a->regen_deadline = 0;
+    link_uplink_close(a);
+}
+
+static void regen_start(app_t *a, int16_t *samples, size_t n, uint64_t now)
+{
+    regen_stop(a, "cut short");
+    if (!samples)
+        return;
+    a->regen = samples;
+    a->regen_len = n;
+    a->regen_pos = 0;
+    a->regen_deadline = now;
+    send_link_key(a, true);
+    LOGI("link: KEY -> peer (DTMF)\n");
+}
+
+static void regen_tick(app_t *a)
+{
+    int16_t frame[160] = {0};
+    size_t left = a->regen_len - a->regen_pos;
+    size_t take = left < 160 ? left : 160;
+    memcpy(frame, a->regen + a->regen_pos, take * sizeof(int16_t));
+    a->regen_pos += take;
+    send_link_voice(a, frame);
+    a->regen_deadline += 20;
+    if (a->regen_pos >= a->regen_len)
+        regen_stop(a, "sent");
 }
 
 /* Stop listening to the link: the peer is treated as having unkeyed. */
@@ -378,6 +433,7 @@ static void set_link(app_t *a, bool up)
     a->link_up = up;
     port_set_link_up(a->port, up);
     if (!up) {
+        regen_stop(a, "cut short");
         link_rx_end(a, monotonic_ms());
         link_tx_end(a);
     }
@@ -459,6 +515,23 @@ static void run_command(app_t *a, const command_t *c)
     case COMMAND_NO_LINK:
         reply_with_message(a, a->cfg.events.link_none_message);
         break;
+    case COMMAND_REGEN: {
+        const config_dtmf_t *d = &a->cfg.dtmf;
+        size_t n;
+        if (a->link_up && a->link_sock >= 0 && !port_repeater_down(a->port)) {
+            int16_t *t = tone_render_dtmf(c->digits, d->regen_lead_ms, d->regen_tone_ms,
+                                          d->regen_gap_ms, d->regen_level, &n);
+            regen_start(a, t, n, monotonic_ms());
+        }
+        int16_t *t = tone_render_dtmf(c->digits, 0, d->regen_tone_ms, d->regen_gap_ms,
+                                      d->regen_level, &n);
+        if (t) {
+            sbuf_t b = {.data = t, .len = n, .cap = n};
+            sbuf_scale(&b, a->cfg.audio.master_gain);
+        }
+        port_queue_reply(a->port, t, n);
+        break;
+    }
     case COMMAND_REPEATER: {
         bool down = c->digits[0] == '0';
         const char *name = down ? a->cfg.events.repeater_down_message : a->cfg.events.repeater_up_message;
@@ -467,6 +540,7 @@ static void run_command(app_t *a, const command_t *c)
             r = message_render(&a->cfg, a->vocab, name, -1.0);
         port_set_repeater_down(a->port, down, r.samples, r.n, monotonic_ms());
         if (down) {
+            regen_stop(a, "cut short");
             link_tx_end(a);
             link_rx_end(a, monotonic_ms());
         }
@@ -765,7 +839,7 @@ static void schedule_update(app_t *a, uint64_t now)
 static int next_timeout_ms(app_t *a, uint64_t now)
 {
     uint64_t min = 0;
-    uint64_t cand[8];
+    uint64_t cand[12];
     int nc = 0;
 
     uint64_t pd = port_next_deadline_ms(a->port);
@@ -777,6 +851,7 @@ static int next_timeout_ms(app_t *a, uint64_t now)
     if (a->fm_ping_deadline) cand[nc++] = a->fm_ping_deadline;
     if (a->schedule_deadline) cand[nc++] = a->schedule_deadline;
     if (a->stats_deadline) cand[nc++] = a->stats_deadline;
+    if (a->regen_deadline) cand[nc++] = a->regen_deadline;
 
     for (int i = 0; i < nc; i++)
         if (min == 0 || cand[i] < min) min = cand[i];
@@ -801,6 +876,9 @@ static void check_all_timers(app_t *a, uint64_t now)
 
     if (a->pace_deadline && now >= a->pace_deadline)
         pace_tick(a, now);
+
+    if (a->regen_deadline && now >= a->regen_deadline)
+        regen_tick(a);
 
     if (a->prev_mmdvm_keyup && a->mmdvm_watchdog_deadline && now >= a->mmdvm_watchdog_deadline) {
         /* Backstop only — MMDVM-Host normally ends a transmission with FME.
@@ -1031,6 +1109,7 @@ int main(int argc, char *argv[])
     }
 
     printf("usrp-rc: stopping\n");
+    regen_stop(a, "cut short");
     close(a->epfd);
     close(a->mmdvm_sock);
     if (a->link_sock >= 0) close(a->link_sock);

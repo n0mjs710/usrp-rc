@@ -79,8 +79,8 @@ default_cw    = cw: {call}/R
 #
 # Any setting can change, except the ones that only take effect at startup: the top
 # of the file, [log], [mmdvm], [link], [stats], [state], dtmf.enabled,
-# dtmf.min_tone_ms, the dtmf.beep_ settings, audio.ste_delay_ms, audio.lead_trim_ms
-# and events.startup_message. Write a setting by its name, or as section.name.
+# dtmf.min_tone_ms, the dtmf.beep_ and dtmf.regen_ settings, audio.ste_delay_ms,
+# audio.lead_trim_ms and events.startup_message. Write a setting by its name, or as section.name.
 #
 #     name = DAYS HH:MM-HH:MM setting=value [setting=value ...]
 #
@@ -168,10 +168,18 @@ default_cw    = cw: {call}/R
 #beep_hz         = 440    # plays during the mute; level is audio.tone_level at startup
 #beep_on_ms      = 100
 #beep_off_ms     = 900
-#pad_test_prefix = 5      # pad test: prefix, then digits to read back. Empty = off.
+# Codes are 2 to 7 keys; the pad test prefix can be 1. The pad test and regen take
+# every key after their code, # and D included, to the unkey, so no other code can
+# start with theirs.
+#pad_test_prefix = 5      # pad test: prefix, then keys to read back. Empty = off.
 #time_code       = 39     # speak the time. Empty = off, likewise the codes below.
 #stats_code      = 38     # speak usage over the last 24 hours (events.stats_message)
 #link_on_code    = 72
 #link_off_code   = 73
 #link_status_code = 70   # says link on or link off, without a change
 #repeater_code   =        # + 0 = repeater down, + 1 = up. Empty = off: anyone could use it
+#regen_code      =        # + keys to send as fresh DTMF, here and over the link if it's on
+#regen_tone_ms   = 100    # regen settings take effect at startup only
+#regen_gap_ms    = 100
+#regen_lead_ms   = 200    # silence on the link before the first tone
+#regen_level     = 0.5

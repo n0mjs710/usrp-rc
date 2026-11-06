@@ -26,6 +26,7 @@ typedef enum {
     COMMAND_LINK_STATUS,
     COMMAND_REPEATER,   /* digits: "0" = down, "1" = up */
     COMMAND_NO_LINK,    /* a link command on a repeater with no link */
+    COMMAND_REGEN,      /* send `digits` as fresh DTMF, here and over the link */
 } command_type_t;
 
 typedef struct {
@@ -61,5 +62,5 @@ bool command_session_link_cut(const command_session_t *s);
 void command_session_fill_mute(command_session_t *s, int16_t frame[160]);
 
 /* The voice clip name that speaks a digit: ZERO..NINE, A, B, C, D, SIERRA for
- * star (ACC's convention). NULL if it isn't a sequence digit. */
+ * star (ACC's convention), P for pound. NULL if it isn't a sequence digit. */
 const char *command_digit_clip(char digit);

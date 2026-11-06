@@ -142,6 +142,11 @@ typedef struct {
     char link_off_code[CFG_DTMF_PREFIX_STR];
     char link_status_code[CFG_DTMF_PREFIX_STR];
     char repeater_code[CFG_DTMF_PREFIX_STR];     /* + 0 = down, + 1 = up; empty by default */
+    char regen_code[CFG_DTMF_PREFIX_STR];        /* + keys to send; empty by default */
+    int    regen_tone_ms;
+    int    regen_gap_ms;
+    int    regen_lead_ms;   /* silence after keying the link, before the first tone */
+    double regen_level;
 } config_dtmf_t;
 
 typedef struct {
