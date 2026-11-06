@@ -120,7 +120,7 @@ frame timing.
 | Computer | The Linux computer that operates MMDVM-Host |
 | Operating system | Linux with systemd |
 | MMDVM-Host | A version with the FM Network protocol (2026 or later) |
-| Packages | `build-essential`, `pkg-config`, `libsystemd-dev`, `libopus-dev` |
+| Packages | `build-essential`, `pkg-config`, `libopus-dev` |
 
 ## Installation
 
@@ -129,7 +129,7 @@ frame timing.
 1. Install the packages:
 
    ```bash
-   sudo apt-get install -y build-essential pkg-config libsystemd-dev libopus-dev
+   sudo apt-get install -y build-essential pkg-config libopus-dev
    ```
 
 2. Build the program:
@@ -155,7 +155,6 @@ frame timing.
 | `/usr/local/share/usrp-rc/tones.conf` | Tone catalog |
 | `/usr/local/share/usrp-rc/vocab_8k/` | Stock voice clips |
 | `/usr/local/share/usrp-rc/user_8k/` | Site voice clips |
-| `/usr/local/share/usrp-rc/toml2conf.py` | Converter for old configurations |
 | `/usr/local/lib/systemd/system/usrp-rc.service` | systemd service |
 | `/var/local/usrp-rc/` | Usage statistics and the repeater down state |
 
@@ -172,28 +171,9 @@ frame timing.
 sudo make uninstall
 ```
 
-This command removes the program, the service, the stock voice clips, the tone catalog
-and the converter. It keeps the configuration, the usage statistics and the site voice
+This command removes the program, the service, the stock voice clips and the tone
+catalog. It keeps the configuration, the usage statistics and the site voice
 clips.
-
-### Convert an old configuration
-
-Earlier versions used `/etc/usrp-rc/usrp-rc.toml`. If `make install` finds this file and
-no `usrp-rc.conf`, it converts the file automatically.
-
-To convert a file manually (Python 3.11 or later is necessary):
-
-```bash
-python3 tools/toml2conf.py usrp-rc.toml usrp-rc.conf
-usrp-rc --check usrp-rc.conf
-```
-
-| Item | Converter action |
-| --- | --- |
-| Settings | Copied as written. This includes settings that the old parser ignored. `--check` shows them by line number. |
-| Messages equal to a catalog tone | Not copied |
-| Comments | Not copied |
-| Output file that exists | Not replaced |
 
 ## MMDVM-Host integration
 
@@ -372,9 +352,6 @@ This version does not include:
 - CTCSS encode, or CTCSS decode in software
 - IAX2
 - More than two ports, or linking of more than one network port
-
-`access_mode = cor_ctcss` has no effect in this version. MMDVM-Host decodes CTCSS, and
-the mmdvm port sends only start and end markers.
 
 ## Related documents
 

@@ -8,7 +8,6 @@
 
 typedef enum {
     PORT_IDLE,
-    PORT_PENDING,   /* reserved for cor_ctcss; unreachable in v1 (single keyup bit) */
     PORT_ACTIVE,
     PORT_TAIL,
     PORT_TIMEOUT,   /* nothing repeated, and a source is timed out until it unkeys */
@@ -78,10 +77,9 @@ bool port_repeater_down(const port_t *p);
 bool port_local_timed_out(const port_t *p);
 
 /* Pulls the next 160-sample controller-audio frame (CT/hang-silence/ID/
- * timeout messages) for the mmdvm TX pacing timer. Returns false (nothing
- * written) if PTT is currently off; otherwise always fills 160 samples
- * (silence-padded on underrun) and returns true. */
-bool port_ctrl_pull(port_t *p, int16_t out[160], uint64_t now);
+ * timeout messages) for the mmdvm TX pacing timer, while PTT is on. Always
+ * fills 160 samples, silence-padded on underrun. */
+void port_ctrl_pull(port_t *p, int16_t out[160], uint64_t now);
 
 /* Additively mixes any in-flight impolite-ID audio into an outgoing 160-
  * sample mmdvm TX frame (repeat, link-forward, or controller-pull path —

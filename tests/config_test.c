@@ -41,7 +41,6 @@ static const test_case_t CASES[] = {
     {"unterminated section", "[timers\nhang = 1.0\n", "line 1: expected [section]"},
     {"key set twice",       BASE "[timers]\nhang = 1.0\nhang = 2.0\n", "line 5: hang: already set on line 4"},
     {"quoted value",        BASE "[events]\nct_link_on_message = \"honk\"\n", "line 4: ct_link_on_message: values don't take quotes"},
-    {"old message section", BASE "[messages.a]\nelements = []\n", "old TOML layout"},
 
     {"text for number",     BASE "[timers]\nhang = fast\n", "timers.hang: 'fast' must be a number"},
     {"trailing junk",       BASE "[timers]\nhang = 9s\n", "timers.hang: '9s' must be a number"},
@@ -51,7 +50,7 @@ static const test_case_t CASES[] = {
     {"bad port",            BASE "[mmdvm]\nlocal_port = 70000\n", "mmdvm.local_port: 70000 is not a valid port"},
     {"zero port",           BASE "[mmdvm]\nrpt_port = 0\n", "mmdvm.rpt_port: 0 is not a valid port"},
     {"bad codec",           BASE "codec = opsu\n", "link.codec: 'opsu' is not valid (expected one of: pcm, opus)"},
-    {"bad access mode",     "access_mode = open\n" BASE, "access_mode: 'open' is not valid"},
+    {"removed access mode", "access_mode = cor\n" BASE, "access_mode: removed, delete this line"},
     {"bad log level",       BASE "[log]\nlevel = loud\n", "log.level: 'loud' is not valid"},
 
     {"negative hang",       BASE "[timers]\nhang = -5.0\n", "timers.hang: -5 is out of range"},
@@ -85,6 +84,8 @@ static const test_case_t CASES[] = {
     {"dtmf code uses D",    BASE "[dtmf]\ntime_code = 3D\n", "dtmf.time_code: '3D' can only use"},
     {"dtmf code used twice", BASE "[dtmf]\nlink_on_code = 39\n", "dtmf.link_on_code: '39' is already used by dtmf.time_code"},
     {"repeater code clash",  BASE "[dtmf]\nrepeater_code = 12\nlink_status_code = 120\n", "dtmf.repeater_code: '120' is already used by dtmf.link_status_code"},
+    {"link host is a name",  "[link]\nremote_host = localhost\n", "link.remote_host: 'localhost' must be an IPv4 address"},
+    {"mmdvm address bad",    BASE "[mmdvm]\nrpt_address = 127.0.0.300\n", "mmdvm.rpt_address: '127.0.0.300' must be an IPv4 address"},
     {"dtmf code too short",  BASE "[dtmf]\ntime_code = 3\n", "dtmf.time_code: '3' must be at least 2 keys"},
     {"regen code too short", BASE "[dtmf]\nregen_code = 6\n", "dtmf.regen_code: '6' must be at least 2 keys"},
     {"code under pad test",  BASE "[dtmf]\ntime_code = 55\n", "dtmf.time_code: '55' starts with dtmf.pad_test_prefix '5', which takes every key after it"},
@@ -352,8 +353,6 @@ int main(void)
         static config_t run;
         bool active[CFG_MAX_SCHEDULE];
         struct tm t = {.tm_wday = 3, .tm_hour = 19, .tm_min = 30};
-        load_text(BASE "[schedule]\nnet = wed 19:00-20:00 timeout=600 hang=1.5 morse_wpm=15 access_mode=cor link_on_code=\n");
-        check("access_mode can't be scheduled", strstr(s_log, "access_mode can't be scheduled") != NULL);
         load_text(BASE "[schedule]\nnet = wed 19:00-20:00 timeout=600 hang=1.5 morse_wpm=15 link_on_code=\n");
         schedule_evaluate(&s_cfg, &t, &run, active);
         check("numbers and codes apply while the window is open",
@@ -383,8 +382,6 @@ int main(void)
     printf("[6] shipped configs load\n");
     check("usrp-rc.conf.sample", capture_load("usrp-rc.conf.sample") == 0);
     check("tests/harness.conf", capture_load("tests/harness.conf") == 0);
-    check("an old .toml path is refused with directions",
-          capture_load("usrp-rc.toml") != 0 && strstr(s_log, "tools/toml2conf.py"));
 
     printf("[7] message content is checked against the vocabulary\n");
     vocab_cache_t *vocab;

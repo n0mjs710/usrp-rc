@@ -1,16 +1,10 @@
 /*
- * Repeater controller state machine — C translation of rc/port.py.
+ * Repeater controller state machine.
  *
- * asyncio coroutines with "await drain_clips()" become continuations:
- * ctrl.on_drain (fires when the controller TX buffer empties) and
- * pad_cont (fires when a pre/post-message pad timer expires). Only one
- * such job is ever in flight at a time, mirroring the fact that port.py's
- * coroutines are serialized by the same clip queue.
- *
- * "cor_ctcss" access mode is accepted in config for structural completeness
- * but is not functionally distinct from "cor" here: the mmdvm link carries
- * only start/end-of-transmission, so there is no independent CTCSS source
- * to gate PENDING on -- CTCSS decode is MMDVM-Host's job.
+ * Work that has to wait is a continuation: ctrl.on_drain runs when the controller
+ * audio buffer empties, and pad_cont when a pre/post-message pad expires. Only one
+ * of each is in flight at a time, as all controller audio goes through the one
+ * buffer.
  */
 
 #include "port.h"
@@ -193,24 +187,31 @@ static port_state_t rest_state(const port_t *p)
     return p->local_timed_out || p->link_timed_out ? PORT_TIMEOUT : PORT_IDLE;
 }
 
-static void set_ptt(port_t *p, bool active, uint64_t now, const char *reason)
+static void set_ptt(port_t *p, bool active, const char *reason)
 {
-    (void)now;
     bool changed = (p->ptt != active);
     p->ptt = active;
     if (changed && p->set_ptt_cb)
         p->set_ptt_cb(p->set_ptt_arg, active, reason);
 }
 
-static void queue_message(port_t *p, const char *name, double morse_level_override)
+/* False if there was nothing to play. */
+static bool queue_message(port_t *p, const char *name, double morse_level_override)
 {
     if (!name || !name[0])
-        return;
+        return false;
     rendered_audio_t r = message_render(p->cfg, p->vocab, name, morse_level_override);
-    if (r.samples) {
-        ctrl_buf_queue(p, r.samples, r.n);
-        free(r.samples);
-    }
+    if (!r.samples)
+        return false;
+    ctrl_buf_queue(p, r.samples, r.n);
+    free(r.samples);
+    return true;
+}
+
+static void start_pad(port_t *p, uint64_t now, int ms, port_cont_fn then)
+{
+    p->pad_deadline = now + (uint64_t)ms;
+    p->pad_cont     = then;
 }
 
 static void reply_discard(port_t *p)
@@ -291,7 +292,7 @@ static void port_transition(port_t *p, port_state_t new_state, uint64_t now)
             p->id_epoch++;
             ctrl_buf_clear(p);
         }
-        if ((old == PORT_IDLE || old == PORT_PENDING) && p->id_deadline == 0 && !p->impolite_id_playing)
+        if (old == PORT_IDLE && p->id_deadline == 0 && !p->impolite_id_playing)
             p->initial_id_pending = true;
     }
 }
@@ -300,24 +301,17 @@ static void port_transition(port_t *p, port_state_t new_state, uint64_t now)
 
 static void timeout_announce_after_drain(port_t *p, uint64_t now)
 {
+    (void)now;
     if (p->state == PORT_TIMEOUT)
-        set_ptt(p, false, now, "timeout-announced");
+        set_ptt(p, false, "timeout-announced");
 }
 
 static void do_timeout_announce(port_t *p, uint64_t now)
 {
-    const char *name = p->ev->timeout_message;
-    if (name[0]) {
-        rendered_audio_t r = message_render(p->cfg, p->vocab, name, -1.0);
-        if (r.samples) {
-            ctrl_buf_queue(p, r.samples, r.n);
-            free(r.samples);
-            p->ctrl.on_drain = timeout_announce_after_drain;
-            return;
-        }
-    }
-    if (p->state == PORT_TIMEOUT)
-        set_ptt(p, false, now, "timeout-announced");
+    if (queue_message(p, p->ev->timeout_message, -1.0))
+        p->ctrl.on_drain = timeout_announce_after_drain;
+    else
+        timeout_announce_after_drain(p, now);
 }
 
 static void timeout_recovery_after_drain(port_t *p, uint64_t now)
@@ -332,21 +326,13 @@ static void do_timeout_recovery(port_t *p, uint64_t now)
     if (p->id_deadline == 0)
         p->initial_id_pending = true;
 
-    const char *name = p->ev->timeout_cancel_message;
-    if (name[0]) {
-        rendered_audio_t r = message_render(p->cfg, p->vocab, name, -1.0);
-        if (r.samples) {
-            ctrl_buf_queue(p, r.samples, r.n);
-            free(r.samples);
-            p->ctrl.on_drain = timeout_recovery_after_drain;
-            return;
-        }
-    }
-    if (p->state == PORT_TAIL)
-        schedule_hang(p, now);
+    if (queue_message(p, p->ev->timeout_cancel_message, -1.0))
+        p->ctrl.on_drain = timeout_recovery_after_drain;
+    else
+        timeout_recovery_after_drain(p, now);
 }
 
-/* ── impolite ID (mix buffer, not ctrl buffer — see port.h) ──────────────── */
+/* ── courtesy tone ─────────────────────────────────────────────────────── */
 
 /* Each case has its own setting, and an empty one plays no tone. */
 static const char *courtesy_tone(const port_t *p)
@@ -368,6 +354,8 @@ static void play_courtesy_tone(port_t *p, uint64_t now)
         schedule_hang(p, now);
 }
 
+/* ── impolite ID (mix buffer, not ctrl buffer — see port.h) ──────────────── */
+
 static void impolite_id_after_mix(port_t *p, uint64_t now)
 {
     p->impolite_id_playing = false;
@@ -384,21 +372,7 @@ static void impolite_id_after_mix(port_t *p, uint64_t now)
 
 static void do_impolite_id(port_t *p, uint64_t now)
 {
-    const char *name = p->ev->impolite_id;
-    char picked[CFG_NAME_STR] = {0};
-
-    if (!name[0]) {
-        if (p->ev->n_mandatory_ids == 0) {
-            LOGW("port: no impolite or mandatory ID configured\n");
-            schedule_id(p, now);
-            return;
-        }
-        int idx = p->id_rot_mandatory % p->ev->n_mandatory_ids;
-        strncpy(picked, p->ev->mandatory_ids[idx], sizeof(picked) - 1);
-        p->id_rot_mandatory = (idx + 1) % p->ev->n_mandatory_ids;
-        name = picked;
-    }
-
+    const char *name = p->ev->impolite_id;   /* required, so never empty */
     LOGI("id: impolite  '%s'\n", name);
     p->impolite_id_playing = true;
     rendered_audio_t r = message_render(p->cfg, p->vocab, name,
@@ -428,37 +402,31 @@ static void mandatory_id_finish(port_t *p, uint64_t now)
 static void mandatory_id_after_post_pad(port_t *p, uint64_t now)
 {
     if (p->state == p->job_state_before)
-        set_ptt(p, false, now, "mandatory-id-done");
+        set_ptt(p, false, "mandatory-id-done");
     mandatory_id_finish(p, now);
 }
 
 static void mandatory_id_after_drain(port_t *p, uint64_t now)
 {
     if (p->job_post_pad_needed && p->cfg->audio.post_message_ms > 0) {
-        p->pad_deadline = now + (uint64_t)p->cfg->audio.post_message_ms;
-        p->pad_cont     = mandatory_id_after_post_pad;
+        start_pad(p, now, p->cfg->audio.post_message_ms, mandatory_id_after_post_pad);
         return;
     }
     mandatory_id_after_post_pad(p, now);
 }
 
-/* What the ID timer plays with nobody talking. With no mandatory ID, impolite_id stands
- * in, because the station still has to identify. NULL if there's nothing at all. */
+/* What the ID timer plays with nobody talking. With no mandatory ID, impolite_id
+ * (which is required) stands in, because the station still has to identify. */
 static const char *mandatory_id_next(const port_t *p)
 {
     if (p->ev->n_mandatory_ids > 0)
         return p->ev->mandatory_ids[p->id_rot_mandatory % p->ev->n_mandatory_ids];
-    return p->ev->impolite_id[0] ? p->ev->impolite_id : NULL;
+    return p->ev->impolite_id;
 }
 
 static void mandatory_id_render_and_queue(port_t *p, uint64_t now)
 {
     const char *name = mandatory_id_next(p);
-    if (!name) {
-        LOGW("port: NO ID SENT: no mandatory_ids or impolite_id configured\n");
-        mandatory_id_finish(p, now);
-        return;
-    }
     if (p->ev->n_mandatory_ids > 0) {
         int idx = p->id_rot_mandatory % p->ev->n_mandatory_ids;
         p->id_rot_mandatory = (idx + 1) % p->ev->n_mandatory_ids;
@@ -483,20 +451,12 @@ static void do_mandatory_id(port_t *p, uint64_t now)
     p->job_was_ptt       = p->ptt;
     p->job_state_before  = p->state;
 
-    const char *peek = mandatory_id_next(p);
-    if (!peek) {
-        LOGW("port: NO ID SENT: no mandatory_ids or impolite_id configured\n");
-        schedule_id(p, now);
-        return;
-    }
-
-    p->job_post_pad_needed = !p->job_was_ptt && message_needs_padding(p->cfg, peek);
+    p->job_post_pad_needed = !p->job_was_ptt && message_needs_padding(p->cfg, mandatory_id_next(p));
 
     if (!p->job_was_ptt) {
-        set_ptt(p, true, now, "mandatory-id");
+        set_ptt(p, true, "mandatory-id");
         if (p->job_post_pad_needed && p->cfg->audio.pre_message_ms > 0) {
-            p->pad_deadline = now + (uint64_t)p->cfg->audio.pre_message_ms;
-            p->pad_cont     = mandatory_id_render_and_queue;
+            start_pad(p, now, p->cfg->audio.pre_message_ms, mandatory_id_render_and_queue);
             return;
         }
     }
@@ -558,8 +518,7 @@ static void do_initial_id(port_t *p, uint64_t now)
     p->job_epoch = p->id_epoch;
     int pre_ms = p->cfg->audio.pre_message_ms;
     if (pre_ms > 0 && p->ev->n_initial_ids > 0) {
-        p->pad_deadline = now + (uint64_t)pre_ms;
-        p->pad_cont     = initial_id_render_and_queue;
+        start_pad(p, now, pre_ms, initial_id_render_and_queue);
         return;
     }
     initial_id_render_and_queue(p, now);
@@ -598,8 +557,7 @@ static void do_anxious_id(port_t *p, uint64_t now)
     p->job_epoch = p->id_epoch;
     int pre_ms = p->cfg->audio.pre_message_ms;
     if (pre_ms > 0) {
-        p->pad_deadline = now + (uint64_t)pre_ms;
-        p->pad_cont     = anxious_id_render_and_queue;
+        start_pad(p, now, pre_ms, anxious_id_render_and_queue);
         return;
     }
     anxious_id_render_and_queue(p, now);
@@ -609,13 +567,8 @@ static void do_anxious_id(port_t *p, uint64_t now)
 
 static void startup_finish(port_t *p, uint64_t now)
 {
-    set_ptt(p, false, now, "startup-done");
+    set_ptt(p, false, "startup-done");
     port_transition(p, PORT_IDLE, now);
-}
-
-static void startup_after_post_pad(port_t *p, uint64_t now)
-{
-    startup_finish(p, now);
 }
 
 static void startup_after_id_drain(port_t *p, uint64_t now)
@@ -627,8 +580,7 @@ static void startup_after_id_drain(port_t *p, uint64_t now)
 
     int post_ms = p->cfg->audio.post_message_ms;
     if (post_ms > 0) {
-        p->pad_deadline = now + (uint64_t)post_ms;
-        p->pad_cont     = startup_after_post_pad;
+        start_pad(p, now, post_ms, startup_finish);
         return;
     }
     startup_finish(p, now);
@@ -649,22 +601,12 @@ static void startup_queue_id(port_t *p, uint64_t now)
     p->ctrl.on_drain = startup_after_id_drain;
 }
 
-static void startup_after_message_drain(port_t *p, uint64_t now)
-{
-    startup_queue_id(p, now);
-}
-
 static void startup_render_message(port_t *p, uint64_t now)
 {
-    const char *name = p->ev->startup_message;
-    rendered_audio_t r = message_render(p->cfg, p->vocab, name, -1.0);
-    if (r.samples) {
-        ctrl_buf_queue(p, r.samples, r.n);
-        free(r.samples);
-        p->ctrl.on_drain = startup_after_message_drain;
-    } else {
+    if (queue_message(p, p->ev->startup_message, -1.0))
+        p->ctrl.on_drain = startup_queue_id;
+    else
         startup_queue_id(p, now);
-    }
 }
 
 void port_start(port_t *p, uint64_t now)
@@ -677,11 +619,10 @@ void port_start(port_t *p, uint64_t now)
         LOGI("port: no startup_message configured — starting quietly in IDLE\n");
         return;
     }
-    set_ptt(p, true, now, "startup");
+    set_ptt(p, true, "startup");
     int pre_ms = p->cfg->audio.pre_message_ms;
     if (pre_ms > 0 && message_needs_padding(p->cfg, p->ev->startup_message)) {
-        p->pad_deadline = now + (uint64_t)pre_ms;
-        p->pad_cont     = startup_render_message;
+        start_pad(p, now, pre_ms, startup_render_message);
         return;
     }
     startup_render_message(p, now);
@@ -743,7 +684,7 @@ static void tail_finish(port_t *p, uint64_t now)
 {
     if (cor_active(p))
         return;
-    set_ptt(p, false, now, "tail-message-done");
+    set_ptt(p, false, "tail-message-done");
     if (p->state == PORT_TAIL) {
         port_state_t rest = rest_state(p);
         LOGI("state: TAIL -> %s  (tail message done)\n", rest == PORT_TIMEOUT ? "TIMEOUT" : "IDLE");
@@ -755,8 +696,7 @@ static void tail_after_drain(port_t *p, uint64_t now)
 {
     int post_ms = p->cfg->audio.post_message_ms;
     if (post_ms > 0 && message_needs_padding(p->cfg, p->tail_name)) {
-        p->pad_deadline = now + (uint64_t)post_ms;
-        p->pad_cont     = tail_finish;
+        start_pad(p, now, post_ms, tail_finish);
         return;
     }
     tail_finish(p, now);
@@ -768,13 +708,10 @@ static bool tail_play(port_t *p, uint64_t now)
     int idx = p->tail_rot % p->ev->n_tail_messages;
     /* A copy, as the schedule can change the list while this plays. */
     snprintf(p->tail_name, sizeof(p->tail_name), "%s", p->ev->tail_messages[idx]);
-    rendered_audio_t r = message_render(p->cfg, p->vocab, p->tail_name, -1.0);
-    if (!r.samples)
+    if (!queue_message(p, p->tail_name, -1.0))
         return false;
     p->tail_rot = (idx + 1) % p->ev->n_tail_messages;
     LOGI("tail: '%s'\n", p->tail_name);
-    ctrl_buf_queue(p, r.samples, r.n);
-    free(r.samples);
     p->ctrl.on_drain = tail_after_drain;
     p->tails_since_message = 0;
     p->tail_last_ms = now;
@@ -805,7 +742,7 @@ static void on_hang(port_t *p, uint64_t now)
 
     port_state_t rest = rest_state(p);
     LOGI("state: TAIL -> %s  (hang expired)\n", rest == PORT_TIMEOUT ? "TIMEOUT" : "IDLE");
-    set_ptt(p, false, now, "hang-expired");
+    set_ptt(p, false, "hang-expired");
     port_transition(p, rest, now);
 }
 
@@ -851,7 +788,7 @@ static void on_id(port_t *p, uint64_t now)
         do_mandatory_id(p, now);
 }
 
-/* ── COR edge handling (access_mode "cor"; "cor_ctcss" collapses to this) ── */
+/* ── COR edge handling ─────────────────────────────────────────────────── */
 
 static void cor_active_edge(port_t *p, port_source_t source, uint64_t now)
 {
@@ -870,7 +807,7 @@ static void cor_active_edge(port_t *p, port_source_t source, uint64_t now)
     LOGI("cor: ACTIVE  source=%s  -> %s\n", src, action);
 
     if (p->state == PORT_IDLE || p->state == PORT_TAIL || p->state == PORT_TIMEOUT) {
-        set_ptt(p, true, now, source == SRC_LOCAL ? "repeat" : "link-fwd");
+        set_ptt(p, true, source == SRC_LOCAL ? "repeat" : "link-fwd");
         port_transition(p, PORT_ACTIVE, now);
     }
 }
@@ -890,7 +827,7 @@ static void cor_idle_edge(port_t *p, port_source_t source, uint64_t now)
             p->initial_id_pending  = false;
             if (p->id_deadline == 0)
                 schedule_id(p, now);
-            set_ptt(p, false, now, "kerchunk");
+            set_ptt(p, false, "kerchunk");
             port_transition(p, rest_state(p), now);
         } else {
             if (p->activity_cb)
@@ -914,7 +851,7 @@ static void timeout_released(port_t *p, port_source_t source, uint64_t now)
     if (p->state != PORT_TIMEOUT || p->local_timed_out || p->link_timed_out)
         return;
     LOGI("state: TIMEOUT -> TAIL  (recovered)\n");
-    set_ptt(p, true, now, "timeout-recovery");
+    set_ptt(p, true, "timeout-recovery");
     port_transition(p, PORT_TAIL, now);
     do_timeout_recovery(p, now);
 }
@@ -996,8 +933,9 @@ void port_on_link_keyup(port_t *p, bool active, uint64_t now)
 
 static void timeout_reply_after_drain(port_t *p, uint64_t now)
 {
+    (void)now;
     if (p->state == PORT_TIMEOUT)
-        set_ptt(p, false, now, "timeout-reply-done");
+        set_ptt(p, false, "timeout-reply-done");
 }
 
 void port_queue_reply(port_t *p, int16_t *samples, size_t n)
@@ -1014,7 +952,7 @@ void port_queue_reply(port_t *p, int16_t *samples, size_t n)
      * reply and drop back. Receiver audio stays off. */
     if (p->state == PORT_TIMEOUT) {
         p->tx_activity = true;
-        set_ptt(p, true, 0, "timeout-reply");
+        set_ptt(p, true, "timeout-reply");
         ctrl_buf_queue(p, samples, n);
         free(samples);
         p->ctrl.on_drain = timeout_reply_after_drain;
@@ -1028,15 +966,16 @@ void port_queue_reply(port_t *p, int16_t *samples, size_t n)
 
 static void down_after_drain(port_t *p, uint64_t now)
 {
-    set_ptt(p, false, now, "repeater-down");
+    set_ptt(p, false, "repeater-down");
     p->tx_activity = false;
     schedule_id(p, now);
 }
 
 static void up_after_drain(port_t *p, uint64_t now)
 {
+    (void)now;
     if (p->state == PORT_IDLE)
-        set_ptt(p, false, now, "repeater-up");
+        set_ptt(p, false, "repeater-up");
 }
 
 /* Stop everything in progress: down supersedes any transmission, tail or time-out. */
@@ -1072,19 +1011,17 @@ void port_set_repeater_down(port_t *p, bool down, int16_t *reply, size_t n, uint
          * and then nothing more is owed. */
         if (!(reply && n) && !p->tx_activity) {
             free(reply);
-            set_ptt(p, false, now, "repeater-down");
+            set_ptt(p, false, "repeater-down");
             return;
         }
-        set_ptt(p, true, now, "repeater-down");
+        set_ptt(p, true, "repeater-down");
         if (reply && n)
             ctrl_buf_queue(p, reply, n);
         const char *id = mandatory_id_next(p);
-        if (id) {
-            if (p->ev->n_mandatory_ids > 0)
-                p->id_rot_mandatory = (p->id_rot_mandatory + 1) % p->ev->n_mandatory_ids;
-            LOGI("id: mandatory  '%s'  (repeater going down)\n", id);
-            queue_message(p, id, -1.0);
-        }
+        if (p->ev->n_mandatory_ids > 0)
+            p->id_rot_mandatory = (p->id_rot_mandatory + 1) % p->ev->n_mandatory_ids;
+        LOGI("id: mandatory  '%s'  (repeater going down)\n", id);
+        queue_message(p, id, -1.0);
         p->ctrl.on_drain = down_after_drain;
         free(reply);
         return;
@@ -1114,7 +1051,7 @@ void port_set_repeater_down(port_t *p, bool down, int16_t *reply, size_t n, uint
     p->tx_activity = true;
     if (p->id_deadline == 0)
         schedule_id(p, now);
-    set_ptt(p, true, now, "repeater-up");
+    set_ptt(p, true, "repeater-up");
     ctrl_buf_queue(p, reply, n);
     free(reply);
     p->ctrl.on_drain = up_after_drain;
@@ -1196,12 +1133,9 @@ bool port_local_timed_out(const port_t *p)
     return p->local_timed_out;
 }
 
-bool port_ctrl_pull(port_t *p, int16_t out[160], uint64_t now)
+void port_ctrl_pull(port_t *p, int16_t out[160], uint64_t now)
 {
-    if (!p->ptt)
-        return false;
     ctrl_buf_pull_frame(p, out, now);
-    return true;
 }
 
 void port_mix_apply(port_t *p, int16_t *payload, uint64_t now)

@@ -9,6 +9,7 @@
 #include <stdarg.h>
 #include <errno.h>
 #include <ctype.h>
+#include <arpa/inet.h>
 
 void config_defaults(config_t *cfg)
 {
@@ -85,7 +86,6 @@ void config_defaults(config_t *cfg)
     strncpy(cfg->events.repeater_up_message, "repeater_up_reply", sizeof(cfg->events.repeater_up_message) - 1);
     strncpy(cfg->events.repeater_down_message, "repeater_down_reply", sizeof(cfg->events.repeater_down_message) - 1);
 
-    cfg->access_mode = ACCESS_COR;
 
     strncpy(cfg->log.level, "info", sizeof(cfg->log.level) - 1);
 }
@@ -118,7 +118,6 @@ typedef struct {
 } field_t;
 
 static const char *const CODEC_CHOICES[]  = {"pcm", "opus", NULL};       /* link_codec_t order */
-static const char *const ACCESS_CHOICES[] = {"cor", "cor_ctcss", NULL};  /* access_mode_t order */
 static const char *const LEVEL_CHOICES[]  = {"error", "warn", "info", "debug", NULL};
 
 #define MEMBER_SIZE(type, m) sizeof(((type *)0)->m)
@@ -137,7 +136,6 @@ static const char *const LEVEL_CHOICES[]  = {"error", "warn", "info", "debug", N
 
 static const field_t FIELDS[] = {
     STR("",       "callsign",    callsign),
-    CHOICE("",    "access_mode", FT_ENUM, access_mode, ACCESS_CHOICES),
     CHOICE("log", "level",       FT_STR,  log.level,   LEVEL_CHOICES),
 
     STR("mmdvm",  "local_address", mmdvm.local_address),
@@ -333,7 +331,8 @@ static void err_unknown_setting(const char *section, const char *key)
         cfg_err("%s: renamed to events.tail_messages, a comma-separated list\n", have);
         return;
     }
-    if (strcmp(section, "audio") == 0 && strcmp(key, "voice_filter") == 0) {
+    if ((strcmp(section, "audio") == 0 && strcmp(key, "voice_filter") == 0)
+        || (!section[0] && strcmp(key, "access_mode") == 0)) {
         cfg_err("%s: removed, delete this line (see UPGRADE.md)\n", have);
         return;
     }
@@ -442,9 +441,7 @@ static void read_section_header(char *line, char *section, size_t sectionsz, boo
     /* Don't also report every key under it. */
     *skipping = true;
     const char *hint = closest_of(name, SECTIONS);
-    if (strncmp(name, "messages.", 9) == 0)
-        cfg_err("[%s]: old TOML layout; convert with tools/toml2conf.py\n", name);
-    else if (hint)
+    if (hint)
         cfg_err("[%s]: unknown section (did you mean [%s]?)\n", name, hint);
     else
         cfg_err("[%s]: unknown section\n", name);
@@ -1704,13 +1701,25 @@ static void warn_settings(const config_t *cfg, const config_t *base)
 #undef NEWLY
 }
 
+/* The sockets take numeric IPv4 addresses only, so a name would stop the start. */
+static void check_address(const char *path, const char *value)
+{
+    struct in_addr a;
+    if (value[0] && inet_pton(AF_INET, value, &a) != 1)
+        cfg_err("%s: '%s' must be an IPv4 address, such as 127.0.0.1\n", path, value);
+}
+
 static void validate(const entries_t *es, const config_t *cfg)
 {
     const config_events_t *ev = &cfg->events;
 
+    check_address("mmdvm.local_address", cfg->mmdvm.local_address);
+    check_address("mmdvm.rpt_address", cfg->mmdvm.rpt_address);
     if (cfg->link.enabled) {
         if (cfg->link.remote_host[0] == '\0')
             cfg_err("link.remote_host is required (or set link.enabled = false)\n");
+        check_address("link.remote_host", cfg->link.remote_host);
+        check_address("link.bind_address", cfg->link.bind_address);
         if (cfg->link.codec == LINK_CODEC_OPUS && cfg->link.opus_frame_ms != 20
             && cfg->link.opus_frame_ms != 40 && cfg->link.opus_frame_ms != 60)
             cfg_err("link.opus_frame_ms must be 20, 40, or 60\n");
@@ -1781,12 +1790,6 @@ int config_load(config_t *cfg, const char *path)
     s_errors = 0;
     s_line = 0;
     s_file = NULL;
-
-    size_t pathlen = strlen(path);
-    if (pathlen > 5 && strcmp(path + pathlen - 5, ".toml") == 0) {
-        LOGE("config: %s is the old TOML format; convert it with tools/toml2conf.py\n", path);
-        return -1;
-    }
 
     entries_t es = {0};
     if (read_entries(path, &es) != 0) {

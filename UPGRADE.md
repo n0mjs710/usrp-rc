@@ -4,6 +4,20 @@ This document lists the configuration changes necessary for each new version. Af
 each change, examine the configuration with `usrp-rc --check <file>`. `--check` shows
 each out-of-date setting by line number.
 
+## 1.0 (November 2026)
+
+These changes apply when you update from 1.0b.
+
+### Necessary changes
+
+1. Remove `access_mode` from the top of the configuration file, if it is there. This
+   setting had no effect and no longer exists. It causes an error.
+2. If `[link]` `remote_host` or `bind_address`, or an address in `[mmdvm]`, is a host
+   name, change it to an IPv4 address. `usrp-rc` accepts only IPv4 addresses. `--check`
+   now shows this error.
+
+`libsystemd-dev` is no longer necessary to build `usrp-rc`.
+
 ## 1.0b (November 2026)
 
 Version 1.0b is the first numbered version. It adds DTMF control, the schedule and new

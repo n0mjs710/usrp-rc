@@ -48,7 +48,9 @@ static void load(stats_t *s, time_t now)
         double seconds;
         if (line[0] == '#' || sscanf(line, "%ld %ld %lf", &hour, &keyups, &seconds) != 3)
             continue;
-        if (hour <= newest - NBUCKETS || hour > newest || keyups < 0 || seconds < 0.0)
+        /* Hours ahead of the clock are kept: a board with no RTC can boot before NTP
+         * sets it. The window in sum() leaves them out until the clock catches up. */
+        if (hour <= newest - NBUCKETS || keyups < 0 || seconds < 0.0)
             continue;
         bucket_t *b = bucket_for(s, hour);
         b->keyups = keyups;

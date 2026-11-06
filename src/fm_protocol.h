@@ -70,11 +70,6 @@ int fm_parse(const uint8_t *buf, size_t len, fm_packet_t *out);
  * Returns the total packet length. nsamples must be <= FM_MAX_SAMPLES. */
 size_t fm_build_data(uint8_t *buf, const int16_t *audio, unsigned nsamples);
 
-/* Build a bare 3-byte tag packet ("FMP", "FME", ...). Returns FM_TAG_LEN. */
+/* Build the 3-byte "FMP" keepalive. Returns FM_TAG_LEN. MMDVM-Host takes only FMD
+ * and FMP from a gateway, so there are no FMS/FME builders. */
 size_t fm_build_ping(uint8_t *buf);
-size_t fm_build_end(uint8_t *buf);
-
-/* Build "FMS" + callsign + NUL. Returns the total packet length.
- * MMDVM-Host ignores this from a gateway; provided for completeness and for
- * loopback testing. */
-size_t fm_build_start(uint8_t *buf, const char *callsign);

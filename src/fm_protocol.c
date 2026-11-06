@@ -87,21 +87,3 @@ size_t fm_build_ping(uint8_t *buf)
     return FM_TAG_LEN;
 }
 
-size_t fm_build_end(uint8_t *buf)
-{
-    memcpy(buf, "FME", FM_TAG_LEN);
-    return FM_TAG_LEN;
-}
-
-size_t fm_build_start(uint8_t *buf, const char *callsign)
-{
-    size_t n = strlen(callsign);
-    if (n > FM_CALLSIGN_MAX - 1)
-        n = FM_CALLSIGN_MAX - 1;
-
-    memcpy(buf, "FMS", FM_TAG_LEN);
-    memcpy(buf + FM_TAG_LEN, callsign, n);
-    buf[FM_TAG_LEN + n] = '\0';
-
-    return FM_TAG_LEN + n + 1u;
-}

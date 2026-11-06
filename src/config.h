@@ -173,11 +173,6 @@ typedef struct {
     char timeout_cancel_message[CFG_NAME_STR];
 } config_events_t;
 
-typedef enum {
-    ACCESS_COR = 0,
-    ACCESS_COR_CTCSS = 1,
-} access_mode_t;
-
 typedef struct {
     char level[16];   /* "error", "warn", "info", or "debug" */
 } config_log_t;
@@ -245,7 +240,6 @@ typedef struct {
     config_dtmf_t    dtmf;
     config_stats_t   stats;
     config_state_t   state;
-    access_mode_t    access_mode;
     config_log_t     log;
 
     config_message_t *messages;   /* everything defined, until config_prune_messages() */

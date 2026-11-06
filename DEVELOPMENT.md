@@ -3,18 +3,15 @@
 Context for anyone working on `usrp-rc` itself, as opposed to running it.
 End-user setup and configuration are in [README.md](README.md).
 
-## Origin
+## Design
 
-`usrp-rc` is a from-scratch C translation of the Python reference
-repeater controller at `../rc` (see especially `port.py`) — the state
-machine, timer semantics, and event names all mirror that implementation
-deliberately. See the project history for the full state-machine
-specification.
+`usrp-rc` is a single-threaded epoll daemon. `src/port.c` is the repeater state
+machine; `src/main.c` owns the sockets and timers and feeds it.
 
-Controller audio (tones, CW, pre-rendered voice clips) is rendered into a
-buffer up front the instant the state machine decides to play it, then
-drained as 20 ms / 160-sample frames — no on-demand synthesis in the hot
-path, and no threads.
+Controller audio (tones, CW, voice clips) is rendered into a buffer when the state
+machine decides to play it, then drained as 20 ms / 160-sample frames. Rendering
+happens in the main loop and takes a few milliseconds at most; there are no
+threads.
 
 ## Protocols
 
@@ -96,7 +93,7 @@ Developed on a Raspberry Pi 3B+ (similar architecture/OS to the production
 target, a NanoPi NEO, which can't run a remote VS Code session). Code is
 pushed to GitHub from this dev box and pulled/built on the NanoPi NEO —
 there's nothing Pi-specific in the source; it's plain C11 against
-`libopus`/`libsystemd`.
+`libopus`.
 
 ## Regenerating `vocab_8k/` from source audio
 

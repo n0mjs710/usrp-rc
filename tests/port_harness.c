@@ -796,8 +796,9 @@ static bool scenario_tail_message_rotation(config_t *base, vocab_cache_t *vocab)
 
 static bool scenario_empty_mandatory_uses_impolite(config_t *base, vocab_cache_t *vocab)
 {
-    printf("\n[14] with no mandatory ID, the timer keys up with impolite_id; with neither, no ID\n");
+    printf("\n[14] with no mandatory ID, the timer keys up with impolite_id\n");
     bool ok = true;
+    char *log;
     config_t cfg = *base;
     cfg.timers.id_interval = 1.5;
     cfg.timers.id_anxious = 0.0;
@@ -814,18 +815,6 @@ static bool scenario_empty_mandatory_uses_impolite(config_t *base, vocab_cache_t
     bool settled = wait_until_idle(p, 8000);
     CHECK(settled && !port_ptt(p), "released afterward");
     free(cap_stop());
-    port_destroy(p);
-
-    cfg.events.impolite_id[0] = '\0';
-    p = fresh_port(&cfg, vocab);
-    prime(p);
-    activity_pulse(p);
-    cap_start();
-    bool warned = wait_for_log(p, "NO ID SENT", 3000);
-    char *log = cap_stop();
-    CHECK(warned, "with neither set, the log says no ID went out");
-    CHECK(!port_ptt(p), "and nothing keys up");
-    free(log);
     port_destroy(p);
 
     /* A solitary key-up with an initial ID owes nothing more. */

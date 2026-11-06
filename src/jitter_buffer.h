@@ -51,18 +51,16 @@ void jitter_buffer_flush(jitter_buffer_t *jb);
 float jitter_buffer_estimate_ms(const jitter_buffer_t *jb);
 
 /* Number of frames dropped since last call because the buffer was at
- * capacity when a push arrived (resets counter). Expected to be rare --
- * unlike the old "late" counter, this is not the discard path for ordinary
- * arrival timing, only for a genuine sustained burst. */
+ * capacity when a push arrived (resets counter). Expected to be rare: only a
+ * sustained burst fills the buffer. */
 uint64_t jitter_buffer_overflow_count(jitter_buffer_t *jb);
 
-/* Reset the live silence counter -- call at the rising edge of output_active so
- * pre-transmission idle pulls don't inflate the per-transmission count. */
+/* Reset the live silence counter when the link keys up, so idle pulls before the
+ * transmission don't inflate its count. */
 void jitter_buffer_reset_silence_count(jitter_buffer_t *jb);
 
-/* Latch the current silence count into a stable snapshot for output-end logging,
- * and accumulate it into the heartbeat bucket.  Call at the falling edge of
- * output_active (in the playback thread) before telemetry polls. */
+/* Latch the current silence count for the end-of-transmission log line, and add it
+ * to the heartbeat count. Call when the link unkeys. */
 void jitter_buffer_latch_silence(jitter_buffer_t *jb);
 
 /* Return (and reset) the latched per-transmission silence count.

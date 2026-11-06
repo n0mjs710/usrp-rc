@@ -10,10 +10,6 @@
 # sent as-is in CW, spelled out word by word in voice (W1XYZ = W ONE X Y Z).
 callsign = W1XYZ
 
-# cor or cor_ctcss. CTCSS decode is MMDVM-Host's job ([FM] CTCSSFrequency and
-# AccessMode), so cor_ctcss currently behaves the same as cor.
-#access_mode = cor
-
 [link]
 # Network USRP peer: rusrp, usrp-reflector, or ASL-compatible endpoint.
 # Set enabled = false for a standalone local repeater with no link socket at all.

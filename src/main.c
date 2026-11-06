@@ -34,8 +34,8 @@
 #define DEFAULT_CONFIG "/etc/usrp-rc/usrp-rc.conf"
 #define MAX_EVENTS 8
 
-/* Not exposed in the TOML schema (see plan) — no-packet timeout on each
- * port before we treat it as unkeyed even without an explicit UNKEY frame.
+/* No-packet timeout on each port before we treat it as unkeyed even without an
+ * explicit UNKEY frame.
  * Matches rusrp's own default network_timeout_ms.
  *
  * On the mmdvm side this is now a pure backstop: MMDVM-Host's FM protocol
@@ -223,13 +223,9 @@ static void note_mmdvm_voice_pacing(app_t *a, uint64_t now)
     a->mmdvm_voice_last_cpu_ms = now_cpu;
 }
 
-/* `keyup` is vestigial on this path and deliberately ignored: MMDVM-Host's
- * FM protocol carries no PTT bit. It stays in the signature because every
- * caller is a place where the distinction still matters conceptually, and
- * because the link side (still USRP) does have one. */
-static void send_mmdvm_voice(app_t *a, const int16_t frame[160], bool keyup)
+/* MMDVM-Host's FM protocol has no PTT bit: the flow of frames is the PTT. */
+static void send_mmdvm_voice(app_t *a, const int16_t frame[160])
 {
-    (void)keyup;
     uint8_t buf[FM_MAX_PKT_LEN];
     size_t len = fm_build_data(buf, frame, 160u);
     send(a->mmdvm_sock, buf, len, 0);
@@ -324,15 +320,12 @@ static void pace_tick(app_t *a, uint64_t now)
         return;   /* repeat path already sends frames synchronously per packet */
 
     int16_t frame[160];
-    if (port_link_gate_open(a->port)) {
+    if (port_link_gate_open(a->port))
         jitter_buffer_pull(a->jb, frame);
-        port_mix_apply(a->port, frame, now);
-        send_mmdvm_voice(a, frame, true);
-    } else {
+    else
         port_ctrl_pull(a->port, frame, now);
-        port_mix_apply(a->port, frame, now);
-        send_mmdvm_voice(a, frame, true);
-    }
+    port_mix_apply(a->port, frame, now);
+    send_mmdvm_voice(a, frame);
 }
 
 /* ── mmdvm RX handling ─────────────────────────────────────────────────── */
@@ -415,13 +408,24 @@ static void regen_tick(app_t *a)
         regen_stop(a, "sent");
 }
 
-/* Stop listening to the link: the peer is treated as having unkeyed. */
-static void link_rx_end(app_t *a, uint64_t now)
+/* The link's transmission is over: its unkey, the link turned off or the repeater
+ * down (each already logged), or a watchdog timeout, which `why` names as a warning. */
+static void link_rx_end(app_t *a, uint64_t now, const char *why)
 {
     if (!a->prev_link_keyup)
         return;
     a->prev_link_keyup = false;
     a->link_watchdog_deadline = 0;
+    jitter_buffer_latch_silence(a->jb);
+    uint64_t overflow = jitter_buffer_overflow_count(a->jb);
+    uint64_t silence  = jitter_buffer_latched_silence_count(a->jb);
+    float    jitter   = jitter_buffer_estimate_ms(a->jb);
+    if (why)
+        LOGW("link: RX ended, %s  overflow=%llu silence=%llu jitter=%.1fms\n", why,
+             (unsigned long long)overflow, (unsigned long long)silence, jitter);
+    else
+        LOGI("link: RX ended  overflow=%llu silence=%llu jitter=%.1fms\n",
+             (unsigned long long)overflow, (unsigned long long)silence, jitter);
     jitter_buffer_flush(a->jb);
     port_on_link_keyup(a->port, false, now);
 }
@@ -434,7 +438,7 @@ static void set_link(app_t *a, bool up)
     port_set_link_up(a->port, up);
     if (!up) {
         regen_stop(a, "cut short");
-        link_rx_end(a, monotonic_ms());
+        link_rx_end(a, monotonic_ms(), NULL);
         link_tx_end(a);
     }
 }
@@ -545,7 +549,7 @@ static void run_command(app_t *a, const command_t *c)
         if (down) {
             regen_stop(a, "cut short");
             link_tx_end(a);
-            link_rx_end(a, monotonic_ms());
+            link_rx_end(a, monotonic_ms(), NULL);
         }
         save_repeater_state(a, down);
         break;
@@ -636,7 +640,7 @@ static void mmdvm_rx_frame(app_t *a, const int16_t frame_in[160], uint64_t now)
     else
         memcpy(frame, ste_out, sizeof(frame));
     port_mix_apply(a->port, frame, now);
-    send_mmdvm_voice(a, frame, true);
+    send_mmdvm_voice(a, frame);
 
     /* Flow 2: mmdvm RX -> link TX. */
     if (a->link_sock >= 0 && !a->link_tx_ended)
@@ -765,25 +769,15 @@ static void handle_link(app_t *a)
         uint64_t now = monotonic_ms();
         a->link_watchdog_deadline = now + WATCHDOG_MS;
 
-        bool keyup = pkt.keyup != 0;
-        if (keyup != a->prev_link_keyup) {
-            a->prev_link_keyup = keyup;
-            if (keyup) {
-                jitter_buffer_reset_silence_count(a->jb);
-            } else {
-                jitter_buffer_latch_silence(a->jb);
-                uint64_t overflow = jitter_buffer_overflow_count(a->jb);
-                uint64_t silence  = jitter_buffer_latched_silence_count(a->jb);
-                float    jitter   = jitter_buffer_estimate_ms(a->jb);
-                LOGI("link: RX ended  overflow=%llu silence=%llu jitter=%.1fms\n",
-                        (unsigned long long)overflow, (unsigned long long)silence, jitter);
-                jitter_buffer_flush(a->jb);
-            }
-            port_on_link_keyup(a->port, keyup, now);
-        }
-
-        if (!keyup)
+        if (!pkt.keyup) {
+            link_rx_end(a, now, NULL);
             continue;
+        }
+        if (!a->prev_link_keyup) {
+            a->prev_link_keyup = true;
+            jitter_buffer_reset_silence_count(a->jb);
+            port_on_link_keyup(a->port, true, now);
+        }
 
         if (pkt.type == USRP_TYPE_VOICE) {
             jitter_buffer_push(a->jb, pkt.audio);
@@ -900,18 +894,8 @@ static void check_all_timers(app_t *a, uint64_t now)
         send_mmdvm_ping(a);
         a->fm_ping_deadline = now + FM_PING_INTERVAL_MS;
     }
-    if (a->prev_link_keyup && a->link_watchdog_deadline && now >= a->link_watchdog_deadline) {
-        a->prev_link_keyup = false;
-        a->link_watchdog_deadline = 0;
-        jitter_buffer_latch_silence(a->jb);
-        uint64_t overflow = jitter_buffer_overflow_count(a->jb);
-        uint64_t silence  = jitter_buffer_latched_silence_count(a->jb);
-        float    jitter   = jitter_buffer_estimate_ms(a->jb);
-        LOGW("link: watchdog timeout — treating as unkey  overflow=%llu silence=%llu jitter=%.1fms\n",
-                (unsigned long long)overflow, (unsigned long long)silence, jitter);
-        jitter_buffer_flush(a->jb);
-        port_on_link_keyup(a->port, false, now);
-    }
+    if (a->prev_link_keyup && a->link_watchdog_deadline && now >= a->link_watchdog_deadline)
+        link_rx_end(a, now, "watchdog timeout, no unkey received");
 
     if (a->heartbeat_deadline && now >= a->heartbeat_deadline) {
         float    jitter  = jitter_buffer_estimate_ms(a->jb);

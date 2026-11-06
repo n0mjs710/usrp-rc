@@ -11,9 +11,9 @@ STATEDIR   ?= /var/local/usrp-rc
 
 CC      ?= gcc
 CFLAGS  += -std=c11 -O2 -Wall -Wextra -D_GNU_SOURCE -fPIE \
-            $(shell pkg-config --cflags libsystemd opus)
+            $(shell pkg-config --cflags opus)
 LDFLAGS += -pie
-LDLIBS  += $(shell pkg-config --libs libsystemd opus) -lm -lpthread
+LDLIBS  += $(shell pkg-config --libs opus) -lm
 
 BUILDDIR  = build
 
@@ -109,8 +109,6 @@ check: $(TARGET) $(HARNESS) $(JITTER_TEST) $(DTMF_TEST) $(STATS_TEST) $(CONFIG_T
 	./$(DTMF_TEST)
 	./$(STATS_TEST)
 	./$(CONFIG_TEST)
-	python3 tools/toml2conf.py tests/legacy.toml | diff - tests/legacy.conf
-	./$(TARGET) --check tests/legacy.conf
 	./$(TARGET) --check usrp-rc.conf.sample
 
 -include $(DEPFILES)
@@ -131,7 +129,6 @@ install: $(TARGET)
 	install -Dm755 $(TARGET)                  $(DESTDIR)$(BINDIR)/usrp-rc
 	install -Dm644 usrp-rc.conf.sample         $(DESTDIR)$(SYSCONFDIR)/usrp-rc/usrp-rc.conf.sample
 	install -Dm644 tones.conf                  $(DESTDIR)$(DATADIR)/tones.conf
-	install -Dm755 tools/toml2conf.py          $(DESTDIR)$(DATADIR)/toml2conf.py
 	install -Dm644 systemd/usrp-rc.service     $(DESTDIR)$(UNITDIR)/usrp-rc.service
 	install -dm755 $(DESTDIR)$(STATEDIR)
 	@# The stock set is replaced as a whole; site clips belong in user_8k/.
@@ -141,14 +138,8 @@ install: $(TARGET)
 	install -Dm644 user_8k/README.md          $(DESTDIR)$(DATADIR)/user_8k/README.md
 	@if [ -z "$(DESTDIR)" ]; then \
 		if [ ! -f $(SYSCONFDIR)/usrp-rc/usrp-rc.conf ]; then \
-			if [ -f $(SYSCONFDIR)/usrp-rc/usrp-rc.toml ]; then \
-				python3 tools/toml2conf.py $(SYSCONFDIR)/usrp-rc/usrp-rc.toml $(SYSCONFDIR)/usrp-rc/usrp-rc.conf \
-					&& echo "usrp-rc: converted usrp-rc.toml to $(SYSCONFDIR)/usrp-rc/usrp-rc.conf -- run usrp-rc --check on it" \
-					|| echo "usrp-rc: could not convert usrp-rc.toml -- see tools/toml2conf.py"; \
-			else \
-				cp $(SYSCONFDIR)/usrp-rc/usrp-rc.conf.sample $(SYSCONFDIR)/usrp-rc/usrp-rc.conf; \
-				echo "usrp-rc: installed default config at $(SYSCONFDIR)/usrp-rc/usrp-rc.conf"; \
-			fi; \
+			cp $(SYSCONFDIR)/usrp-rc/usrp-rc.conf.sample $(SYSCONFDIR)/usrp-rc/usrp-rc.conf; \
+			echo "usrp-rc: installed default config at $(SYSCONFDIR)/usrp-rc/usrp-rc.conf"; \
 		else \
 			echo "usrp-rc: existing config preserved at $(SYSCONFDIR)/usrp-rc/usrp-rc.conf"; \
 		fi; \
@@ -158,7 +149,7 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/usrp-rc
 	rm -f $(DESTDIR)$(UNITDIR)/usrp-rc.service
 	rm -rf $(DESTDIR)$(DATADIR)/vocab_8k
-	rm -f $(DESTDIR)$(DATADIR)/tones.conf $(DESTDIR)$(DATADIR)/toml2conf.py
+	rm -f $(DESTDIR)$(DATADIR)/tones.conf
 	rm -f $(DESTDIR)$(DATADIR)/user_8k/README.md
 	@echo "usrp-rc: config at $(SYSCONFDIR)/usrp-rc/ preserved — remove manually if desired"
 	@echo "usrp-rc: usage figures in $(STATEDIR)/ preserved — remove manually if desired"

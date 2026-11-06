@@ -63,6 +63,12 @@ int main(void)
     check("figures survive a restart", stats_keyups(s, now, 168) == 2);
     stats_destroy(s);
 
+    stats_create(&s, path, now - 30 * 24 * HOUR);
+    stats_record(s, now - 30 * 24 * HOUR, 10.0);   /* dirty, so the save rewrites the file */
+    check("booted with the clock behind, figures aren't thrown away", stats_save(s) == 0
+          && (stats_destroy(s), stats_create(&s, path, now), stats_keyups(s, now, 168) == 2));
+    stats_destroy(s);
+
     stats_create(&s, path, now + 200 * HOUR);
     check("old figures on disk stay out of the window", stats_keyups(s, now + 200 * HOUR, 168) == 0);
     stats_destroy(s);

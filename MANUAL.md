@@ -212,7 +212,7 @@ key = value   # a comment after a value
 | An empty value means "none" or "off". | `tail_messages =` |
 | Commas separate a list of choices. | `mandatory_ids = id1,id2` |
 | Spaces separate the items of a sequence. | `voice: THISIS {call} REPEATER` |
-| Settings before the first section are top-level settings. | `callsign`, `access_mode` |
+| Settings before the first section are top-level settings. | `callsign` |
 
 ### 3.3 Apply a change
 
@@ -1086,7 +1086,6 @@ These settings go before the first section.
 | Setting | Default | Range | Function |
 | --- | --- | --- | --- |
 | `callsign` | None | Letters and digits | Used by `{call}`. Add `/R` or `REPEATER` in the message. |
-| `access_mode` | `cor` | `cor`, `cor_ctcss` | No difference at this time. MMDVM-Host decodes CTCSS. |
 
 ### 11.2 `[log]`
 
@@ -1115,10 +1114,10 @@ the ports to agree with `MMDVM-Host.ini`. For the procedure, see
 | --- | --- | --- | --- |
 | `enabled` | `true` | `true`, `false` | The repeater has a link |
 | `start_on` | `true` | `true`, `false` | The link is on at start |
-| `remote_host` | None | | Address of the USRP peer. Necessary when `enabled` is true. |
+| `remote_host` | None | | IPv4 address of the USRP peer, for example `127.0.0.1`. Host names are not accepted. Necessary when `enabled` is true. |
 | `remote_port` | `34001` | | Port of the peer |
 | `local_port` | `34002` | | Port on which `usrp-rc` receives |
-| `bind_address` | `0.0.0.0` | | Address on which `usrp-rc` receives |
+| `bind_address` | `0.0.0.0` | | IPv4 address on which `usrp-rc` receives |
 | `codec` | `pcm` | `pcm`, `opus` | Audio format of the link |
 | `opus_bitrate` | `8000` | 4000-64000 | Applies when `codec = opus` |
 | `opus_frame_ms` | `60` | 20, 40, 60 | Applies when `codec = opus` |
