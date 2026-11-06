@@ -4,7 +4,9 @@ This document lists the configuration changes necessary for each new version. Af
 each change, examine the configuration with `usrp-rc --check <file>`. `--check` shows
 each out-of-date setting by line number.
 
-## Unreleased (`dtmf-control` branch)
+## November 2026: DTMF control, schedule and new configuration rules
+
+These changes apply when you update from a `main` before November 2026.
 
 ### Necessary changes
 

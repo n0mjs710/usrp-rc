@@ -1,6 +1,6 @@
 # usrp-rc Operation and Reference Manual
 
-This manual applies to the `dtmf-control` branch of `usrp-rc`. For installation and
+This manual applies to the `main` branch of `usrp-rc`. For installation and
 MMDVM-Host integration, see [README.md](README.md).
 
 > [!WARNING]
