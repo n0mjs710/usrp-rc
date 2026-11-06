@@ -115,6 +115,7 @@ void jitter_buffer_flush(jitter_buffer_t *jb)
     jb->read_idx = 0;
     jb->count    = 0;
     jb->priming  = true;
+    jb->last_push_ts = 0;   /* the gap to the next transmission isn't jitter */
     pthread_mutex_unlock(&jb->lock);
 }
 
