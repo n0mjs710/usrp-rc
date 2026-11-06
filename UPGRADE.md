@@ -18,6 +18,14 @@ These changes apply when you update from 1.0b.
 
 `libsystemd-dev` is no longer necessary to build `usrp-rc`.
 
+### Changes in operation
+
+- The ID timer starts when an ID starts, not when it ends. The time between the
+  starts of two IDs is now `id_interval`.
+- `pre_message_ms` and `post_message_ms` now apply each time the controller keys the
+  transmitter for its own audio and drops it after: also for repeater up and down
+  replies and time-out replies. They no longer add a pause before an ID in a tail.
+
 ## 1.0b (November 2026)
 
 Version 1.0b is the first numbered version. It adds DTMF control, the schedule and new

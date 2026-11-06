@@ -227,14 +227,9 @@ static void prime(port_t *p)
     wait_until_idle(p, 3000);
 }
 
-/* prime()'s own initial-ID completion resets tx_activity to false (see
- * initial_id_after_drain) -- on_id() declines to fire ANY periodic ID
- * (mandatory or impolite) while tx_activity is false, since nothing has
- * happened since the last one. A second, ordinary transmission (which
- * doesn't re-trigger initial_id_pending, already consumed by prime())
- * sets tx_activity back to true and leaves it true through its own
- * plain courtesy-tone/hang completion, so the next periodic id_deadline
- * actually has something to report. */
+/* prime()'s initial ID pays what was owed, and the ID timer declines to fire with
+ * nothing owed. A second, ordinary transmission (no initial ID, as the timer is now
+ * running) makes an ID owed again, so the next timer expiry has something to do. */
 static void activity_pulse(port_t *p)
 {
     key_local(p, true);
@@ -363,39 +358,22 @@ static bool scenario_anxious_between_ct_delay_and_ct(config_t *base, vocab_cache
      * otherwise be indistinguishable from the post-message pause we're
      * trying to measure. */
     strncpy(cfg.events.anxious_id, "id_voice", sizeof(cfg.events.anxious_id) - 1);
-    cfg.timers.id_interval = 1.00;   /* fast, predictable timing for this scenario, */
-    cfg.timers.id_anxious  = 0.90;   /* independent of the base config's id_interval */
+    cfg.timers.id_interval = 4.00;
+    cfg.timers.id_anxious  = 3.50;   /* the window opens 0.5 s after an ID starts */
     port_t *p = fresh_port(&cfg, vocab);
 
     cap_start();
-    key_local(p, true);
+    prime(p);                        /* the initial ID pays what the first key-up owed */
+    char *so_far = cap_peek();
+    CHECK(count_occurrences(so_far, "id: anxious") == 0,
+          "no anxious ID right after the initial ID: nothing is owed");
+    free(so_far);
+
+    key_local(p, true);              /* a second transmission, inside the window */
     wait_ms(p, 150);
     key_local(p, false);
-    /* This first-ever transmission's own tail exercises the sequence:
-     * initial ID -> schedule_id (arms id_sub_deadline @ +0.1s and
-     * ct_delay @ +0.2s from the same instant) -> id_sub_deadline fires
-     * first, arming anxious_id_armed -> ct_delay fires -> anxious ID
-     * (not the CT) -> anxious_id_finish re-arms a fresh ct_delay -> CT. */
-    bool got_initial = wait_for_log(p, "id: initial", 3000);
-    CHECK(got_initial, "initial ID fired first");
-
     bool got_anxious = wait_for_log(p, "id: anxious", 3000);
-    CHECK(got_anxious, "anxious ID fired next, ahead of the courtesy tone");
-
-    /* anxious_id_finish() re-arms id_sub_deadline via schedule_id() with
-     * this same (deliberately tight, for a fast test) id_anxious/
-     * id_interval ratio -- left alone, it would re-fire before the fresh
-     * ct_delay it also re-arms, preempting the courtesy tone forever
-     * (this exact ratio is what makes the anxious ID preempt ct_delay at
-     * all; the same ratio re-applied always does it again). That
-     * requires id_interval - id_anxious < ct_delay, which no sane
-     * deployment would configure (id_anxious is meant to be a short lead
-     * before a long interval) -- disable further re-arming now that
-     * we've confirmed the one preemption we're testing, same as a real
-     * deployment's next cycle wouldn't be due for hundreds of seconds.
-     * p->cfg points at this function's `cfg`, so schedule_id() (which
-     * re-reads it live) sees this on its very next call. */
-    cfg.timers.id_anxious = 0.0;
+    CHECK(got_anxious, "anxious ID fired at the end of ct_delay, ahead of the courtesy tone");
 
     int gap = measure_gap_after_current_run(p, 3000);
     CHECK(gap >= 160 && gap <= 260,
@@ -405,6 +383,7 @@ static bool scenario_anxious_between_ct_delay_and_ct(config_t *base, vocab_cache
     CHECK(settled, "port returned to idle (PTT off) without getting stuck");
 
     char *log = cap_stop();
+    CHECK(count_occurrences(log, "id: anxious") == 1, "the anxious ID played once: it paid what was owed");
     CHECK(count_occurrences(log, "id: mandatory") == 0, "no mandatory ID involved in this scenario");
     free(log);
 
@@ -800,7 +779,7 @@ static bool scenario_empty_mandatory_uses_impolite(config_t *base, vocab_cache_t
     bool ok = true;
     char *log;
     config_t cfg = *base;
-    cfg.timers.id_interval = 1.5;
+    cfg.timers.id_interval = 3.0;   /* longer than prime() plus an ID, so it's still running */
     cfg.timers.id_anxious = 0.0;
     cfg.events.n_mandatory_ids = 0;
     snprintf(cfg.events.impolite_id, sizeof(cfg.events.impolite_id), "id_voice");
@@ -874,7 +853,7 @@ static bool scenario_empty_mandatory_uses_impolite(config_t *base, vocab_cache_t
     /* With no anxious ID, nothing plays early: the timer waits for the mandatory ID. */
     cfg.events.n_initial_ids = 1;
     cfg.events.anxious_id[0] = '\0';
-    cfg.timers.id_interval = 2.0;
+    cfg.timers.id_interval = 3.0;
     cfg.timers.id_anxious = 1.0;
     p = fresh_port(&cfg, vocab);
     prime(p);
@@ -1264,6 +1243,53 @@ static bool scenario_id_in_tail(config_t *base, vocab_cache_t *vocab)
     return ok;
 }
 
+/* Ticks until audio is heard, or the budget runs out; returns the ms waited, -1 if none. */
+static int ms_until_audio(port_t *p, int max_ms)
+{
+    for (int t = TICK_MS; t <= max_ms; t += TICK_MS)
+        if (tick(p))
+            return t;
+    return -1;
+}
+
+static bool scenario_message_pads(config_t *base, vocab_cache_t *vocab)
+{
+    printf("\n[20] pre/post message pauses: where the controller keys up and where it drops\n");
+    bool ok = true;
+    config_t cfg = *base;
+    cfg.audio.pre_message_ms  = 300;
+    cfg.audio.post_message_ms = 300;
+    cfg.timers.id_interval    = 3.0;
+    port_t *p = fresh_port(&cfg, vocab);
+
+    key_local(p, true);
+    wait_ms(p, 150);
+    key_local(p, false);
+    int start = ms_until_audio(p, 1000);
+    CHECK(start >= 0 && start <= 2 * TICK_MS, "the initial ID in the tail has no pause before it (%d ms)", start);
+    wait_until_idle(p, 8000);
+
+    key_local(p, true);
+    wait_ms(p, 150);
+    key_local(p, false);
+    wait_until_idle(p, 8000);
+    while (!port_ptt(p))
+        tick(p);                  /* the timer keys up for the mandatory ID */
+    start = ms_until_audio(p, 2000);
+    CHECK(start >= 300, "keyed up for an ID, the pause comes first (%d ms)", start);
+    int last_audio = 0, t = 0;
+    while (port_ptt(p) && t < 8000) {
+        t += TICK_MS;
+        if (tick(p))
+            last_audio = t;
+    }
+    CHECK(!port_ptt(p) && t - last_audio >= 300, "... and another before it drops (%d ms)", t - last_audio);
+    port_destroy(p);
+
+    printf(ok ? "[20] PASS\n" : "[20] FAIL\n");
+    return ok;
+}
+
 /* ── driver ───────────────────────────────────────────────────────────── */
 
 static bool scenario_no_courtesy_tone(config_t *base, vocab_cache_t *vocab)
@@ -1355,6 +1381,7 @@ int main(void)
         scenario_repeater_down,
         scenario_no_courtesy_tone,
         scenario_id_in_tail,
+        scenario_message_pads,
     };
     int n = (int)(sizeof(scenarios) / sizeof(scenarios[0]));
 

@@ -130,8 +130,8 @@ default_cw    = cw: {call}/R
 #voice_gap_ms         = 150    # length of a bare "_" pause
 #ste_delay_ms         = 0      # squelch tail elimination delay (0 = off)
 #lead_trim_ms         = 0      # mute this much leading RX audio per transmission (0 = off)
-#pre_message_ms       = 0      # dead air after PTT-on before CW/voice starts
-#post_message_ms      = 0      # dead air after audio drains before PTT-off
+#pre_message_ms       = 0      # dead air when the controller keys up for its own audio
+#post_message_ms      = 0      # dead air after its audio, before it drops PTT
 
 #[timers]
 # All in seconds.
@@ -141,7 +141,7 @@ default_cw    = cw: {call}/R
 #timeout     = 180     # local time-out timer (TOT); resets at the courtesy tone
                        # (the end of ct_delay, also with no tone); 0 = off
 #link_timeout = 180    # link time-out timer; resets each time the link unkeys; 0 = off
-#id_interval = 600     # mandatory ID interval, from the end of an ID (US: at most 10 minutes)
+#id_interval = 600     # mandatory ID interval, from the start of an ID (US: at most 10 minutes)
 #id_anxious  = 60      # sneak an anxious ID this far before the deadline
 #tail_every  = 0       # play events.tail_messages every this many tails; 0 = off
 #tail_min_interval = 0 # ... but at least this many seconds apart; 0 = no limit

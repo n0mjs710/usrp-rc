@@ -170,17 +170,6 @@ int message_has_voice(const config_t *cfg, const char *name)
     return 0;
 }
 
-int message_needs_padding(const config_t *cfg, const char *name)
-{
-    const config_message_t *m = config_find_message(cfg, name);
-    if (!m)
-        return 0;
-    for (int i = 0; i < m->nelements; i++)
-        if (m->elements[i].type == ELEM_CW || m->elements[i].type == ELEM_VOICE)
-            return 1;
-    return 0;
-}
-
 static int check_length(const config_t *cfg, vocab_cache_t *vocab, const config_message_t *m,
                         const char *where)
 {

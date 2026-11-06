@@ -25,11 +25,9 @@ typedef struct {
     size_t   n;
 } rendered_audio_t;
 
-/* True if any element in the named message is CW or VOICE (used to decide
- * whether pre/post message padding applies, and whether an ID is a "voice
- * ID" subject to epoch interruption). */
+/* True if the named message has a voice part: a keyup over such an ID swaps it for
+ * the impolite ID. */
 int message_has_voice(const config_t *cfg, const char *name);
-int message_needs_padding(const config_t *cfg, const char *name);
 
 /* Render a named message to 8 kHz mono s16 samples.
  * morse_level_override: if >= 0.0, used instead of cfg->audio.morse_level

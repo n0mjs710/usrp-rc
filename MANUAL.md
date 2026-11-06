@@ -548,10 +548,9 @@ items. It does not stop the start, because the rules of other countries are diff
 
 - Each ID must contain the call sign. Use `{call}`, or a site voice clip that speaks the
   call sign. `--check` does not examine this.
-- The ID timer starts when an ID ends. Thus, the time from the start of one ID to the
-  start of the next is `id_interval` plus the length of the ID, plus `pre_message_ms`
-  if the ID keys the transmitter. For a margin below 10 minutes, set `id_interval` to
-  less than 600, for example 540.
+- The ID timer starts when an ID starts. Thus, the time from the start of one ID to the
+  start of the next is `id_interval`, plus `pre_message_ms` if the ID keys the
+  transmitter.
 - The rule asks for an ID at the end of each communication. Without an initial ID, the
   ID after a short communication comes when the ID timer expires. This is the usual
   practice of repeater controllers. For an ID nearer to the end of each communication,
@@ -1131,7 +1130,7 @@ the ports to agree with `MMDVM-Host.ini`. For the procedure, see
 | `hang` | `2.5` | 0-600 | Time that the transmitter stays on after the courtesy tone |
 | `timeout` | `180` | 0-3600 | Local time-out timer. It resets at the courtesy tone (the end of `ct_delay`), also with no tone set. 0 is off. |
 | `link_timeout` | `180` | 0-3600 | Link time-out timer. It resets each time the link unkeys. 0 is off. |
-| `id_interval` | `600` | 1-86400 | ID timer, from the end of an ID. A value above 600 (the US limit of 10 minutes) causes a warning. See [6.1](#61-identification). |
+| `id_interval` | `600` | 1-86400 | ID timer, from the start of an ID. A value above 600 (the US limit of 10 minutes) causes a warning. See [6.1](#61-identification). |
 | `id_anxious` | `60` | 0-3600 | Anxious ID period before the ID timer expires. Must be less than `id_interval`. |
 | `tail_every` | `0` | 0-1000 | Tails between tail messages. 0 disables tail messages. |
 | `tail_min_interval` | `0` | 0-86400 | Minimum seconds between tail messages. 0 is no limit. |
@@ -1150,8 +1149,8 @@ the ports to agree with `MMDVM-Host.ini`. For the procedure, see
 | `voice_gap_ms` | `150` | 0-10000 | Length of a `_` pause |
 | `ste_delay_ms` | `0` | 0-2000 | Delay of repeated audio and link audio, for squelch tail elimination. 0 is off. |
 | `lead_trim_ms` | `0` | 0-2000 | Mute at the start of each transmission. 0 is off. |
-| `pre_message_ms` | `0` | 0-10000 | Silence after the transmitter starts, before CW or voice |
-| `post_message_ms` | `0` | 0-10000 | Silence after the audio, before the transmitter stops |
+| `pre_message_ms` | `0` | 0-10000 | Silence after the controller keys the transmitter for its own audio, before that audio. Not used when the transmitter is already on. |
+| `post_message_ms` | `0` | 0-10000 | Silence after the controller's audio, before the controller drops the transmitter |
 
 Levels above 1.0 are permitted, but they can cause clipping.
 
