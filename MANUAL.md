@@ -77,6 +77,10 @@ used. Speech and sound effects are WAV clips and text definitions.
 
 ## 2. Over-the-air operation
 
+The codes, times and limits in this section are the defaults. The repeater operator can
+change them, so the numbers on a given repeater can be different. The procedures and the
+functions do not change. Ask the repeater operator for the values on that repeater.
+
 ### 2.1 DTMF commands
 
 These are the default codes. The repeater operator can change or disable each code. DTMF
@@ -101,9 +105,9 @@ commands operate only if the operator sets `[dtmf] enabled = true`.
 
 After the pad test prefix or the regen code, `#` and `D` are keys like the others. They
 do not cancel or execute. Only the unkey ends the entry. To stop the entry, pause for
-more than 4 seconds. The repeater discards the keys before the pause, and a new command
-can then be entered. Or stay keyed for more than 8 seconds after the last key, then
-unkey.
+longer than the limit between two digits (see [2.4](#24-discarded-entries)). The repeater
+discards the keys before the pause, and a new command can then be entered. Or stay keyed
+for longer than the limit after the last digit, then unkey.
 
 ### 2.3 Command entry
 
