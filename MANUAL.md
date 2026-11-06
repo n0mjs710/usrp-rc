@@ -1000,7 +1000,7 @@ regen_code = 69
 | Setting | Default | Function |
 | --- | --- | --- |
 | `regen_tone_ms` | `100` | Length of each tone |
-| `regen_gap_ms` | `100` | Silence between tones |
+| `regen_gap_ms` | `100` | Silence between tones. On the link, silence of 2 × this time also follows the last tone, before the unkey. |
 | `regen_lead_ms` | `200` | Silence on the link before the first tone. Some decoders do not detect a tone that starts at the key-up. |
 | `regen_level` | `0.5` | Level of the tones. The two frequencies of each tone have the same level. |
 

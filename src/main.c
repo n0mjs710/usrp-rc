@@ -519,12 +519,15 @@ static void run_command(app_t *a, const command_t *c)
         const config_dtmf_t *d = &a->cfg.dtmf;
         size_t n;
         if (a->link_up && a->link_sock >= 0 && !port_repeater_down(a->port)) {
+            /* Silence before the unkey, or ASL never sees the last digit end and
+             * stays keyed. */
             int16_t *t = tone_render_dtmf(c->digits, d->regen_lead_ms, d->regen_tone_ms,
-                                          d->regen_gap_ms, d->regen_level, &n);
+                                          d->regen_gap_ms, 2 * d->regen_gap_ms,
+                                          d->regen_level, &n);
             regen_start(a, t, n, monotonic_ms());
         }
         int16_t *t = tone_render_dtmf(c->digits, 0, d->regen_tone_ms, d->regen_gap_ms,
-                                      d->regen_level, &n);
+                                      0, d->regen_level, &n);
         if (t) {
             sbuf_t b = {.data = t, .len = n, .cap = n};
             sbuf_scale(&b, a->cfg.audio.master_gain);

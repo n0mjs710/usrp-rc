@@ -83,11 +83,11 @@ static bool dtmf_freqs(char key, double *row, double *col)
 }
 
 int16_t *tone_render_dtmf(const char *keys, int lead_ms, int tone_ms, int gap_ms,
-                          double amp, size_t *out_n)
+                          int trail_ms, double amp, size_t *out_n)
 {
     size_t per_ms = TONE_SAMPLE_RATE / 1000;
     size_t nkeys = strlen(keys);
-    size_t cap = per_ms * ((size_t)lead_ms + nkeys * (size_t)(tone_ms + gap_ms));
+    size_t cap = per_ms * ((size_t)lead_ms + nkeys * (size_t)(tone_ms + gap_ms) + (size_t)trail_ms);
     int16_t *out = cap ? calloc(cap, sizeof(int16_t)) : NULL;
     *out_n = 0;
     if (!out)
@@ -108,6 +108,6 @@ int16_t *tone_render_dtmf(const char *keys, int lead_ms, int tone_ms, int gap_ms
         if (i + 1 < nkeys)
             n += per_ms * (size_t)gap_ms;
     }
-    *out_n = n;
+    *out_n = n + per_ms * (size_t)trail_ms;
     return out;
 }

@@ -265,8 +265,8 @@ static void test_generator(void)
 
     const char *keys = "123A456B789C*0#D";
     size_t n;
-    int16_t *t = tone_render_dtmf(keys, 200, 100, 100, 0.5, &n);
-    check("length is lead + tones + gaps between", n == 8 * (200 + 16 * 100 + 15 * 100));
+    int16_t *t = tone_render_dtmf(keys, 200, 100, 100, 200, 0.5, &n);
+    check("length is lead + tones + gaps between + trail", n == 8 * (200 + 16 * 100 + 15 * 100 + 200));
 
     decode_run_t r = new_run();
     int16_t frame[160] = {0};
@@ -278,6 +278,10 @@ static void test_generator(void)
     r.on[r.non] = 0;
     check("every key decodes, in order", strcmp(r.on, keys) == 0);
     check("the lead is silent", t[0] == 0 && t[8 * 200 - 1] == 0);
+    int quiet = 1;
+    for (size_t i = n - 8 * 200; i < n; i++)
+        quiet &= t[i] == 0;
+    check("so is the trail", quiet);
     dtmf_decoder_destroy(r.d);
     free(t);
 }

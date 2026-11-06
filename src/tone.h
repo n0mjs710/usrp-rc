@@ -11,7 +11,7 @@
  * Caller must free() the result. */
 int16_t *tone_render(double freq1, double freq2, int ms, double amp, size_t *out_n);
 
-/* DTMF keys (0-9, A-D, *, #) as tone_ms tones gap_ms apart, after lead_ms of
- * silence. Both tones at the same level, peaking at amp together. */
+/* DTMF keys (0-9, A-D, *, #) as tone_ms tones gap_ms apart, between lead_ms and
+ * trail_ms of silence. Both tones at the same level, peaking at amp together. */
 int16_t *tone_render_dtmf(const char *keys, int lead_ms, int tone_ms, int gap_ms,
-                          double amp, size_t *out_n);
+                          int trail_ms, double amp, size_t *out_n);
