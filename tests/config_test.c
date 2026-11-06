@@ -84,6 +84,7 @@ static const test_case_t CASES[] = {
     {"dtmf code uses D",    BASE "[dtmf]\ntime_code = 3D\n", "dtmf.time_code: '3D' can only use"},
     {"dtmf code used twice", BASE "[dtmf]\nlink_on_code = 39\n", "dtmf.link_on_code: '39' is already used by dtmf.time_code"},
     {"repeater code clash",  BASE "[dtmf]\nrepeater_code = 12\nlink_status_code = 120\n", "dtmf.repeater_code: '120' is already used by dtmf.link_status_code"},
+    {"opus frame too big",   "[link]\nremote_host = 127.0.0.1\ncodec = opus\nopus_bitrate = 64000\nopus_frame_ms = 60\n", "480 bytes a frame, over the 256-byte limit"},
     {"link host is a name",  "[link]\nremote_host = localhost\n", "link.remote_host: 'localhost' must be an IPv4 address"},
     {"mmdvm address bad",    BASE "[mmdvm]\nrpt_address = 127.0.0.300\n", "mmdvm.rpt_address: '127.0.0.300' must be an IPv4 address"},
     {"dtmf code too short",  BASE "[dtmf]\ntime_code = 3\n", "dtmf.time_code: '3' must be at least 2 keys"},

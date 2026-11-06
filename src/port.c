@@ -746,7 +746,7 @@ void port_on_mmdvm_keyup(port_t *p, bool active, uint64_t now)
             p->local_tot_used_s = 0.0;
         start_local_timer(p, now);
     } else {
-        if (!p->local_timed_out && p->mmdvm_active)
+        if (!p->local_timed_out && p->mmdvm_active && !p->down)
             p->local_tot_used_s += (double)(now - p->local_tot_start_ms) / 1000.0;
         p->local_timeout_deadline = 0;
         p->local_timed_out = false;
@@ -887,11 +887,19 @@ void port_set_repeater_down(port_t *p, bool down, int16_t *reply, size_t n, uint
         return;
     }
 
-    bool was_down = p->down;
-    p->down = false;
-    LOGW("port: repeater UP%s\n", was_down ? "" : " (already up)");
-    if (was_down)
+    if (!p->down) {
+        LOGI("port: repeater UP (already up)\n");
+        /* An ordinary reply, unless the repeater is idle (a kerchunk-short entry),
+         * when it keys up for it below. */
+        if (p->state != PORT_IDLE) {
+            port_queue_reply(p, reply, n);
+            return;
+        }
+    } else {
+        p->down = false;
+        LOGW("port: repeater UP\n");
         quiesce(p, now);
+    }
 
     /* A station still keyed (a command ended with D) is repeated at once, and the
      * reply waits for its tail like any other. */

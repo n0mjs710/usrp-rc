@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 #include <stddef.h>
 
 #define USRP_MAGIC          "USRP"
@@ -32,12 +33,15 @@ typedef struct {
     usrp_type_t type;
     uint32_t    mpxid;
     uint32_t    reserved;
-    int16_t     audio[USRP_AUDIO_FRAMES];   /* valid when type == USRP_TYPE_VOICE */
+    bool        has_audio;                  /* a VOICE packet with its 320 bytes  */
+    int16_t     audio[USRP_AUDIO_FRAMES];   /* valid when has_audio               */
     uint8_t     opus[USRP_OPUS_MAX_BYTES];  /* valid when type == USRP_TYPE_OPUS  */
     size_t      opus_len;                   /* encoded byte count                 */
 } usrp_packet_t;
 
-/* Parse a raw UDP payload into *out. Returns 0 on success, -1 on bad packet. */
+/* Parse a raw UDP payload into *out. Returns 0 for a VOICE or OPUS packet, -1 for
+ * anything else: other types (TEXT, DTMF, PING ...) carry no key state of their own,
+ * and a VOICE packet must be the bare header or the full 352 bytes. */
 int usrp_parse(const uint8_t *buf, size_t len, usrp_packet_t *out);
 
 /* Build a 352-byte voice packet into buf (must be >= USRP_PKT_LEN). */

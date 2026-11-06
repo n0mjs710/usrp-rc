@@ -1118,7 +1118,7 @@ the ports to agree with `MMDVM-Host.ini`. For the procedure, see
 | `local_port` | `34002` | | Port on which `usrp-rc` receives |
 | `bind_address` | `0.0.0.0` | | IPv4 address on which `usrp-rc` receives |
 | `codec` | `pcm` | `pcm`, `opus` | Audio format of the link |
-| `opus_bitrate` | `8000` | 4000-64000 | Applies when `codec = opus` |
+| `opus_bitrate` | `8000` | 4000-64000 | Applies when `codec = opus`. One frame must be 256 bytes or less: `opus_bitrate` × `opus_frame_ms` / 8000. |
 | `opus_frame_ms` | `60` | 20, 40, 60 | Applies when `codec = opus` |
 
 ### 11.5 `[timers]`

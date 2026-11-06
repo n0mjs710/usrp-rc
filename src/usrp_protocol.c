@@ -32,18 +32,26 @@ int usrp_parse(const uint8_t *buf, size_t len, usrp_packet_t *out)
     out->mpxid    = rd32(buf + 24);
     out->reserved = rd32(buf + 28);
 
-    memset(out->audio, 0, sizeof(out->audio));
+    out->has_audio = false;
     out->opus_len = 0;
 
-    if (out->type == USRP_TYPE_VOICE && len >= USRP_PKT_LEN) {
-        memcpy(out->audio, buf + USRP_HEADER_LEN, USRP_AUDIO_BYTES);
-    } else if (out->type == USRP_TYPE_OPUS && len > USRP_HEADER_LEN) {
+    if (out->type == USRP_TYPE_VOICE) {
+        if (len >= USRP_PKT_LEN) {
+            memcpy(out->audio, buf + USRP_HEADER_LEN, USRP_AUDIO_BYTES);
+            out->has_audio = true;
+        } else if (len != USRP_HEADER_LEN) {
+            return -1;   /* truncated */
+        }
+    } else if (out->type == USRP_TYPE_OPUS) {
+        if (len <= USRP_HEADER_LEN)
+            return 0;
         out->opus_len = len - USRP_HEADER_LEN;
         if (out->opus_len > USRP_OPUS_MAX_BYTES)
             out->opus_len = USRP_OPUS_MAX_BYTES;
         memcpy(out->opus, buf + USRP_HEADER_LEN, out->opus_len);
+    } else {
+        return -1;
     }
-
     return 0;
 }
 

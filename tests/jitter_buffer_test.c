@@ -177,6 +177,26 @@ static void test_no_sequence_gating(void)
     jitter_buffer_destroy(jb);
 }
 
+/* Only VOICE and OPUS packets carry key state; a VOICE packet is the bare header
+ * or the full 352 bytes. */
+static void test_usrp_parse(void)
+{
+    printf("\nusrp_parse\n");
+    uint8_t buf[USRP_PKT_LEN];
+    usrp_packet_t pkt;
+    int16_t audio[USRP_AUDIO_FRAMES] = {1, 2, 3};
+
+    usrp_build_voice(buf, 1, 1, audio);
+    CHECK(usrp_parse(buf, USRP_PKT_LEN, &pkt) == 0 && pkt.keyup && pkt.has_audio && pkt.audio[2] == 3,
+          "a full voice packet parses, with its audio");
+    usrp_build_key(buf, 2, 0);
+    CHECK(usrp_parse(buf, USRP_HEADER_LEN, &pkt) == 0 && !pkt.keyup && !pkt.has_audio,
+          "a bare header is a key/unkey with no audio");
+    CHECK(usrp_parse(buf, USRP_HEADER_LEN + 100, &pkt) != 0, "a truncated voice packet is refused");
+    buf[23] = (uint8_t)USRP_TYPE_TEXT;
+    CHECK(usrp_parse(buf, USRP_PKT_LEN, &pkt) != 0, "a TEXT packet is ignored: it can't key or unkey the link");
+}
+
 int main(void)
 {
     test_priming_then_flows();
@@ -185,6 +205,7 @@ int main(void)
     test_genuine_underrun();
     test_flush_rearms_priming();
     test_no_sequence_gating();
+    test_usrp_parse();
 
     printf("\n==== %s ====\n", failures == 0 ? "all checks passed" : "FAILURES PRESENT");
     return failures == 0 ? 0 : 1;

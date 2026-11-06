@@ -1151,6 +1151,18 @@ static bool scenario_repeater_down(config_t *base, vocab_cache_t *vocab)
     CHECK(wait_until_idle(p, 8000), "... and the tail finishes normally");
     port_destroy(p);
 
+    /* Up when already up is an ordinary reply: it doesn't restart the time-out timer. */
+    RUN_CAPTURED(&cfg, {
+        key_local(p, true); wait_ms(p, 6000);
+        port_set_repeater_down(p, false, test_reply(800), 800, g_now);
+        wait_ms(p, 5000);
+        key_local(p, false);
+        wait_until_idle(p, 8000);
+    });
+    CHECK(strstr(log, "already up") && strstr(log, "TIMEOUT"),
+          "up when already up: the time-out timer carries on (10 s timer, 11 s carrier)");
+    free(log); port_destroy(p);
+
     printf(ok ? "[17] PASS\n" : "[17] FAIL\n");
     return ok;
 }

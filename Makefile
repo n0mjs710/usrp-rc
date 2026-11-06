@@ -77,7 +77,7 @@ $(HARNESS): $(BUILDDIR)/tests/port_harness.o $(HARNESS_OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^ -lm
 
 JITTER_TEST = $(BUILDDIR)/tests/jitter_buffer_test
-JITTER_TEST_OBJS = $(BUILDDIR)/src/jitter_buffer.o
+JITTER_TEST_OBJS = $(BUILDDIR)/src/jitter_buffer.o $(BUILDDIR)/src/usrp_protocol.o
 
 $(JITTER_TEST): $(BUILDDIR)/tests/jitter_buffer_test.o $(JITTER_TEST_OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^ -lpthread

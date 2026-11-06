@@ -314,7 +314,11 @@ static void pace_tick(app_t *a, uint64_t now)
         a->pace_deadline = 0;
         return;
     }
-    a->pace_deadline = now + 20;
+    /* Step the deadline, not now + 20, so late wakeups don't slow the cadence;
+     * after a long stall, start again from now rather than send a burst. */
+    a->pace_deadline += 20;
+    if (a->pace_deadline + 60 < now)
+        a->pace_deadline = now + 20;
 
     if (port_mmdvm_gate_open(a->port))
         return;   /* repeat path already sends frames synchronously per packet */
@@ -779,16 +783,20 @@ static void handle_link(app_t *a)
             port_on_link_keyup(a->port, true, now);
         }
 
-        if (pkt.type == USRP_TYPE_VOICE) {
-            jitter_buffer_push(a->jb, pkt.audio);
+        /* While a local station has priority, link audio isn't played: keep none,
+         * or it would play late when the local station unkeys. */
+        bool keep = !port_mmdvm_gate_open(a->port);
+        if (!keep)
+            jitter_buffer_flush(a->jb);
+
+        if (pkt.has_audio) {
+            if (keep)
+                jitter_buffer_push(a->jb, pkt.audio);
         } else if (pkt.type == USRP_TYPE_OPUS && a->opus) {
             int16_t pcm[480];
             int dn = opus_codec_decode(a->opus, pkt.opus, (int)pkt.opus_len, pcm);
-            if (dn > 0) {
-                int sub = dn / 160;
-                for (int i = 0; i < sub; i++)
-                    jitter_buffer_push(a->jb, pcm + i * 160);
-            }
+            for (int i = 0; keep && i < dn / 160; i++)
+                jitter_buffer_push(a->jb, pcm + i * 160);
         }
     }
 }
@@ -1084,19 +1092,21 @@ int main(int argc, char *argv[])
             break;
         }
 
-        now = monotonic_ms();
-        check_all_timers(a, now);
-
+        /* Packets first: after a stall, one already waiting must refresh its
+         * watchdog before the watchdog is checked. */
         for (int i = 0; i < n; i++) {
             if (events[i].data.fd == a->mmdvm_sock)
                 handle_mmdvm(a);
             else if (events[i].data.fd == a->link_sock)
                 handle_link(a);
         }
+        check_all_timers(a, monotonic_ms());
     }
 
     printf("usrp-rc: stopping\n");
     regen_stop(a, "cut short");
+    if (a->prev_mmdvm_keyup)
+        link_tx_end(a);   /* don't leave the peer keyed */
     close(a->epfd);
     close(a->mmdvm_sock);
     if (a->link_sock >= 0) close(a->link_sock);

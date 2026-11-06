@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "util.h"
+
 typedef struct {
     int16_t *data;
     size_t   len;
@@ -21,7 +23,7 @@ static inline void sbuf_reserve(sbuf_t *b, size_t extra)
     size_t new_cap = b->cap ? b->cap * 2 : 256;
     while (new_cap < b->len + extra)
         new_cap *= 2;
-    b->data = realloc(b->data, new_cap * sizeof(int16_t));
+    b->data = xrealloc(b->data, new_cap * sizeof(int16_t));
     b->cap  = new_cap;
 }
 

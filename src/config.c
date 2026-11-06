@@ -1,5 +1,7 @@
 #include "config.h"
 #include "log.h"
+#include "util.h"
+#include "usrp_protocol.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -499,7 +501,7 @@ static int read_entries(const char *path, entries_t *es)
 
         if (es->n >= es->cap) {
             es->cap = es->cap ? es->cap * 2 : 128;
-            es->v = realloc(es->v, (size_t)es->cap * sizeof(entry_t));
+            es->v = xrealloc(es->v, (size_t)es->cap * sizeof(entry_t));
         }
         entry_t *e = &es->v[es->n++];
         e->line = lineno;
@@ -1723,6 +1725,12 @@ static void validate(const entries_t *es, const config_t *cfg)
         if (cfg->link.codec == LINK_CODEC_OPUS && cfg->link.opus_frame_ms != 20
             && cfg->link.opus_frame_ms != 40 && cfg->link.opus_frame_ms != 60)
             cfg_err("link.opus_frame_ms must be 20, 40, or 60\n");
+        /* A USRP Opus packet carries at most USRP_OPUS_MAX_BYTES of audio. */
+        long frame_bytes = (long)cfg->link.opus_bitrate * cfg->link.opus_frame_ms / 8000;
+        if (cfg->link.codec == LINK_CODEC_OPUS && frame_bytes > (long)USRP_OPUS_MAX_BYTES)
+            cfg_err("link.opus_bitrate %d at %d ms frames is %ld bytes a frame, over the %u-byte "
+                    "limit; lower one of them\n", cfg->link.opus_bitrate, cfg->link.opus_frame_ms,
+                    frame_bytes, USRP_OPUS_MAX_BYTES);
     }
 
     for (size_t i = 0; i < NFIELDS; i++) {

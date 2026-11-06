@@ -15,6 +15,8 @@ These changes apply when you update from 1.0b.
 2. If `[link]` `remote_host` or `bind_address`, or an address in `[mmdvm]`, is a host
    name, change it to an IPv4 address. `usrp-rc` accepts only IPv4 addresses. `--check`
    now shows this error.
+3. If `[link]` `codec = opus`, one frame must be 256 bytes or less:
+   `opus_bitrate` × `opus_frame_ms` / 8000. `--check` shows a setting that is too high.
 
 `libsystemd-dev` is no longer necessary to build `usrp-rc`.
 
@@ -25,6 +27,8 @@ These changes apply when you update from 1.0b.
 - `pre_message_ms` and `post_message_ms` now apply each time the controller keys the
   transmitter for its own audio and drops it after: also for repeater up and down
   replies and time-out replies. They no longer add a pause before an ID in a tail.
+- "Repeater up" when the repeater is already up is an ordinary command reply. It no
+  longer restarts the time-out timer.
 
 ## 1.0b (November 2026)
 

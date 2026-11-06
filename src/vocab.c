@@ -1,5 +1,6 @@
 #include "vocab.h"
 #include "log.h"
+#include "util.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -65,7 +66,7 @@ static int load_wav(const char *path, int16_t **out, size_t *out_n)
                 fseek(fp, (long)(csize - 16), SEEK_CUR);
             if (csize & 1) fseek(fp, 1, SEEK_CUR);
         } else if (memcmp(chdr, "data", 4) == 0) {
-            if (!have_fmt || channels != 1 || bits != 16) {
+            if (!have_fmt || channels != 1 || bits != 16 || have_data) {
                 fseek(fp, (long)csize + (long)(csize & 1), SEEK_CUR);
                 continue;
             }
@@ -154,7 +155,7 @@ static void load_dir(struct vocab_cache *vc, const char *dir)
 
         if (vc->n >= vc->cap) {
             int new_cap = vc->cap ? vc->cap * 2 : 256;
-            vc->clips = realloc(vc->clips, (size_t)new_cap * sizeof(vocab_clip_t));
+            vc->clips = xrealloc(vc->clips, (size_t)new_cap * sizeof(vocab_clip_t));
             vc->cap   = new_cap;
         }
         vocab_clip_t *c = &vc->clips[vc->n++];
