@@ -48,7 +48,7 @@ void config_defaults(config_t *cfg)
     cfg->timers.link_timeout = 180.0;
     cfg->timers.id_interval = 600.0;
     cfg->timers.id_anxious  = 60.0;
-    cfg->timers.tail_every  = 10;
+    cfg->timers.tail_every  = 0;
     cfg->timers.tail_min_interval = 0.0;
 
     /* Off unless asked for: it mutes repeat audio and drops the link, which an
@@ -1190,7 +1190,80 @@ static bool parse_window(const char *text, int *start, int *end)
 
 static void check_message_ref(const config_t *cfg, const char *path, const char *name);
 
-static void read_override(char *tok, const char *path, const config_t *cfg, config_schedule_t *out)
+/* Why a setting can't go in a schedule window, or NULL if it can. */
+static const char *not_schedulable(const field_t *f)
+{
+    static const char *const STARTUP_SECTIONS[] = {"", "log", "mmdvm", "link", "stats", "state", NULL};
+    static const char *const STARTUP_KEYS[] = {
+        "dtmf.enabled", "dtmf.min_tone_ms", "dtmf.beep_hz", "dtmf.beep_on_ms", "dtmf.beep_off_ms",
+        "audio.ste_delay_ms", "audio.lead_trim_ms", NULL,
+    };
+    if (strcmp(f->section, "events") == 0 && strcmp(f->key, "startup_message") == 0)
+        return "it only plays at startup";
+    for (int i = 0; STARTUP_SECTIONS[i]; i++)
+        if (strcmp(f->section, STARTUP_SECTIONS[i]) == 0)
+            return "it only takes effect at startup";
+    char path[96];
+    make_path(path, sizeof(path), f->section, f->key);
+    for (int i = 0; STARTUP_KEYS[i]; i++)
+        if (strcmp(path, STARTUP_KEYS[i]) == 0)
+            return "it only takes effect at startup";
+    return NULL;
+}
+
+/* A schedule names a setting by its key, or section.key where the key alone is
+ * ambiguous. */
+static const field_t *find_schedule_field(const char *name, const char *path)
+{
+    const char *dot = strchr(name, '.');
+    const field_t *found = NULL;
+    int matches = 0;
+    for (size_t i = 0; i < NFIELDS; i++) {
+        const field_t *f = &FIELDS[i];
+        bool hit = dot ? strncmp(f->section, name, (size_t)(dot - name)) == 0
+                         && !f->section[dot - name] && strcmp(f->key, dot + 1) == 0
+                       : strcmp(f->key, name) == 0;
+        if (hit) {
+            found = f;
+            matches++;
+        }
+    }
+    if (matches > 1) {
+        cfg_err("%s: '%s' is in more than one section; write it as section.%s\n", path, name, name);
+        return NULL;
+    }
+    if (found)
+        return found;
+
+    const char *hint = NULL;
+    char want[96], best[96] = "";
+    for (size_t i = 0; i < NFIELDS && dot && !hint; i++)
+        if (strcmp(FIELDS[i].key, dot + 1) == 0) {
+            make_path(best, sizeof(best), FIELDS[i].section, FIELDS[i].key);
+            hint = best;
+        }
+    bool misplaced = hint != NULL;
+    for (size_t i = 0; i < NFIELDS && !misplaced; i++) {
+        if (not_schedulable(&FIELDS[i]))
+            continue;
+        if (dot)
+            make_path(want, sizeof(want), FIELDS[i].section, FIELDS[i].key);
+        else
+            snprintf(want, sizeof(want), "%s", FIELDS[i].key);
+        if (closer(name, want, hint)) {
+            snprintf(best, sizeof(best), "%s", want);
+            hint = best;
+        }
+    }
+    if (hint)
+        cfg_err("%s: '%s' is not a setting (did you mean %s?)\n", path, name, hint);
+    else
+        cfg_err("%s: '%s' is not a setting\n", path, name);
+    return NULL;
+}
+
+static void read_override(char *tok, const char *path, const config_t *cfg, config_t *scratch,
+                          config_schedule_t *out)
 {
     char *eq = strchr(tok, '=');
     if (!eq) {
@@ -1209,42 +1282,61 @@ static void read_override(char *tok, const char *path, const config_t *cfg, conf
     }
     const char *key = tok, *value = eq + 1;
 
-    const field_t *f = NULL;
-    for (size_t i = 0; i < NFIELDS && !f; i++)
-        if (strcmp(FIELDS[i].section, "events") == 0 && strcmp(FIELDS[i].key, key) == 0)
-            f = &FIELDS[i];
-    if (!f || strcmp(key, "startup_message") == 0) {
-        cfg_err("%s: '%s' can't be scheduled (only [events] settings can, except startup_message)\n", path, key);
+    const field_t *f = find_schedule_field(key, path);
+    if (!f)
+        return;
+    const char *why = not_schedulable(f);
+    if (why) {
+        char full[96];
+        make_path(full, sizeof(full), f->section, f->key);
+        cfg_err("%s: %s can't be scheduled: %s\n", path, full, why);
         return;
     }
-    if (strcmp(key, "impolite_id") == 0 && !value[0]) {
+    bool names = strcmp(f->section, "events") == 0;
+    if (names && strcmp(f->key, "impolite_id") == 0 && !value[0]) {
         cfg_err("%s: impolite_id can't be empty: it's the ID of last resort\n", path);
         return;
     }
     if (op != OVERRIDE_SET && f->type != FT_NAME_LIST) {
-        cfg_err("%s: %s takes one message, so it can't use += or -=\n", path, key);
+        cfg_err("%s: %s takes one value, so it can't use += or -=\n", path, f->key);
         return;
     }
     if (op != OVERRIDE_SET && !value[0]) {
-        cfg_err("%s: %s%s= needs at least one message\n", path, key, op == OVERRIDE_ADD ? "+" : "-");
+        cfg_err("%s: %s%s= needs at least one message\n", path, f->key, op == OVERRIDE_ADD ? "+" : "-");
         return;
     }
     if (out->nsets == CFG_MAX_SCHEDULE_SETS) {
         cfg_err("%s: more than %d settings\n", path, CFG_MAX_SCHEDULE_SETS);
         return;
     }
-
-    config_override_t *o = &out->sets[out->nsets++];
-    if (strlen(value) >= sizeof(o->value)) {
-        cfg_err("%s: value for %s is too long\n", path, key);
+    if (strlen(value) >= sizeof(out->sets[0].value)) {
+        cfg_err("%s: value for %s is too long\n", path, f->key);
         return;
     }
-    strcpy(o->value, value);
-    o->op     = op;
-    o->offset = f->offset - offsetof(config_t, events);
-    o->size   = f->size;
-    o->count_offset = f->type == FT_NAME_LIST ? f->count_offset - offsetof(config_t, events) : 0;
 
+    config_override_t o = {
+        .offset = f->offset,
+        .size   = f->size,
+        .count_offset = f->type == FT_NAME_LIST ? f->count_offset : 0,
+        .op     = op,
+        .names  = names,
+    };
+    if (f->type == FT_NAME_LIST) {
+        strcpy(o.value, value);
+    } else {
+        /* Parsed and range-checked exactly as the same line in its own section. */
+        char where[160];
+        snprintf(where, sizeof(where), "%s: %s", path, f->key);
+        int before = s_errors;
+        read_field(value, where, f, scratch);
+        if (s_errors != before)
+            return;
+        memcpy(o.value, (const char *)scratch + f->offset, f->size);
+    }
+    out->sets[out->nsets++] = o;
+
+    if (!names)
+        return;
     char copy[CFG_STR];
     strcpy(copy, value);
     int count = 0;
@@ -1257,12 +1349,59 @@ static void read_override(char *tok, const char *path, const config_t *cfg, conf
     }
     int max = f->type == FT_NAME_LIST ? (int)(f->size / CFG_NAME_STR) : 1;
     if (count > max)
-        cfg_err("%s: %s takes at most %d name(s)\n", path, key, max);
+        cfg_err("%s: %s takes at most %d name(s)\n", path, f->key, max);
+}
+
+static int name_position(char (*names)[CFG_NAME_STR], int count, const char *name)
+{
+    for (int i = 0; i < count; i++)
+        if (strcmp(names[i], name) == 0)
+            return i;
+    return -1;
+}
+
+void config_apply_override(config_t *cfg, const config_override_t *o)
+{
+    char *dst = (char *)cfg + o->offset;
+
+    if (!o->count_offset) {
+        memcpy(dst, o->value, o->size);
+        return;
+    }
+
+    char (*names)[CFG_NAME_STR] = (char (*)[CFG_NAME_STR])dst;
+    int *count = (int *)((char *)cfg + o->count_offset);
+    int max = (int)(o->size / CFG_NAME_STR);
+    /* The ID is a legal requirement: a window can't remove the last one by accident. */
+    int min = dst == (char *)cfg->events.mandatory_ids ? 1 : 0;
+
+    if (o->op == OVERRIDE_SET)
+        *count = 0;
+
+    char copy[sizeof(o->value)];
+    strcpy(copy, o->value);
+    char *save = NULL;
+    for (char *n = strtok_r(copy, ",", &save); n; n = strtok_r(NULL, ",", &save)) {
+        int at = name_position(names, *count, n);
+        if (o->op == OVERRIDE_REMOVE) {
+            if (at >= 0 && *count > min) {
+                memmove(names[at], names[at + 1], (size_t)(*count - at - 1) * CFG_NAME_STR);
+                (*count)--;
+            }
+        } else if (*count < max && (o->op == OVERRIDE_SET || at < 0)) {
+            snprintf(names[(*count)++], CFG_NAME_STR, "%s", n);
+        }
+    }
 }
 
 /* name = DAYS HH:MM-HH:MM setting=value [setting=value ...] */
 static void read_schedule(const entries_t *es, config_t *cfg)
 {
+    config_t *scratch = calloc(1, sizeof(*scratch));
+    if (!scratch) {
+        cfg_err("out of memory\n");
+        return;
+    }
     for (int i = 0; i < es->n; i++) {
         const entry_t *e = &es->v[i];
         if (strcmp(e->section, SCHEDULE_SECTION) != 0)
@@ -1302,13 +1441,14 @@ static void read_schedule(const entries_t *es, config_t *cfg)
             cfg_err("%s: window '%s' starts and ends at the same time\n", path, window);
 
         for (char *tok = strtok_r(NULL, " \t", &save); tok; tok = strtok_r(NULL, " \t", &save))
-            read_override(tok, path, cfg, out);
+            read_override(tok, path, cfg, scratch, out);
         if (out->nsets == 0)
             cfg_err("%s: changes nothing (add at least one setting=value)\n", path);
 
         cfg->nschedule++;
         free(copy);
     }
+    free(scratch);
     s_line = 0;
 }
 
@@ -1369,12 +1509,12 @@ static void check_schedule_lists(const config_t *cfg)
 {
     const config_events_t *ev = &cfg->events;
     static const struct { const char *key; size_t offset; size_t count_offset; } LISTS[] = {
-        {"initial_ids",   offsetof(config_events_t, initial_ids),   offsetof(config_events_t, n_initial_ids)},
-        {"mandatory_ids", offsetof(config_events_t, mandatory_ids), offsetof(config_events_t, n_mandatory_ids)},
-        {"tail_messages", offsetof(config_events_t, tail_messages), offsetof(config_events_t, n_tail_messages)},
+        {"initial_ids",   offsetof(config_t, events.initial_ids),   offsetof(config_t, events.n_initial_ids)},
+        {"mandatory_ids", offsetof(config_t, events.mandatory_ids), offsetof(config_t, events.n_mandatory_ids)},
+        {"tail_messages", offsetof(config_t, events.tail_messages), offsetof(config_t, events.n_tail_messages)},
     };
     for (size_t l = 0; l < sizeof(LISTS) / sizeof(LISTS[0]); l++) {
-        int most = *(const int *)((const char *)ev + LISTS[l].count_offset);
+        int most = *(const int *)((const char *)cfg + LISTS[l].count_offset);
         for (int i = 0; i < cfg->nschedule; i++)
             for (int j = 0; j < cfg->schedule[i].nsets; j++) {
                 const config_override_t *o = &cfg->schedule[i].sets[j];
@@ -1389,7 +1529,7 @@ static void check_schedule_lists(const config_t *cfg)
     for (int i = 0; i < cfg->nschedule; i++)
         for (int j = 0; j < cfg->schedule[i].nsets; j++) {
             const config_override_t *o = &cfg->schedule[i].sets[j];
-            if (o->offset != offsetof(config_events_t, mandatory_ids))
+            if (o->offset != offsetof(config_t, events.mandatory_ids))
                 continue;
             if (o->op == OVERRIDE_SET && !o->value[0])
                 LOGW("config: schedule.%s: mandatory_ids= leaves no mandatory ID during this window, so it will use impolite_id\n",
@@ -1411,17 +1551,17 @@ static void check_schedule_lists(const config_t *cfg)
         }
 }
 
-static void validate(const entries_t *es, const config_t *cfg)
+/* Where the settings being checked come from: NULL for the file as written, or a
+ * schedule window, whose settings are checked as they'd be while it's open. */
+static const char *s_where;
+
+#define WHERE_FMT "%s%s"
+#define WHERE_ARGS s_where ? s_where : "", s_where ? ": " : ""
+
+/* Rules between settings, so they apply to every combination a window can make. */
+static void check_consistency(const config_t *cfg)
 {
     const config_events_t *ev = &cfg->events;
-
-    if (cfg->link.enabled) {
-        if (cfg->link.remote_host[0] == '\0')
-            cfg_err("link.remote_host is required (or set link.enabled = false)\n");
-        if (cfg->link.codec == LINK_CODEC_OPUS && cfg->link.opus_frame_ms != 20
-            && cfg->link.opus_frame_ms != 40 && cfg->link.opus_frame_ms != 60)
-            cfg_err("link.opus_frame_ms must be 20, 40, or 60\n");
-    }
 
     /* # and D are the cancel and enter keys, so a code could never be typed. */
     static const struct { const char *key; size_t offset; } CODES[] = {
@@ -1436,10 +1576,11 @@ static void validate(const entries_t *es, const config_t *cfg)
     for (size_t i = 0; i < sizeof(CODES) / sizeof(CODES[0]); i++) {
         const char *code = (const char *)&cfg->dtmf + CODES[i].offset;
         if (code[strspn(code, "0123456789*ABC")])
-            cfg_err("dtmf.%s: '%s' can only use 0-9, *, A, B and C\n", CODES[i].key, code);
+            cfg_err(WHERE_FMT "dtmf.%s: '%s' can only use 0-9, *, A, B and C\n", WHERE_ARGS, CODES[i].key, code);
         for (size_t j = 0; j < i; j++)
             if (code[0] && strcmp(code, (const char *)&cfg->dtmf + CODES[j].offset) == 0)
-                cfg_err("dtmf.%s: '%s' is already used by dtmf.%s\n", CODES[i].key, code, CODES[j].key);
+                cfg_err(WHERE_FMT "dtmf.%s: '%s' is already used by dtmf.%s\n", WHERE_ARGS,
+                        CODES[i].key, code, CODES[j].key);
     }
     /* The repeater command is its code plus 0 or 1, so those can't be other codes. */
     if (cfg->dtmf.repeater_code[0]) {
@@ -1448,12 +1589,47 @@ static void validate(const entries_t *es, const config_t *cfg)
             snprintf(full, sizeof(full), "%s%d", cfg->dtmf.repeater_code, arg);
             for (size_t j = 0; j + 1 < sizeof(CODES) / sizeof(CODES[0]); j++)
                 if (strcmp(full, (const char *)&cfg->dtmf + CODES[j].offset) == 0)
-                    cfg_err("dtmf.repeater_code: '%s' is already used by dtmf.%s\n", full, CODES[j].key);
+                    cfg_err(WHERE_FMT "dtmf.repeater_code: '%s' is already used by dtmf.%s\n", WHERE_ARGS,
+                            full, CODES[j].key);
         }
     }
     if (cfg->dtmf.mute_hang_ms >= cfg->dtmf.interdigit_ms)
-        cfg_err("dtmf.mute_hang_ms (%d) must be less than dtmf.interdigit_ms (%d)\n",
+        cfg_err(WHERE_FMT "dtmf.mute_hang_ms (%d) must be less than dtmf.interdigit_ms (%d)\n", WHERE_ARGS,
                 cfg->dtmf.mute_hang_ms, cfg->dtmf.interdigit_ms);
+
+    if (ev->anxious_id[0] && cfg->timers.id_anxious >= cfg->timers.id_interval)
+        cfg_err(WHERE_FMT "timers.id_anxious (%g) must be less than timers.id_interval (%g)\n", WHERE_ARGS,
+                cfg->timers.id_anxious, cfg->timers.id_interval);
+}
+
+/* Settings that are legal but worth a second look. For a window, only what it
+ * changes: the file's own settings have already had their say. */
+static void warn_settings(const config_t *cfg, const config_t *base)
+{
+#define NEWLY(member, test) (cfg->member test && !(base && base->member test))
+    if (NEWLY(timers.timeout, == 0.0))
+        LOGW("config: " WHERE_FMT "timers.timeout is 0: a local carrier can hold the transmitter on with no limit\n",
+             WHERE_ARGS);
+    if (cfg->link.enabled && NEWLY(timers.link_timeout, == 0.0))
+        LOGW("config: " WHERE_FMT "timers.link_timeout is 0: the link can hold the transmitter on with no limit\n",
+             WHERE_ARGS);
+    if (NEWLY(timers.id_interval, > 600.0))
+        LOGW("config: " WHERE_FMT "timers.id_interval is %g s, longer than the FCC 10-minute limit\n",
+             WHERE_ARGS, cfg->timers.id_interval);
+#undef NEWLY
+}
+
+static void validate(const entries_t *es, const config_t *cfg)
+{
+    const config_events_t *ev = &cfg->events;
+
+    if (cfg->link.enabled) {
+        if (cfg->link.remote_host[0] == '\0')
+            cfg_err("link.remote_host is required (or set link.enabled = false)\n");
+        if (cfg->link.codec == LINK_CODEC_OPUS && cfg->link.opus_frame_ms != 20
+            && cfg->link.opus_frame_ms != 40 && cfg->link.opus_frame_ms != 60)
+            cfg_err("link.opus_frame_ms must be 20, 40, or 60\n");
+    }
 
     for (size_t i = 0; i < NFIELDS; i++) {
         if (strcmp(FIELDS[i].section, "events") != 0)
@@ -1465,31 +1641,51 @@ static void validate(const entries_t *es, const config_t *cfg)
     if (!ev->impolite_id[0])
         cfg_err("events.impolite_id is required: it's the ID of last resort if mandatory_ids is empty\n");
 
-    if (ev->anxious_id[0] && cfg->timers.id_anxious >= cfg->timers.id_interval)
-        cfg_err("timers.id_anxious (%g) must be less than timers.id_interval (%g)\n",
-                cfg->timers.id_anxious, cfg->timers.id_interval);
+    int before = s_errors;
+    check_consistency(cfg);
+    warn_settings(cfg, NULL);
+
+    /* Each window on its own, over the file's settings. A window that clashes only
+     * with another overlapping window isn't caught, but each on its own must work.
+     * Skipped if the file itself is inconsistent, or every window repeats it. */
+    if (s_errors == before && cfg->nschedule > 0) {
+        config_t *open = malloc(sizeof(*open));
+        if (open) {
+            char where[64];
+            for (int i = 0; i < cfg->nschedule; i++) {
+                *open = *cfg;
+                for (int j = 0; j < cfg->schedule[i].nsets; j++)
+                    config_apply_override(open, &cfg->schedule[i].sets[j]);
+                snprintf(where, sizeof(where), "schedule.%s", cfg->schedule[i].name);
+                s_where = where;
+                check_consistency(open);
+                warn_settings(open, cfg);
+                s_where = NULL;
+            }
+            free(open);
+        }
+    }
 
     check_schedule_lists(cfg);
 
-    bool tail_used = ev->n_tail_messages > 0;
-    for (int i = 0; i < cfg->nschedule && !tail_used; i++)
-        for (int j = 0; j < cfg->schedule[i].nsets; j++)
-            if (cfg->schedule[i].sets[j].offset == offsetof(config_events_t, tail_messages))
+    /* The count can be set by a window as well as the messages, so this only
+     * warns when no combination could ever play one. */
+    bool tail_used = ev->n_tail_messages > 0, tail_counted = cfg->timers.tail_every > 0;
+    for (int i = 0; i < cfg->nschedule; i++)
+        for (int j = 0; j < cfg->schedule[i].nsets; j++) {
+            const config_override_t *o = &cfg->schedule[i].sets[j];
+            if (o->offset == offsetof(config_t, events.tail_messages) && o->value[0])
                 tail_used = true;
-    if (tail_used && cfg->timers.tail_every == 0)
+            if (o->offset == offsetof(config_t, timers.tail_every) && *(const int *)o->value > 0)
+                tail_counted = true;
+        }
+    if (tail_used && !tail_counted)
         LOGW("config: a tail message is set, but timers.tail_every is 0, so it won't play\n");
 
     /* Not an error, as impolite_id covers it. Misspelling the key can't land here --
      * that's already an unknown-setting error. */
     if (ev->n_mandatory_ids == 0)
         LOGW("config: events.mandatory_ids is empty -- mandatory IDs will use events.impolite_id\n");
-    if (cfg->timers.timeout == 0.0)
-        LOGW("config: timers.timeout is 0: a local carrier can hold the transmitter on with no limit\n");
-    if (cfg->link.enabled && cfg->timers.link_timeout == 0.0)
-        LOGW("config: timers.link_timeout is 0: the link can hold the transmitter on with no limit\n");
-    if (cfg->timers.id_interval > 600.0)
-        LOGW("config: timers.id_interval is %g s, longer than the FCC 10-minute limit\n",
-             cfg->timers.id_interval);
 }
 
 /* ── public ─────────────────────────────────────────────────────────────── */
@@ -1540,6 +1736,8 @@ static bool message_in_use(const config_t *cfg, const char *name)
     }
     for (int i = 0; i < cfg->nschedule; i++)
         for (int j = 0; j < cfg->schedule[i].nsets; j++) {
+            if (!cfg->schedule[i].sets[j].names)
+                continue;
             char copy[CFG_STR];
             snprintf(copy, sizeof(copy), "%s", cfg->schedule[i].sets[j].value);
             char *save = NULL;

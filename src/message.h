@@ -54,3 +54,7 @@ int message_var_clips(voice_var_t var, const struct tm *when, const message_stat
  * and returns how many there were. Separate from config_load because the
  * vocab cache isn't loaded until after the config. */
 int message_validate(const config_t *cfg, vocab_cache_t *vocab);
+
+/* The length limit again, for each schedule window that changes audio settings,
+ * as its messages would sound while it's open. Returns how many are over. */
+int message_check_schedule(const config_t *cfg, vocab_cache_t *vocab);

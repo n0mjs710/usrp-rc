@@ -28,18 +28,19 @@ codec       = pcm      # pcm or opus
 #start_on      = true   # link state at startup; the DTMF link commands change it after that
 
 [events]
-# Which message plays for each occasion. Empty = play nothing.
+# Which message plays for each occasion. Empty = play nothing. Each courtesy tone
+# is independent: an empty one plays no tone, and does not use another one.
 # initial_ids, mandatory_ids and tail_messages rotate through a comma-separated list (max 8).
 initial_ids     = default_voice
 mandatory_ids   = default_cw
 impolite_id     = default_cw   # required: also the ID of last resort if mandatory_ids is empty
-ct_link_on_message = yellow_jacket
-ct_link_message    = bumble_bee
+ct_link_off_message = yellow_jacket   # local traffic, link off or no link
+ct_link_on_message  = yellow_jacket   # local traffic, link on
+ct_link_message     = bumble_bee      # link traffic
 timeout_message = timeout_warn
 #startup_message        =
 #anxious_id             =
 #timeout_cancel_message =
-#ct_link_off_message    =               # local courtesy tone while the link is off; empty = ct_link_on_message
 #tail_messages          =               # see timers.tail_every; empty = none
 #time_message           = time_readback  # replies to DTMF commands; empty = no reply
 #stats_message          = stats_readback
@@ -72,8 +73,14 @@ default_voice = voice: THISIS {call} REPEATER
 default_cw    = cw: {call}/R
 
 [schedule]
-# Change [events] settings during a time window. They change back by themselves when
-# the window closes, and a restart in the middle of one picks it back up.
+# Change settings during a time window. They change back by themselves when the
+# window closes, and a restart in the middle of one picks it back up. A new timer
+# value applies the next time that timer starts.
+#
+# Any setting can change, except the ones that only take effect at startup: the top
+# of the file, [log], [mmdvm], [link], [stats], [state], dtmf.enabled,
+# dtmf.min_tone_ms, the dtmf.beep_ settings, audio.ste_delay_ms, audio.lead_trim_ms
+# and events.startup_message. Write a setting by its name, or as section.name.
 #
 #     name = DAYS HH:MM-HH:MM setting=value [setting=value ...]
 #
@@ -91,8 +98,8 @@ default_cw    = cw: {call}/R
 #     meeting = 2nd-wed 07:00-19:25 tail_messages+=club_meeting
 #     no_cw   = sat,sun 00:00-23:59 mandatory_ids-=default_cw
 #
-#net_reminder = wed 07:00-19:25 tail_messages=net_tonight
-#net_running  = wed 19:30-20:30 ct_link_on_message=net_ct ct_link_off_message=net_ct
+#net_reminder = wed 07:00-19:25 tail_messages=net_tonight tail_every=5
+#net_running  = wed 19:30-20:30 timeout=600 hang=1 ct_link_on_message=net_ct ct_link_off_message=net_ct
 
 # ── Optional: everything below shows the defaults ─────────────────────────
 #
@@ -132,14 +139,15 @@ default_cw    = cw: {call}/R
 
 #[timers]
 # All in seconds.
-#hang        = 2.5     # PTT holdoff after the courtesy tone
-#ct_delay    = 0.5     # from RX loss to courtesy tone
+#hang        = 2.5     # transmitter hold after the courtesy tone; 0 = none
+#ct_delay    = 0.5     # from RX loss to courtesy tone; 0 = none
 #kerchunk    = 0.5     # minimum COR hold to respond (anti-kerchunk)
-#timeout     = 180     # local time-out timer (TOT); resets at the courtesy tone; 0 = off
+#timeout     = 180     # local time-out timer (TOT); resets at the courtesy tone
+                       # (the end of ct_delay, also with no tone); 0 = off
 #link_timeout = 180    # link time-out timer; resets each time the link unkeys; 0 = off
 #id_interval = 600     # mandatory ID interval (FCC: at most 10 minutes)
 #id_anxious  = 60      # sneak an anxious ID this far before the deadline
-#tail_every  = 10      # play events.tail_messages every this many tails; 0 = off
+#tail_every  = 0       # play events.tail_messages every this many tails; 0 = off
 #tail_min_interval = 0 # ... but at least this many seconds apart; 0 = no limit
 
 #[stats]
@@ -157,7 +165,7 @@ default_cw    = cw: {call}/R
 #interdigit_ms   = 4000   # a longer gap between digits discards what came before
 #end_of_tx_ms    = 8000   # a longer gap from last digit to unkey discards the sequence
 #mute_hang_ms    = 2000   # repeat audio stays muted this long after the last tone
-#beep_hz         = 440    # plays during the mute; level is audio.tone_level
+#beep_hz         = 440    # plays during the mute; level is audio.tone_level at startup
 #beep_on_ms      = 100
 #beep_off_ms     = 900
 #pad_test_prefix = 5      # pad test: prefix, then digits to read back. Empty = off.

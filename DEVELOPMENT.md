@@ -70,9 +70,11 @@ and multi-port routing are deliberately not the model here.
 ## Schedule
 
 `src/schedule.c` is a pure function of the config and a time: it holds no state, so
-windows have no start or end events to miss. `main.c` re-evaluates it every minute
-into `app_t.events`, and `port.c` reads events through `p->ev`, which points there.
-Anything that changes by time should read `p->ev` rather than `cfg->events`.
+windows have no start or end events to miss. `main.c` keeps the config as loaded in
+`app_t.base` and re-evaluates the schedule every minute into `app_t.cfg`, which every
+module points at. So anything read from the config at the time it's used follows the
+schedule. Anything cached at startup (sockets, the codec, the DTMF decoder, the STE
+buffer, the DTMF beep) must be listed in `not_schedulable()` in `src/config.c`.
 
 ## Usage statistics
 

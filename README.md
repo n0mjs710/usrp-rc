@@ -6,6 +6,14 @@ functions of MMDVM-Host.
 
 For operation and the settings reference, see [MANUAL.md](MANUAL.md).
 
+> [!WARNING]
+> **MMDVM-Host FM audio quality.** At the date of this document (November 2026),
+> MMDVM-Host has defects that decrease the audio quality of FM mode. The symptoms are
+> crackles, distortion and an incorrect frequency response (EQ). The defects are worst
+> on the network and with `[FM] LinkMode=1`, because these two functions use the same
+> code path. For the best performance, use the patched versions of MMDVM and MMDVM-Host
+> at [github.com/n0mjs710](https://github.com/n0mjs710).
+
 ## Contents
 
 - [Description](#description)
@@ -51,14 +59,16 @@ remote ASL server.
 
 ## Functional overview
 
-```
-MMDVM-Host (loopback)                  usrp-rc                    Network
-  FM Network ──► [mmdvm RX] ──┬────────────────────────────► [link TX]  (STE-delayed uplink)
-                              │        repeater                USRP
-                              │        controller
-  FM Network ◄── [mmdvm TX] ◄─┴──────┬─────────────────────  [link RX]  (jitter-buffered downlink)
-                                     │                         USRP
-                      controller audio (IDs, CT, timeout, hang)
+```text
+MMDVM-Host (loopback)          usrp-rc                         Network
+
+ FM Network ─► [mmdvm RX] ─┬─────────────────────────► [link TX] USRP
+                           │                           STE-delayed uplink
+                           │   repeater controller
+                           │
+ FM Network ◄─ [mmdvm TX] ◄┴─────┬───────────────────── [link RX] USRP
+                                 │                     jitter-buffered
+             controller audio (IDs, CT, time-out, hang)
 ```
 
 | Audio | Source | Destination |
@@ -274,6 +284,7 @@ remote_port = 41001
 initial_ids          = my_voice
 mandatory_ids        = my_cw,my_voice
 impolite_id          = my_cw
+ct_link_off_message  = yellow_jacket
 ct_link_on_message   = yellow_jacket
 ct_link_message      = bumble_bee
 timeout_message      = timeout_warn

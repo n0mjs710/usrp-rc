@@ -618,7 +618,7 @@ static bool scenario_link_state_courtesy_tone(config_t *base, vocab_cache_t *voc
     CHECK(ms[0] <= 80, "link on plays the normal tone (%d ms)", ms[0]);
     CHECK(ms[1] >= 180, "link off plays its own tone (%d ms)", ms[1]);
 
-    /* Unset, there's nothing different to play. */
+    /* Unset, that case has no tone: there's no fallback to another one. */
     cfg.events.ct_link_off_message[0] = 0;
     key_local(p, true);
     wait_ms(p, 150);
@@ -626,7 +626,7 @@ static bool scenario_link_state_courtesy_tone(config_t *base, vocab_cache_t *voc
     int fallback = 0;
     for (int t = 0; t < 1000; t += TICK_MS)
         if (tick(p)) fallback += TICK_MS;
-    CHECK(fallback > 0 && fallback <= 80, "with none set, link off falls back to the normal tone (%d ms)", fallback);
+    CHECK(fallback == 0, "with none set, link off plays no tone (%d ms)", fallback);
 
     port_destroy(p);
     printf(ok ? "[9] PASS\n" : "[9] FAIL\n");
@@ -1188,6 +1188,57 @@ static bool scenario_repeater_down(config_t *base, vocab_cache_t *vocab)
 
 /* ── driver ───────────────────────────────────────────────────────────── */
 
+static bool scenario_no_courtesy_tone(config_t *base, vocab_cache_t *vocab)
+{
+    printf("\n[18] no courtesy tone, and true zero hang time\n");
+    bool ok = true;
+    config_t cfg = timeout_cfg(base);
+    cfg.events.ct_link_on_message[0] = cfg.events.ct_link_message[0] = cfg.events.ct_link_off_message[0] = 0;
+    cfg.timers.hang = 1.0;
+    port_t *p;
+    char *log;
+
+    RUN_CAPTURED(&cfg, {
+        for (int i = 0; i < 3; i++) { key_local(p, true); wait_ms(p, 4000); key_local(p, false); wait_ms(p, 1000); }
+        wait_until_idle(p, 8000);
+    });
+    CHECK(!strstr(log, "TIMEOUT"), "with no tone, the time-out timer still resets at the end of ct_delay");
+    free(log); port_destroy(p);
+
+    RUN_CAPTURED(&cfg, {
+        for (int i = 0; i < 3; i++) { key_local(p, true); wait_ms(p, 4000); key_local(p, false); wait_until_idle(p, 3000); }
+    });
+    CHECK(!strstr(log, "TIMEOUT"), "... and when the transmitter drops");
+    free(log); port_destroy(p);
+
+    /* A short tail with no tone: ct_delay holds the transmitter, hang is 0. */
+    cfg.timers.hang = 0.0;
+    cfg.timers.ct_delay = 1.0;
+    p = fresh_port(&cfg, vocab);
+    key_local(p, true);
+    wait_ms(p, 1000);
+    key_local(p, false);
+    uint64_t unkey_at = g_now;
+    wait_until_idle(p, 3000);
+    int held = (int)(g_ptt[g_ptt_n - 1].ms - unkey_at);
+    CHECK(held >= 1000 && held <= 1000 + TICK_MS, "ct_delay 1, hang 0, no tone: the transmitter holds for ct_delay (%d ms)", held);
+    port_destroy(p);
+
+    cfg.timers.ct_delay = 0.0;
+    p = fresh_port(&cfg, vocab);
+    key_local(p, true);
+    wait_ms(p, 1000);
+    key_local(p, false);
+    uint64_t unkeyed = g_now;
+    bool dropped = wait_until_idle(p, 1000);
+    CHECK(dropped && g_ptt_n >= 2 && !g_ptt[g_ptt_n - 1].active && g_ptt[g_ptt_n - 1].ms - unkeyed <= TICK_MS,
+          "hang 0, ct_delay 0 and no tone: the transmitter drops with the receiver (%d ms)",
+          (int)(g_ptt[g_ptt_n - 1].ms - unkeyed));
+    port_destroy(p);
+
+    return ok;
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -1224,6 +1275,7 @@ int main(void)
         scenario_ct_follows_last_active,
         scenario_timeout_per_source,
         scenario_repeater_down,
+        scenario_no_courtesy_tone,
     };
     int n = (int)(sizeof(scenarios) / sizeof(scenarios[0]));
 

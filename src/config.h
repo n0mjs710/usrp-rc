@@ -186,18 +186,20 @@ typedef struct {
 } config_state_t;
 
 #define CFG_MAX_SCHEDULE      32
-#define CFG_MAX_SCHEDULE_SETS 8
+#define CFG_MAX_SCHEDULE_SETS 16
 #define CFG_MAX_DAY_RULES     8
 
 /* One setting changed for the length of a schedule window. Offsets are into
- * config_events_t, so applying one needs nothing else from the config. */
+ * config_t. A list keeps its text, for += and -=; anything else holds the value
+ * already parsed, ready to copy in. */
 typedef enum { OVERRIDE_SET, OVERRIDE_ADD, OVERRIDE_REMOVE } override_op_t;
 
 typedef struct {
     size_t offset;
     size_t size;
-    size_t count_offset;   /* for a list of names; 0 = a single name */
+    size_t count_offset;   /* for a list of names; 0 = not a list */
     override_op_t op;      /* add and remove only apply to a list */
+    bool   names;          /* value is message names, as text */
     char   value[CFG_STR];
 } config_override_t;
 
@@ -264,6 +266,9 @@ int  config_load(config_t *cfg, const char *path);
 void config_prune_messages(config_t *cfg);
 
 void config_free(config_t *cfg);
+
+/* Apply one schedule setting. */
+void config_apply_override(config_t *cfg, const config_override_t *o);
 
 /* Look up a message by name; returns NULL if not found or name is empty. */
 const config_message_t *config_find_message(const config_t *cfg, const char *name);

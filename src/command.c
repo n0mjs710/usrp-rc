@@ -272,6 +272,20 @@ const char *command_digit_clip(char digit)
     }
 }
 
+/* Rendered once, at startup: this plays continuously during a mute, on the audio path,
+ * so its levels don't follow a schedule window. */
+static void render_beep(command_session_t *s)
+{
+    const config_t *cfg = s->cfg;
+    s->beep = tone_render((double)cfg->dtmf.beep_hz, 0.0, cfg->dtmf.beep_on_ms,
+                          cfg->audio.tone_level, &s->beep_len);
+    if (s->beep) {
+        sbuf_t b = {.data = s->beep, .len = s->beep_len, .cap = s->beep_len};
+        sbuf_scale(&b, cfg->audio.master_gain);
+    }
+    s->beep_period = s->beep_len + (size_t)cfg->dtmf.beep_off_ms * (TONE_SAMPLE_RATE / 1000);
+}
+
 int command_session_create(command_session_t **out, const config_t *cfg)
 {
     command_session_t *s = calloc(1, sizeof(*s));
@@ -284,18 +298,11 @@ int command_session_create(command_session_t **out, const config_t *cfg)
         return -1;
     }
 
-    /* Rendered once: this plays continuously during a mute, on the audio path. */
-    s->beep = tone_render((double)cfg->dtmf.beep_hz, 0.0, cfg->dtmf.beep_on_ms,
-                          cfg->audio.tone_level, &s->beep_len);
-    if (s->beep) {
-        sbuf_t b = {.data = s->beep, .len = s->beep_len, .cap = s->beep_len};
-        sbuf_scale(&b, cfg->audio.master_gain);
-    }
-    s->beep_period = s->beep_len + (size_t)cfg->dtmf.beep_off_ms * (TONE_SAMPLE_RATE / 1000);
-
+    render_beep(s);
     *out = s;
     return 0;
 }
+
 
 void command_session_destroy(command_session_t *s)
 {

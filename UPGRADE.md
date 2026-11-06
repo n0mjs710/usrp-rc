@@ -28,6 +28,19 @@ each out-of-date setting by line number.
    exists. It causes an error.
 5. In `initial_ids` and `mandatory_ids`, use commas between names:
    `mandatory_ids = id1,id2`. Spaces between names cause an error.
+6. In `[events]`, set each courtesy tone that the repeater must play. An empty
+   courtesy tone now plays no tone. It does not use `ct_link_on_message`. A repeater
+   with `[link]` `enabled = false` now uses `ct_link_off_message`. To keep one tone
+   for all traffic, set the same message in all three:
+
+   ```ini
+   ct_link_off_message = yellow_jacket
+   ct_link_on_message  = yellow_jacket
+   ct_link_message     = yellow_jacket
+   ```
+
+7. If the repeater plays tail messages, set `[timers]` `tail_every`. The default is now
+   0, which disables tail messages. The old default was 10.
 
 ### New functions
 
@@ -45,6 +58,7 @@ see [MANUAL.md](MANUAL.md).
 | Separate time-out for link traffic | `[timers]` `link_timeout` |
 | Repeater down and up by DTMF (no code by default) | `[dtmf]` `repeater_code` |
 | Settings that change by time and day | `[schedule]` section |
+| No courtesy tone, or no tail at all | `[events]` `ct_*_message` empty; for no tail, also `[timers]` `ct_delay = 0`, `hang = 0` |
 | Different location for usage statistics, or memory only | `[stats]` `file` |
 
 When DTMF is enabled, these commands operate by default. An empty code disables its
@@ -62,6 +76,12 @@ command.
 
 ### Changes in operation
 
+- A schedule window can now change any setting, except the settings that only take
+  effect at startup. Before, a window could change `[events]` settings only.
+  `usrp-rc --check` examines each window with the settings that it changes.
+- With no courtesy tone set, the local time-out timer still resets at the end of
+  `ct_delay`, the same point as a tone. For a short tail with no tone, set `ct_delay` to
+  the tail length and `hang = 0`.
 - If `initial_ids` is empty, the first key-up plays no ID, as before. But when the ID timer
   expires, the repeater now sends an ID, also if no other transmission occurred.
 - The 64-message limit is removed. `usrp-rc` examines all messages. It then removes from

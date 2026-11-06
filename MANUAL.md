@@ -3,6 +3,14 @@
 This manual applies to the `dtmf-control` branch of `usrp-rc`. For installation and
 MMDVM-Host integration, see [README.md](README.md).
 
+> [!WARNING]
+> **MMDVM-Host FM audio quality.** At the date of this document (November 2026),
+> MMDVM-Host has defects that decrease the audio quality of FM mode. The symptoms are
+> crackles, distortion and an incorrect frequency response (EQ). The defects are worst
+> on the network and with `[FM] LinkMode=1`, because these two functions use the same
+> code path. For the best performance, use the patched versions of MMDVM and MMDVM-Host
+> at [github.com/n0mjs710](https://github.com/n0mjs710).
+
 ## Contents
 
 1. [Introduction](#1-introduction)
@@ -56,7 +64,7 @@ used. Speech and sound effects are WAV clips and text definitions.
 | Tail | The period from the end of a transmission to the end of the hang |
 | Message | A named sequence of voice, CW and tone audio |
 | Event | A setting that names the message for one occasion |
-| Window | A schedule line that changes events during a time period |
+| Window | A schedule line that changes settings during a time period |
 
 ### 1.4 Units
 
@@ -217,7 +225,7 @@ value:
 
 ```text
 config: line 12: timers.hnag: unknown setting (did you mean timers.hang?)
-config: line 20: events.ct_link_on_message: no message named 'yelow_jacket' (did you mean 'yellow_jacket'?)
+config: line 20: events.impolite_id: no message named 'idd' (did you mean 'id'?)
 config: line 31: messages.my_voice: no voice clip named 'THSIS'
 ```
 
@@ -265,7 +273,8 @@ Most timers and events start at one point in this cycle:
    |  timers.ct_delay
  Replies and the anxious ID play, if they are pending.
    |
- Courtesy tone. The time-out timer resets here.
+ Courtesy tone, if one is set. The local time-out timer resets here,
+ also with no tone.
    |  timers.hang
  Tail message plays, if it is due.
    |
@@ -276,16 +285,39 @@ A local key-up during the delay or the hang starts repetition again. The local t
 timer then continues from its last value. A link key-up always starts the link time-out
 timer from zero.
 
+With no courtesy tone, the local time-out timer still resets at the end of `ct_delay`.
+For a short tail with no tone, use `ct_delay` as the hang: set `ct_delay` to the tail
+length and `hang` to 0. The transmitter stays on for `ct_delay`, then stops. See
+[12.8](#128-no-courtesy-tone-short-tail).
+
 | Timer | Default | Function |
 | --- | --- | --- |
 | `kerchunk` | 0.5 s | Minimum carrier time for a full transmission |
-| `ct_delay` | 0.5 s | Time from carrier stop to the courtesy tone |
-| `hang` | 2.5 s | Time from the end of the courtesy tone to transmitter stop |
+| `ct_delay` | 0.5 s | Time from carrier stop to the courtesy tone. 0 is no delay. |
+| `hang` | 2.5 s | Time from the end of the courtesy tone to transmitter stop. 0 is no hang. |
 | `timeout` | 180 s | Maximum local transmission time |
 | `link_timeout` | 180 s | Maximum link transmission time |
 
 > **Note:** The log value `ptt: OFF ... duration` includes the carrier time, `ct_delay`,
 > the courtesy tone and `hang`.
+
+### 4.1 No tail
+
+For no tail ("true zero hang time"), set all three:
+
+```ini
+[timers]
+ct_delay = 0
+hang     = 0
+
+[events]
+ct_link_off_message =
+ct_link_on_message  =
+ct_link_message     =
+```
+
+The transmitter stops in the next 20 ms audio frame after the carrier stops. An ID or a
+command reply that is due still plays before the transmitter stops.
 
 ---
 
@@ -484,12 +516,17 @@ This protects ID integrity against configuration mistakes.
 
 | Setting | Plays after |
 | --- | --- |
-| `ct_link_on_message` | Local traffic with the link on. If `ct_link_off_message` is empty, also local traffic with the link off or with no link. |
-| `ct_link_off_message` | Local traffic with the link off |
-| `ct_link_message` | Link traffic. If this setting is empty, the two tones above apply. |
+| `ct_link_off_message` | Local traffic with the link off, or with no link (`[link]` `enabled = false`) |
+| `ct_link_on_message` | Local traffic with the link on |
+| `ct_link_message` | Link traffic |
 
-A courtesy tone can be any message, also a voice message. A different tone for link off
-shows the link state to listeners.
+- Each setting is independent. An empty setting plays no tone. It does not use one of
+  the other tones.
+- To play one tone for all traffic, set the same message in all three settings.
+- A courtesy tone can be any message, also a voice message.
+- A different tone for link off shows the link state to listeners.
+- The local time-out timer resets at the end of `ct_delay`, also when no tone is set.
+  See [6.3](#63-time-out).
 
 ### 6.3 Time-out
 
@@ -498,11 +535,12 @@ timer.
 
 | Timer | Setting | Resets |
 | --- | --- | --- |
-| Local | `timers.timeout` | At the courtesy tone. Also when a local station keys up during link traffic, or immediately after it. |
+| Local | `timers.timeout` | At the courtesy tone, which is the end of `ct_delay`, also with no tone set. Also when a local station keys up during link traffic, or immediately after it. |
 | Link | `timers.link_timeout` | Each time the link unkeys. Link stations cannot hear the courtesy tone. |
 
 A local station that keys up before the courtesy tone does not reset the local timer.
-Thus, local stations must wait for the courtesy tone.
+Thus, local stations must wait for the courtesy tone. With no courtesy tone, they must
+wait for the end of `ct_delay`.
 
 When a timer expires, the repeater stops the audio from that source until the source
 unkeys:
@@ -569,11 +607,12 @@ tail message never keys the transmitter.
 
 | Setting | Condition |
 | --- | --- |
-| `timers.tail_every` | Minimum number of tails since the last tail message. `1` is each tail. `0` disables tail messages. Default: 10. |
+| `timers.tail_every` | Minimum number of tails since the last tail message. `1` is each tail. `0` disables tail messages. Default: 0. |
 | `timers.tail_min_interval` | Minimum number of seconds since the last tail message started. `0` is no limit. Default: 0. |
 
 At the end of each hang, the message plays if both conditions are true. If not, the tail
-ends as usual.
+ends as usual. Tail messages are off by default: to use them, set `tail_messages` and
+`tail_every`. If `tail_messages` is set and `tail_every` is 0, `--check` shows a warning.
 
 - A tail message does not wait in a queue. It plays a maximum of one time in each tail.
 - If a key-up interrupts a tail message, the message counts as played.
@@ -587,8 +626,11 @@ at the end of a hang if 5 minutes have passed since the last tail message starte
 
 ### 7.1 Function
 
-A schedule window changes `[events]` settings for a time period. When the window closes,
-the settings go back to their configured values. No second line is necessary.
+A schedule window changes settings for a time period. When the window closes, the
+settings go back to their configured values. No second line is necessary.
+
+A window can change timers, audio, DTMF and event settings. Examples: a longer time-out
+timer and a shorter hang during a net, or a different CW speed and pitch.
 
 ```ini
 [messages]
@@ -596,8 +638,8 @@ net_tonight = voice: NET TONIGHT AT SEVEN THIRTY
 net_ct      = cw: N
 
 [schedule]
-net_reminder = wed 07:00-19:25 tail_messages=net_tonight
-net_running  = wed 19:30-20:30 ct_link_on_message=net_ct ct_link_off_message=net_ct
+net_reminder = wed 07:00-19:25 tail_messages=net_tonight tail_every=5
+net_running  = wed 19:30-20:30 timeout=600 hang=1 ct_link_on_message=net_ct
 ```
 
 ### 7.2 Window format
@@ -612,7 +654,7 @@ name = DAYS HH:MM-HH:MM setting=value [setting=value ...]
 | Days | See [7.3](#73-days). Commas separate days, with no spaces: `mon,wed,fri` or `1st-tue,3rd-tue`. |
 | Times | 24-hour format. The window includes its start minute. It does not include its end minute. |
 | Midnight | If the end time is before the start time, the window continues past midnight. The window belongs to its start day: `fri 22:00-02:00` is open at 01:00 on Saturday. |
-| Settings | Any `[events]` setting, but not `startup_message`. An empty value disables the setting: `tail_messages=`. Lists use commas with no spaces: `mandatory_ids=id1,id2`. |
+| Settings | See [7.5](#75-settings). An empty value disables an event or a code: `tail_messages=`. Lists use commas with no spaces: `mandatory_ids=id1,id2`. |
 | Overlaps | Windows apply in file sequence. The last line has priority. |
 
 ### 7.3 Days
@@ -656,6 +698,9 @@ club_meeting = voice: CLUB MEETING TONIGHT
 ident_cw     = cw: {call}/R
 ident_voice  = voice: THISIS {call} REPEATER
 
+[timers]
+tail_every = 5
+
 [events]
 mandatory_ids = ident_cw,ident_voice
 
@@ -693,7 +738,31 @@ weekly  = wed 19:00-21:00 ct_link_on_message=weekly_ct
 
 Put the most specific line last.
 
-### 7.5 Timing
+### 7.5 Settings
+
+A window can change each setting in these sections:
+
+- `[timers]`
+- `[audio]`, but not `ste_delay_ms` or `lead_trim_ms`
+- `[dtmf]`, but not `enabled`, `min_tone_ms` or the `beep_` settings
+- `[events]`, but not `startup_message`
+
+The other settings take effect only at startup. `--check` rejects them in a window.
+
+- Write a setting by its name, for example `hang=1`. The name `section.name` is also
+  correct, for example `timers.hang=1`.
+- Each value has the same range as in its own section.
+- `--check` examines each window together with the settings in the file. It applies the
+  same rules as to the file. For example, a window cannot set `time_code` to a code
+  that another command uses. A window that sets `timeout=0` causes a warning.
+- `--check` also examines the length of each message during each window that changes
+  `[audio]` settings. A message must be 3 minutes or shorter in each window.
+- `--check` does not examine two windows that overlap together.
+
+A new value has effect the next time that it is used. A timer that runs when the window
+opens or closes keeps its value. The new value applies when the timer starts again.
+
+### 7.6 Timing
 
 - Windows start and stop at the start of each minute.
 - The schedule uses the system clock and time zone. Keep the clock and time zone of the
@@ -701,17 +770,17 @@ Put the most specific line last.
 - The schedule stores no data. After a restart during a window, the window applies again
   immediately.
 
-### 7.6 Limits
+### 7.7 Limits
 
 | Item | Limit |
 | --- | --- |
 | Windows | 32 |
-| Settings in one window | 8 |
+| Settings in one window | 16 |
 | Calendar days in one window | 8 |
 | Names in a list | 8. `--check` shows a warning if `+=` can add more. Names after the eighth are not added. |
 | Length of one window | 24 hours |
 
-### 7.7 Test a window
+### 7.8 Test a window
 
 1. Add a window that opens 2 minutes after the current time.
 2. Apply the change. See [3.3](#33-apply-a-change).
@@ -723,10 +792,10 @@ tail: 'net_tonight'
 schedule: 'net_reminder' ended
 ```
 
-### 7.8 Functions not available
+### 7.9 Functions not available
 
-- A window cannot change `[timers]` or `[link]` settings. Thus, a window cannot turn the
-  link on or off.
+- A window cannot change `[link]` settings. Thus, a window cannot turn the link on or
+  off.
 - A change without an end time is not available.
 - "Last Friday" and one-time dates are not available.
 
@@ -746,8 +815,8 @@ schedule: 'net_reminder' ended
 - `usrp-rc` does not keep the link state after a restart. At each start, the link state
   is the value of `start_on`.
 - To hear the link state without a change, use the link-status command, `70`.
-- To show the link state with each courtesy tone, set a different `ct_link_off_message`.
-  See [6.2](#62-courtesy-tones).
+- To show the link state with each courtesy tone, set different messages in
+  `ct_link_on_message` and `ct_link_off_message`. See [6.2](#62-courtesy-tones).
 - At this time, each station can use `72` and `73`. A control operator level is planned.
 - At this time, `codec = opus` operates only with other tools from the same author.
 
@@ -916,7 +985,8 @@ traffic:
 ## 11. Settings reference
 
 The default applies when a setting is not in the file. A value out of range is a
-configuration error.
+configuration error. A schedule window can change the settings in `[timers]`, `[audio]`,
+`[dtmf]` and `[events]`, with some exceptions. See [7.5](#75-settings).
 
 ### 11.1 Top level
 
@@ -969,11 +1039,11 @@ the ports to agree with `MMDVM-Host.ini`. For the procedure, see
 | `kerchunk` | `0.5` | 0-60 | The repeater ignores a carrier shorter than this time. |
 | `ct_delay` | `0.5` | 0-60 | Time from carrier stop to the courtesy tone |
 | `hang` | `2.5` | 0-600 | Time that the transmitter stays on after the courtesy tone |
-| `timeout` | `180` | 0-3600 | Local time-out timer. It resets at the courtesy tone. 0 is off. |
+| `timeout` | `180` | 0-3600 | Local time-out timer. It resets at the courtesy tone (the end of `ct_delay`), also with no tone set. 0 is off. |
 | `link_timeout` | `180` | 0-3600 | Link time-out timer. It resets each time the link unkeys. 0 is off. |
 | `id_interval` | `600` | 1-86400 | ID timer. A value above 600 (the FCC limit of 10 minutes) causes a warning. |
 | `id_anxious` | `60` | 0-3600 | Anxious ID period before the ID timer expires. Must be less than `id_interval`. |
-| `tail_every` | `10` | 0-1000 | Tails between tail messages. 0 disables tail messages. |
+| `tail_every` | `0` | 0-1000 | Tails between tail messages. 0 disables tail messages. |
 | `tail_min_interval` | `0` | 0-86400 | Minimum seconds between tail messages. 0 is no limit. |
 
 ### 11.6 `[audio]`
@@ -986,7 +1056,7 @@ the ports to agree with `MMDVM-Host.ini`. For the procedure, see
 | `morse_level` | `0.9` | 0-2 | CW level |
 | `impolite_morse_level` | `0.3` | 0-2 | CW level for an impolite ID |
 | `voice_level` | `0.9` | 0-2 | Voice clip level |
-| `tone_level` | `0.5` | 0-2 | Level of tones without `@LEVEL`, and of the DTMF beep |
+| `tone_level` | `0.5` | 0-2 | Level of tones without `@LEVEL`, and of the DTMF beep. The beep uses the value at startup. |
 | `voice_gap_ms` | `150` | 0-10000 | Length of a `_` pause |
 | `ste_delay_ms` | `0` | 0-2000 | Delay of repeated audio and link audio, for squelch tail elimination. 0 is off. |
 | `lead_trim_ms` | `0` | 0-2000 | Mute at the start of each transmission. 0 is off. |
@@ -1030,7 +1100,8 @@ Levels above 1.0 are permitted, but they can cause clipping.
 
 ### 11.10 `[events]`
 
-All `[events]` settings are message names. Empty plays nothing.
+All `[events]` settings are message names. Empty plays nothing. No event uses another
+event's message in its place.
 
 | Setting | Default | Lists | Section |
 | --- | --- | --- | --- |
@@ -1039,8 +1110,8 @@ All `[events]` settings are message names. Empty plays nothing.
 | `mandatory_ids` | Empty | Yes | [6.1](#61-identification) |
 | `anxious_id` | Empty | No | [6.1](#61-identification) |
 | `impolite_id` | None. Necessary. | No | [6.1](#61-identification) |
-| `ct_link_on_message` | Empty | No | [6.2](#62-courtesy-tones) |
 | `ct_link_off_message` | Empty | No | [6.2](#62-courtesy-tones) |
+| `ct_link_on_message` | Empty | No | [6.2](#62-courtesy-tones) |
 | `ct_link_message` | Empty | No | [6.2](#62-courtesy-tones) |
 | `timeout_message` | Empty | No | [6.3](#63-time-out) |
 | `timeout_cancel_message` | Empty | No | [6.3](#63-time-out) |
@@ -1080,8 +1151,8 @@ id_voice = voice: THISIS {call} REPEATER
 
 ```ini
 [events]
-ct_link_on_message  = yellow_jacket
 ct_link_off_message = comet
+ct_link_on_message  = yellow_jacket
 ct_link_message     = bumble_bee
 ```
 
@@ -1092,7 +1163,7 @@ ct_link_message     = bumble_bee
 weekend_time = voice: F_GOOD {greeting} _ F_THE F_TIME F_IS {time} {ampm}
 
 [schedule]
-weekend_tail = weekends 08:00-20:00 tail_messages=weekend_time
+weekend_tail = weekends 08:00-20:00 tail_messages=weekend_time tail_every=5
 ```
 
 ### 12.4 Speak the usage for 7 days with command `38`
@@ -1105,6 +1176,9 @@ stats_readback = voice: {keyups_week} KEY UP _S _ {minutes_week} MINUTES
 ### 12.5 Disable tail messages at night
 
 ```ini
+[timers]
+tail_every = 10
+
 [events]
 tail_messages = my_tail
 
@@ -1115,7 +1189,7 @@ my_tail = voice: WELCOME TO {call}
 quiet_nights = daily 22:00-06:00 tail_messages=
 ```
 
-### 12.6 Change the courtesy tone and the ID during a net
+### 12.6 Change the timers, the courtesy tone and the ID during a net
 
 ```ini
 [messages]
@@ -1123,8 +1197,12 @@ net_ct = cw: N
 net_id = voice: THISIS {call} NET
 
 [schedule]
-net = wed 19:30-20:30 ct_link_on_message=net_ct ct_link_off_message=net_ct mandatory_ids=net_id
+timers = wed 19:30-20:30 timeout=600 hang=1
+tones  = wed 19:30-20:30 ct_link_on_message=net_ct ct_link_off_message=net_ct
+ids    = wed 19:30-20:30 mandatory_ids=net_id
 ```
+
+One window can hold all of these settings. Separate windows keep each line short.
 
 ### 12.7 Turn on the link only by command
 
@@ -1134,7 +1212,29 @@ remote_host = 127.0.0.1
 start_on    = false
 ```
 
-### 12.8 Delay the courtesy tone by 640 ms
+### 12.8 No courtesy tone, short tail
+
+Some repeaters use no courtesy tone and a total tail of 1 to 2 seconds. Use `ct_delay`
+as the tail, and set `hang` to 0. The transmitter stays on for `ct_delay`, then stops.
+The local time-out timer resets at the end of `ct_delay`:
+
+```ini
+[timers]
+ct_delay = 1.5
+hang     = 0
+
+[events]
+ct_link_off_message =
+ct_link_on_message  =
+ct_link_message     =
+```
+
+A long hang with no tone is also correct. The time-out timer then resets at the end of
+`ct_delay`, and the transmitter stays on for `hang` after that.
+
+For no tail at all, see [4.1](#41-no-tail).
+
+### 12.9 Delay the courtesy tone by 640 ms
 
 Some courtesy tone specifications have a delay of 640 ms from squelch closure to the
 first tone:
@@ -1171,6 +1271,7 @@ cause of a problem.
 | `events.ct_message: renamed` | Old setting name | Change it to `ct_link_on_message`. |
 | `needs commas between names` | Spaces separate list names. | Change `id1 id2` to `id1,id2`. |
 | `a variable needs the voice clip` | A stock clip is missing. | Do `sudo make install`. It replaces all stock clips. |
+| No courtesy tone in one link state | The `ct_` setting for that state is empty. An empty setting plays no tone. | Set all three `ct_` settings. See [6.2](#62-courtesy-tones). |
 | A tail message does not play | `tail_every` is 0, or the conditions are not true. | Look for the `tail_every` warning. On a quiet repeater, the `tail_every` count can be not yet reached. `tail_min_interval` can also prevent the message. |
 | A window opens at the wrong time | The clock or the time zone is wrong. | Examine the clock and time zone with `timedatectl`. |
 | Usage statistics reset at restart | `usrp-rc` cannot write the file. | Look for `stats: can't save` in the log. Make sure that `/var/local/usrp-rc` exists and the service file is current. Then do `sudo systemctl daemon-reload`. |
@@ -1250,7 +1351,9 @@ Use these tones by name, for example `ct_link_on_message = yellow_jacket`. The t
 ## Appendix B: Voice clips
 
 `usrp-rc` includes 623 clips in `/usr/local/share/usrp-rc/vocab_8k/`. Clip names are not
-case-sensitive: `repeater` and `REPEATER` are the same clip.
+case-sensitive: `repeater`, `Repeater` and `REPEATER` are the same clip. The lists below
+use lowercase. A bold letter is the clip for that letter, for example `C` in
+`voice: W ONE C`.
 
 | Clip type | Function |
 | --- | --- |
@@ -1259,65 +1362,191 @@ case-sensitive: `repeater` and `REPEATER` are the same clip.
 
 ### Standard voice
 
-```text
-A ABEAM ABORT ABOUT ABOVE ACCELERATED ACKNOWLEDGE ACTION ADJUST ADVANCED
-ADVISE AERIAL AFFIRMATIVE AIR AIRCRAFT AIRPORT AIRSPEED AIR_BRAKES ALERT ALL
-ALOFT ALPHA ALTERNATE ALTIMETER ALTITUDE AMATEUR AMPS AND_A AND_B ANSWER
-APPROACH APPROACHES APRIL AREA ARRIVAL AS AT ATIS AUGUST AUTO AUTOMATIC
-AUTOPILOT AUXILLIARY A_M B BAND BANK BARKER BASE BATTERY BELOW BETWEEN BLOWING
-BOARD BOOST BRAKE BRAVO BREAK BREAKING BROKEN BUTTON BY C CABIN CALIBRATE CALL
-CALLING CALM CANCEL CAUTION CEILING CELSIUS CENTER CHANGE CHARLIE CHECK
-CIRCUIT CLEAR CLEARANCE CLEARANCE_DELIVERY CLIMB CLOCK CLOSED CLUB CODE COME
-COMPLETE COMPUTER CONDITION CONGRATULATIONS CONNECT CONTACT CONTROL CONVERGING
-COUNT COURSE CRANE CROSSWIND CRYSTALS CURRENT CYCLE CYLINDER D DANGER DAYS
-DAYTON DECEMBER DECREASE DECREASING DEGREE DEGREES DELTA DEPARTURE DEVICE DIAL
-DINNER DIRECTION DISPLAY DIVIDED DOOR DOORS DOWN DOWNWIND DRIVE DRIZZLE DUST E
-EAST ECHO EIGHT EIGHTEEN EIGHTY ELECTRICIAN ELEVATION ELEVEN EMERGENCY ENGINE
-ENTER EQUAL EQUALS ERROR ESTIMATED ETA EVACUATE EVACUATION EXIT EXPECT F FAIL
-FAILURE FARAD FARENHEIT FAST FEBRUARY FEET FIELD FIFTEEN FIFTY FIF_ FILED
-FINAL FIRE FIRST FIVE FLAME_OUT FLAPS FLIGHT FLIGHTWATCH FLOW FOG FOR FORTY
-FOUR FOURTEEN FOURTH FOXTROT FREEDOM FREEZING FREQUENCY FRIDAY FROM FRONT FUEL
-FULL G GALLEY GALLONS GATE GAUGE GEAR GET GLIDE GO GOLF GRAIN GREAT GREEN
-GREENWICH GROUND GUNDISH GUSTING_TO H HAIL HALF HAM HAMFEST HAMVENTION HAVE
-HAZARDOUS HAZE HEADING HEAT HEAVY HELP HENRY HERTZ HIGH HOLD HOME HOTEL HOUR
-HOURS HUNDRED I ICE ICING IDENTIFY IDLE IFR IGNITE IGNITION ILS IMMEDIATELY IN
-INBOUND INCH INCREASE INCREASING INCREASINGTO INDIA INDICATED INFLIGHT
-INFORMATION INNER INSPECTOR INSTRUMENTS INTRUDER IS IT J JANUARY JULIET JULY
-JUNE K KEY KILO KNOTS L LAND LANDING LANDING_GEAR LATE LAUNCH LEAN LEFT LEG
-LESS_THAN LEVEL LEVEL_OFF LIGHT LIGHTS LIMA LINE LINK LIST LOCALIZER LOCK LONG
-LOOK LOW LOWER LUNCH M MACHINE MAGNETOS MAINTAIN MANUAL MARCH MARKER MAY
-MAYDAY ME MEAN MEASURE MEASURED MEETING MEGA MESSAGES METER MICRO MIDDLE
-MIDPOINT MIG MIKE MILES MILL MILLI MILLION MINUS MINUTES MIST MIXTURE MOBILE
-MODERATE MONDAY MONTH MORE_THAN MOTOR MOVE MOVING MUCH N NEAR NEGATIVE NET NEW
-NEXT NIGHT NINE NINER NINETEEN NINETY NO NORTH NORTHEAST NORTHWEST NOT NOTAM
-NOVEMBER NO_TURN NUMBER O OBSCURED OCLOCK OCTOBER OF OFF OHIO OHMS OIL ON ONE
-OPEN OPERATION OPERATOR OSCAR OTHER OUT OUTER OVER OVERCAST OVERSPEED P PAPA
-PARTIALLY PASS PAST PATCH PATH PAUSE_ PELLETS PER PERCENT PHONE PICO PLAN
-PLEASE PLUS POINT POLICE POSITION POWER PRACTICE PRESS PRESSURE PRIVATE PROBE
-PROGRAMMING PROPS PULL PUMPS PUSH P_M Q QUEBEC R RADAR RADIAL RADIO RADIOS
-RAIN RAISE RANGE RATE READY REAR RECEIVE RED REFUELLING RELEASE REMARK REMOTE
-REPAIR REPEAT REPEATER REPEAT_ER RICH RIG RIGHT ROAD ROGER ROLL_OUT ROMEO
-ROUTE R_NAV S SAFE SAND SANTACLARA SATURDAY SCATTERED SECOND SECONDS SECURITY
-SELCAL SELECT SEPTEMBER SEQUENCE SERVICE SET SEVEN SEVENTEEN SEVENTY SEVERE
-SEXY SHORT SHOWERS SHUT SIDE SIERRA SIGHT SIGMET SIX SIXTEEN SIXTY SLEET SLOPE
-SLOW SMOKE SNOW SOUTH SOUTHEAST SOUTHWEST SPEED SPOILERS SPRAY SQUAWK
-SQUAWKING STABILIZER STALL START STOP STORM STRAY SUNDAY SWITCH SYSTEM T TACAN
-TANGO TANK TARGET TAXI TELEPHONE TEMPERATURE TEN TERMINAL TEST THANKYOU THAT
-THEE THE_A THE_B THIN THINLY THIRD THIRTEEN THIRTY THIR_ THISIS THOUSAND THREE
-THUNDERSTORM THURSDAY TIME TIMER TIMES TO TODAY TOMORROW TONIGHT TOOL TOO_LOW
-TORNADO TOUCHDOWN TOWER TRAFFIC TRANSMIT TRIM TRUE TUESDAY TURBULENCE TURN
-TWELVE TWENTY TWO U UNDER UNDERCARRIAGE UNICOM UNIFORM UNIT UNLIMITED UNTIL UP
-USE_S USE_Z V VACUUM VALLEY VALVE VARIABLE VECTORS VERIFY VFR VHE VICTOR
-VISIBILITY VOLTS VOR VORTAC W WAIT WAKE WARNING WATCH WATTS WAY WEATHER
-WEDNESDAY WELCOME WEST WHISKEY WHITE WILL WIND WINDOWS WITH WRONG X XRAY Y
-YANKEE YELLOW YESTERDAY YOU YOUR Z ZED ZERO ZONE ZULU _ED _ER _S _TEEN _TH _TY
-```
+<table>
+<tr><td><b>A</b></td><td><b>F</b></td><td><b>M</b></td><td><b>S</b></td></tr>
+<tr><td>a_m</td><td>fail</td><td>machine</td><td>safe</td></tr>
+<tr><td>abeam</td><td>failure</td><td>magnetos</td><td>sand</td></tr>
+<tr><td>abort</td><td>farad</td><td>maintain</td><td>santaclara</td></tr>
+<tr><td>about</td><td>farenheit</td><td>manual</td><td>saturday</td></tr>
+<tr><td>above</td><td>fast</td><td>march</td><td>scattered</td></tr>
+<tr><td>accelerated</td><td>february</td><td>marker</td><td>second</td></tr>
+<tr><td>acknowledge</td><td>feet</td><td>may</td><td>seconds</td></tr>
+<tr><td>action</td><td>field</td><td>mayday</td><td>security</td></tr>
+<tr><td>adjust</td><td>fif_</td><td>me</td><td>selcal</td></tr>
+<tr><td>advanced</td><td>fifteen</td><td>mean</td><td>select</td></tr>
+<tr><td>advise</td><td>fifty</td><td>measure</td><td>september</td></tr>
+<tr><td>aerial</td><td>filed</td><td>measured</td><td>sequence</td></tr>
+<tr><td>affirmative</td><td>final</td><td>meeting</td><td>service</td></tr>
+<tr><td>air</td><td>fire</td><td>mega</td><td>set</td></tr>
+<tr><td>air_brakes</td><td>first</td><td>messages</td><td>seven</td></tr>
+<tr><td>aircraft</td><td>five</td><td>meter</td><td>seventeen</td></tr>
+<tr><td>airport</td><td>flame_out</td><td>micro</td><td>seventy</td></tr>
+<tr><td>airspeed</td><td>flaps</td><td>middle</td><td>severe</td></tr>
+<tr><td>alert</td><td>flight</td><td>midpoint</td><td>sexy</td></tr>
+<tr><td>all</td><td>flightwatch</td><td>mig</td><td>short</td></tr>
+<tr><td>aloft</td><td>flow</td><td>mike</td><td>showers</td></tr>
+<tr><td>alpha</td><td>fog</td><td>miles</td><td>shut</td></tr>
+<tr><td>alternate</td><td>for</td><td>mill</td><td>side</td></tr>
+<tr><td>altimeter</td><td>forty</td><td>milli</td><td>sierra</td></tr>
+<tr><td>altitude</td><td>four</td><td>million</td><td>sight</td></tr>
+<tr><td>amateur</td><td>fourteen</td><td>minus</td><td>sigmet</td></tr>
+<tr><td>amps</td><td>fourth</td><td>minutes</td><td>six</td></tr>
+<tr><td>and_a</td><td>foxtrot</td><td>mist</td><td>sixteen</td></tr>
+<tr><td>and_b</td><td>freedom</td><td>mixture</td><td>sixty</td></tr>
+<tr><td>answer</td><td>freezing</td><td>mobile</td><td>sleet</td></tr>
+<tr><td>approach</td><td>frequency</td><td>moderate</td><td>slope</td></tr>
+<tr><td>approaches</td><td>friday</td><td>monday</td><td>slow</td></tr>
+<tr><td>april</td><td>from</td><td>month</td><td>smoke</td></tr>
+<tr><td>area</td><td>front</td><td>more_than</td><td>snow</td></tr>
+<tr><td>arrival</td><td>fuel</td><td>motor</td><td>south</td></tr>
+<tr><td>as</td><td>full</td><td>move</td><td>southeast</td></tr>
+<tr><td>at</td><td></td><td>moving</td><td>southwest</td></tr>
+<tr><td>atis</td><td><b>G</b></td><td>much</td><td>speed</td></tr>
+<tr><td>august</td><td>galley</td><td></td><td>spoilers</td></tr>
+<tr><td>auto</td><td>gallons</td><td><b>N</b></td><td>spray</td></tr>
+<tr><td>automatic</td><td>gate</td><td>near</td><td>squawk</td></tr>
+<tr><td>autopilot</td><td>gauge</td><td>negative</td><td>squawking</td></tr>
+<tr><td>auxilliary</td><td>gear</td><td>net</td><td>stabilizer</td></tr>
+<tr><td></td><td>get</td><td>new</td><td>stall</td></tr>
+<tr><td><b>B</b></td><td>glide</td><td>next</td><td>start</td></tr>
+<tr><td>band</td><td>go</td><td>night</td><td>stop</td></tr>
+<tr><td>bank</td><td>golf</td><td>nine</td><td>storm</td></tr>
+<tr><td>barker</td><td>grain</td><td>niner</td><td>stray</td></tr>
+<tr><td>base</td><td>great</td><td>nineteen</td><td>sunday</td></tr>
+<tr><td>battery</td><td>green</td><td>ninety</td><td>switch</td></tr>
+<tr><td>below</td><td>greenwich</td><td>no</td><td>system</td></tr>
+<tr><td>between</td><td>ground</td><td>no_turn</td><td></td></tr>
+<tr><td>blowing</td><td>gundish</td><td>north</td><td><b>T</b></td></tr>
+<tr><td>board</td><td>gusting_to</td><td>northeast</td><td>tacan</td></tr>
+<tr><td>boost</td><td></td><td>northwest</td><td>tango</td></tr>
+<tr><td>brake</td><td><b>H</b></td><td>not</td><td>tank</td></tr>
+<tr><td>bravo</td><td>hail</td><td>notam</td><td>target</td></tr>
+<tr><td>break</td><td>half</td><td>november</td><td>taxi</td></tr>
+<tr><td>breaking</td><td>ham</td><td>number</td><td>telephone</td></tr>
+<tr><td>broken</td><td>hamfest</td><td></td><td>temperature</td></tr>
+<tr><td>button</td><td>hamvention</td><td><b>O</b></td><td>ten</td></tr>
+<tr><td>by</td><td>have</td><td>obscured</td><td>terminal</td></tr>
+<tr><td></td><td>hazardous</td><td>oclock</td><td>test</td></tr>
+<tr><td><b>C</b></td><td>haze</td><td>october</td><td>thankyou</td></tr>
+<tr><td>cabin</td><td>heading</td><td>of</td><td>that</td></tr>
+<tr><td>calibrate</td><td>heat</td><td>off</td><td>the_a</td></tr>
+<tr><td>call</td><td>heavy</td><td>ohio</td><td>the_b</td></tr>
+<tr><td>calling</td><td>help</td><td>ohms</td><td>thee</td></tr>
+<tr><td>calm</td><td>henry</td><td>oil</td><td>thin</td></tr>
+<tr><td>cancel</td><td>hertz</td><td>on</td><td>thinly</td></tr>
+<tr><td>caution</td><td>high</td><td>one</td><td>thir_</td></tr>
+<tr><td>ceiling</td><td>hold</td><td>open</td><td>third</td></tr>
+<tr><td>celsius</td><td>home</td><td>operation</td><td>thirteen</td></tr>
+<tr><td>center</td><td>hotel</td><td>operator</td><td>thirty</td></tr>
+<tr><td>change</td><td>hour</td><td>oscar</td><td>thisis</td></tr>
+<tr><td>charlie</td><td>hours</td><td>other</td><td>thousand</td></tr>
+<tr><td>check</td><td>hundred</td><td>out</td><td>three</td></tr>
+<tr><td>circuit</td><td></td><td>outer</td><td>thunderstorm</td></tr>
+<tr><td>clear</td><td><b>I</b></td><td>over</td><td>thursday</td></tr>
+<tr><td>clearance</td><td>ice</td><td>overcast</td><td>time</td></tr>
+<tr><td>clearance_delivery</td><td>icing</td><td>overspeed</td><td>timer</td></tr>
+<tr><td>climb</td><td>identify</td><td></td><td>times</td></tr>
+<tr><td>clock</td><td>idle</td><td><b>P</b></td><td>to</td></tr>
+<tr><td>closed</td><td>ifr</td><td>p_m</td><td>today</td></tr>
+<tr><td>club</td><td>ignite</td><td>papa</td><td>tomorrow</td></tr>
+<tr><td>code</td><td>ignition</td><td>partially</td><td>tonight</td></tr>
+<tr><td>come</td><td>ils</td><td>pass</td><td>too_low</td></tr>
+<tr><td>complete</td><td>immediately</td><td>past</td><td>tool</td></tr>
+<tr><td>computer</td><td>in</td><td>patch</td><td>tornado</td></tr>
+<tr><td>condition</td><td>inbound</td><td>path</td><td>touchdown</td></tr>
+<tr><td>congratulations</td><td>inch</td><td>pause_</td><td>tower</td></tr>
+<tr><td>connect</td><td>increase</td><td>pellets</td><td>traffic</td></tr>
+<tr><td>contact</td><td>increasing</td><td>per</td><td>transmit</td></tr>
+<tr><td>control</td><td>increasingto</td><td>percent</td><td>trim</td></tr>
+<tr><td>converging</td><td>india</td><td>phone</td><td>true</td></tr>
+<tr><td>count</td><td>indicated</td><td>pico</td><td>tuesday</td></tr>
+<tr><td>course</td><td>inflight</td><td>plan</td><td>turbulence</td></tr>
+<tr><td>crane</td><td>information</td><td>please</td><td>turn</td></tr>
+<tr><td>crosswind</td><td>inner</td><td>plus</td><td>twelve</td></tr>
+<tr><td>crystals</td><td>inspector</td><td>point</td><td>twenty</td></tr>
+<tr><td>current</td><td>instruments</td><td>police</td><td>two</td></tr>
+<tr><td>cycle</td><td>intruder</td><td>position</td><td></td></tr>
+<tr><td>cylinder</td><td>is</td><td>power</td><td><b>U</b></td></tr>
+<tr><td></td><td>it</td><td>practice</td><td>under</td></tr>
+<tr><td><b>D</b></td><td></td><td>press</td><td>undercarriage</td></tr>
+<tr><td>danger</td><td><b>J</b></td><td>pressure</td><td>unicom</td></tr>
+<tr><td>days</td><td>january</td><td>private</td><td>uniform</td></tr>
+<tr><td>dayton</td><td>juliet</td><td>probe</td><td>unit</td></tr>
+<tr><td>december</td><td>july</td><td>programming</td><td>unlimited</td></tr>
+<tr><td>decrease</td><td>june</td><td>props</td><td>until</td></tr>
+<tr><td>decreasing</td><td></td><td>pull</td><td>up</td></tr>
+<tr><td>degree</td><td><b>K</b></td><td>pumps</td><td>use_s</td></tr>
+<tr><td>degrees</td><td>key</td><td>push</td><td>use_z</td></tr>
+<tr><td>delta</td><td>kilo</td><td></td><td></td></tr>
+<tr><td>departure</td><td>knots</td><td><b>Q</b></td><td><b>V</b></td></tr>
+<tr><td>device</td><td></td><td>quebec</td><td>vacuum</td></tr>
+<tr><td>dial</td><td><b>L</b></td><td></td><td>valley</td></tr>
+<tr><td>dinner</td><td>land</td><td><b>R</b></td><td>valve</td></tr>
+<tr><td>direction</td><td>landing</td><td>r_nav</td><td>variable</td></tr>
+<tr><td>display</td><td>landing_gear</td><td>radar</td><td>vectors</td></tr>
+<tr><td>divided</td><td>late</td><td>radial</td><td>verify</td></tr>
+<tr><td>door</td><td>launch</td><td>radio</td><td>vfr</td></tr>
+<tr><td>doors</td><td>lean</td><td>radios</td><td>vhe</td></tr>
+<tr><td>down</td><td>left</td><td>rain</td><td>victor</td></tr>
+<tr><td>downwind</td><td>leg</td><td>raise</td><td>visibility</td></tr>
+<tr><td>drive</td><td>less_than</td><td>range</td><td>volts</td></tr>
+<tr><td>drizzle</td><td>level</td><td>rate</td><td>vor</td></tr>
+<tr><td>dust</td><td>level_off</td><td>ready</td><td>vortac</td></tr>
+<tr><td></td><td>light</td><td>rear</td><td></td></tr>
+<tr><td><b>E</b></td><td>lights</td><td>receive</td><td><b>W</b></td></tr>
+<tr><td>east</td><td>lima</td><td>red</td><td>wait</td></tr>
+<tr><td>echo</td><td>line</td><td>refuelling</td><td>wake</td></tr>
+<tr><td>eight</td><td>link</td><td>release</td><td>warning</td></tr>
+<tr><td>eighteen</td><td>list</td><td>remark</td><td>watch</td></tr>
+<tr><td>eighty</td><td>localizer</td><td>remote</td><td>watts</td></tr>
+<tr><td>electrician</td><td>lock</td><td>repair</td><td>way</td></tr>
+<tr><td>elevation</td><td>long</td><td>repeat</td><td>weather</td></tr>
+<tr><td>eleven</td><td>look</td><td>repeat_er</td><td>wednesday</td></tr>
+<tr><td>emergency</td><td>low</td><td>repeater</td><td>welcome</td></tr>
+<tr><td>engine</td><td>lower</td><td>rich</td><td>west</td></tr>
+<tr><td>enter</td><td>lunch</td><td>rig</td><td>whiskey</td></tr>
+<tr><td>equal</td><td></td><td>right</td><td>white</td></tr>
+<tr><td>equals</td><td></td><td>road</td><td>will</td></tr>
+<tr><td>error</td><td></td><td>roger</td><td>wind</td></tr>
+<tr><td>estimated</td><td></td><td>roll_out</td><td>windows</td></tr>
+<tr><td>eta</td><td></td><td>romeo</td><td>with</td></tr>
+<tr><td>evacuate</td><td></td><td>route</td><td>wrong</td></tr>
+<tr><td>evacuation</td><td></td><td></td><td></td></tr>
+<tr><td>exit</td><td></td><td></td><td><b>X</b></td></tr>
+<tr><td>expect</td><td></td><td></td><td>xray</td></tr>
+<tr><td></td><td></td><td></td><td></td></tr>
+<tr><td></td><td></td><td></td><td><b>Y</b></td></tr>
+<tr><td></td><td></td><td></td><td>yankee</td></tr>
+<tr><td></td><td></td><td></td><td>yellow</td></tr>
+<tr><td></td><td></td><td></td><td>yesterday</td></tr>
+<tr><td></td><td></td><td></td><td>you</td></tr>
+<tr><td></td><td></td><td></td><td>your</td></tr>
+<tr><td></td><td></td><td></td><td></td></tr>
+<tr><td></td><td></td><td></td><td><b>Z</b></td></tr>
+<tr><td></td><td></td><td></td><td>zed</td></tr>
+<tr><td></td><td></td><td></td><td>zero</td></tr>
+<tr><td></td><td></td><td></td><td>zone</td></tr>
+<tr><td></td><td></td><td></td><td>zulu</td></tr>
+</table>
 
 ### Female voice
 
-```text
-F_AFTERNOON F_A_M F_EIGHT F_EIGHTEEN F_ELEVEN F_EVENING F_FIFTEEN F_FIFTY
-F_FIVE F_FORTY F_FOUR F_FOURTEEN F_GOOD F_IS F_MORNING F_NINE F_NINETEEN
-F_OCLOCK F_OH F_ONE F_P_M F_SEVEN F_SEVENTEEN F_SIX F_SIXTEEN F_TEN F_THE
-F_THIRTEEN F_THIRTY F_THREE F_TIME F_TWELVE F_TWENTY F_TWO
-```
+<table>
+<tr><td>f_a_m</td><td>f_forty</td><td>f_oh</td><td>f_thirteen</td></tr>
+<tr><td>f_afternoon</td><td>f_four</td><td>f_one</td><td>f_thirty</td></tr>
+<tr><td>f_eight</td><td>f_fourteen</td><td>f_p_m</td><td>f_three</td></tr>
+<tr><td>f_eighteen</td><td>f_good</td><td>f_seven</td><td>f_time</td></tr>
+<tr><td>f_eleven</td><td>f_is</td><td>f_seventeen</td><td>f_twelve</td></tr>
+<tr><td>f_evening</td><td>f_morning</td><td>f_six</td><td>f_twenty</td></tr>
+<tr><td>f_fifteen</td><td>f_nine</td><td>f_sixteen</td><td>f_two</td></tr>
+<tr><td>f_fifty</td><td>f_nineteen</td><td>f_ten</td><td></td></tr>
+<tr><td>f_five</td><td>f_oclock</td><td>f_the</td><td></td></tr>
+</table>
+
+### Word endings
+
+Add an ending after a word: `voice: KEY UP _S`.
+
+<table>
+<tr><td>_ed</td><td>_er</td><td>_s</td><td>_teen</td><td>_th</td><td>_ty</td></tr>
+</table>

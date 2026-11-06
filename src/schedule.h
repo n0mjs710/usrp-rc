@@ -9,9 +9,10 @@
  * it starts on: "fri 22:00-02:00" is still open at 01:00 on Saturday. */
 bool schedule_entry_active(const config_schedule_t *entry, const struct tm *when);
 
-/* The events in force at this time: the config's, with each open window's settings
+/* The settings in force at this time: base, with each open window's settings
  * applied in file order, so a later entry wins. active[i] says whether entry i is
  * open. Nothing is remembered between calls: a window's changes end when it does,
- * and a restart in the middle of one picks it straight back up. */
-void schedule_evaluate(const config_t *cfg, const struct tm *when,
-                       config_events_t *out, bool active[CFG_MAX_SCHEDULE]);
+ * and a restart in the middle of one picks it straight back up. out shares base's
+ * messages, so only base is freed. */
+void schedule_evaluate(const config_t *base, const struct tm *when,
+                       config_t *out, bool active[CFG_MAX_SCHEDULE]);

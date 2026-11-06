@@ -73,7 +73,7 @@ typedef struct {
     stats_t  *stats;
     uint64_t  stats_deadline;
 
-    config_events_t events;   /* the config's, as changed by any open schedule window */
+    config_t        base;     /* as loaded; cfg is this with any open schedule window applied */
     bool     schedule_active[CFG_MAX_SCHEDULE];
     uint64_t schedule_deadline;
 
@@ -439,28 +439,28 @@ static void run_command(app_t *a, const command_t *c)
         break;
     }
     case COMMAND_TIME:
-        reply_with_message(a, a->events.time_message);
+        reply_with_message(a, a->cfg.events.time_message);
         break;
     case COMMAND_STATS:
-        reply_with_message(a, a->events.stats_message);
+        reply_with_message(a, a->cfg.events.stats_message);
         break;
     case COMMAND_LINK_ON:
         set_link(a, true);
-        reply_with_message(a, a->events.link_on_message);
+        reply_with_message(a, a->cfg.events.link_on_message);
         break;
     case COMMAND_LINK_OFF:
         set_link(a, false);
-        reply_with_message(a, a->events.link_off_message);
+        reply_with_message(a, a->cfg.events.link_off_message);
         break;
     case COMMAND_LINK_STATUS:
-        reply_with_message(a, a->link_up ? a->events.link_on_message : a->events.link_off_message);
+        reply_with_message(a, a->link_up ? a->cfg.events.link_on_message : a->cfg.events.link_off_message);
         break;
     case COMMAND_NO_LINK:
-        reply_with_message(a, a->events.link_none_message);
+        reply_with_message(a, a->cfg.events.link_none_message);
         break;
     case COMMAND_REPEATER: {
         bool down = c->digits[0] == '0';
-        const char *name = down ? a->events.repeater_down_message : a->events.repeater_up_message;
+        const char *name = down ? a->cfg.events.repeater_down_message : a->cfg.events.repeater_up_message;
         rendered_audio_t r = {0};
         if (name[0])
             r = message_render(&a->cfg, a->vocab, name, -1.0);
@@ -750,10 +750,10 @@ static void schedule_update(app_t *a, uint64_t now)
     localtime_r(&t, &when);
 
     bool active[CFG_MAX_SCHEDULE];
-    schedule_evaluate(&a->cfg, &when, &a->events, active);
-    for (int i = 0; i < a->cfg.nschedule; i++) {
+    schedule_evaluate(&a->base, &when, &a->cfg, active);
+    for (int i = 0; i < a->base.nschedule; i++) {
         if (active[i] != a->schedule_active[i])
-            LOGI("schedule: '%s' %s\n", a->cfg.schedule[i].name, active[i] ? "started" : "ended");
+            LOGI("schedule: '%s' %s\n", a->base.schedule[i].name, active[i] ? "started" : "ended");
         a->schedule_active[i] = active[i];
     }
     a->schedule_deadline = now + (uint64_t)(60 - when.tm_sec) * 1000;
@@ -880,6 +880,8 @@ int main(int argc, char *argv[])
     }
 
     int content_errors = message_validate(&a->cfg, a->vocab);
+    if (content_errors == 0)
+        content_errors = message_check_schedule(&a->cfg, a->vocab);
     if (config_rc != 0 || content_errors != 0) {
         LOGE("usrp-rc: config errors in %s -- not starting\n", config_path);
         return 1;
@@ -887,6 +889,7 @@ int main(int argc, char *argv[])
 
     int defined = a->cfg.nmessages;
     config_prune_messages(&a->cfg);
+    a->base = a->cfg;
 
     if (check_only) {
         printf("usrp-rc: %s OK (%d messages defined, %d in use)\n", config_path, defined, a->cfg.nmessages);
@@ -922,8 +925,7 @@ int main(int argc, char *argv[])
     message_set_stats_source(stats_for_messages, a);
 
     a->link_up = a->cfg.link.enabled && a->cfg.link.start_on;
-    /* With no link at all, there's no "link off" for the courtesy tone to show. */
-    port_set_link_up(a->port, a->link_up || !a->cfg.link.enabled);
+    port_set_link_up(a->port, a->link_up);
     if (load_repeater_down(a))
         port_restore_repeater_down(a->port);
 
@@ -987,13 +989,9 @@ int main(int argc, char *argv[])
         epoll_ctl(a->epfd, EPOLL_CTL_ADD, a->link_sock, &ev);
     }
 
-    a->events = a->cfg.events;
-
     /* Ahead of the startup message, so it already sees any open window. */
-    if (a->cfg.nschedule > 0) {
+    if (a->base.nschedule > 0)
         schedule_update(a, monotonic_ms());
-        port_set_events(a->port, &a->events);
-    }
 
     port_start(a->port, monotonic_ms());
 

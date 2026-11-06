@@ -328,14 +328,24 @@ static void do_timeout_recovery(port_t *p, uint64_t now)
 
 /* ── impolite ID (mix buffer, not ctrl buffer — see port.h) ──────────────── */
 
+/* Each case has its own setting, and an empty one plays no tone. */
 static const char *courtesy_tone(const port_t *p)
 {
     const config_events_t *ev = p->ev;
-    if (p->last_source == SRC_LINK && ev->ct_link_message[0])
+    if (p->last_source == SRC_LINK)
         return ev->ct_link_message;
-    if (!p->link_up && ev->ct_link_off_message[0])
-        return ev->ct_link_off_message;
-    return ev->ct_link_on_message;
+    return p->link_up ? ev->ct_link_on_message : ev->ct_link_off_message;
+}
+
+/* The local time-out timer resets here, whether or not a tone is set. */
+static void play_courtesy_tone(port_t *p, uint64_t now)
+{
+    p->local_tot_used_s = 0.0;
+    queue_message(p, courtesy_tone(p), -1.0);
+    if (ctrl_buf_playing(p))
+        p->ctrl.on_drain = ct_after_drain;
+    else
+        schedule_hang(p, now);
 }
 
 static void impolite_id_after_mix(port_t *p, uint64_t now)
@@ -348,11 +358,7 @@ static void impolite_id_after_mix(port_t *p, uint64_t now)
             schedule_ct_delay(p, now);   /* the reply goes first, as on any other tail */
             return;
         }
-        queue_message(p, courtesy_tone(p), -1.0);
-        if (ctrl_buf_playing(p))
-            p->ctrl.on_drain = ct_after_drain;
-        else
-            schedule_hang(p, now);
+        play_courtesy_tone(p, now);
     }
 }
 
@@ -704,13 +710,7 @@ static void on_ct_delay(port_t *p, uint64_t now)
         return;
     }
 
-    queue_message(p, courtesy_tone(p), -1.0);
-
-    p->local_tot_used_s = 0.0;
-    if (ctrl_buf_playing(p))
-        p->ctrl.on_drain = ct_after_drain;
-    else
-        schedule_hang(p, now);
+    play_courtesy_tone(p, now);
 }
 
 /* ── tail message ────────────────────────────────────────────────────────── */
@@ -1098,11 +1098,6 @@ void port_restore_repeater_down(port_t *p)
 bool port_repeater_down(const port_t *p)
 {
     return p->down;
-}
-
-void port_set_events(port_t *p, const config_events_t *events)
-{
-    p->ev = events;
 }
 
 void port_set_link_up(port_t *p, bool up)

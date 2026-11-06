@@ -71,57 +71,15 @@ bool schedule_entry_active(const config_schedule_t *entry, const struct tm *when
         || (now < entry->end_min && day_matches(entry, day_before(today)));
 }
 
-static int name_position(char (*names)[CFG_NAME_STR], int count, const char *name)
+void schedule_evaluate(const config_t *base, const struct tm *when,
+                       config_t *out, bool active[CFG_MAX_SCHEDULE])
 {
-    for (int i = 0; i < count; i++)
-        if (strcmp(names[i], name) == 0)
-            return i;
-    return -1;
-}
-
-static void apply(config_events_t *ev, const config_override_t *o)
-{
-    char *dst = (char *)ev + o->offset;
-
-    if (!o->count_offset) {
-        snprintf(dst, o->size, "%s", o->value);
-        return;
-    }
-
-    char (*names)[CFG_NAME_STR] = (char (*)[CFG_NAME_STR])dst;
-    int *count = (int *)((char *)ev + o->count_offset);
-    int max = (int)(o->size / CFG_NAME_STR);
-    /* The ID is a legal requirement: a window can't remove the last one by accident. */
-    int min = dst == (char *)ev->mandatory_ids ? 1 : 0;
-
-    if (o->op == OVERRIDE_SET)
-        *count = 0;
-
-    char copy[sizeof(o->value)];
-    strcpy(copy, o->value);
-    char *save = NULL;
-    for (char *n = strtok_r(copy, ",", &save); n; n = strtok_r(NULL, ",", &save)) {
-        int at = name_position(names, *count, n);
-        if (o->op == OVERRIDE_REMOVE) {
-            if (at >= 0 && *count > min) {
-                memmove(names[at], names[at + 1], (size_t)(*count - at - 1) * CFG_NAME_STR);
-                (*count)--;
-            }
-        } else if (*count < max && (o->op == OVERRIDE_SET || at < 0)) {
-            snprintf(names[(*count)++], CFG_NAME_STR, "%s", n);
-        }
-    }
-}
-
-void schedule_evaluate(const config_t *cfg, const struct tm *when,
-                       config_events_t *out, bool active[CFG_MAX_SCHEDULE])
-{
-    *out = cfg->events;
-    for (int i = 0; i < cfg->nschedule; i++) {
-        active[i] = schedule_entry_active(&cfg->schedule[i], when);
+    *out = *base;
+    for (int i = 0; i < base->nschedule; i++) {
+        active[i] = schedule_entry_active(&base->schedule[i], when);
         if (!active[i])
             continue;
-        for (int j = 0; j < cfg->schedule[i].nsets; j++)
-            apply(out, &cfg->schedule[i].sets[j]);
+        for (int j = 0; j < base->schedule[i].nsets; j++)
+            config_apply_override(out, &base->schedule[i].sets[j]);
     }
 }

@@ -181,6 +181,19 @@ int message_needs_padding(const config_t *cfg, const char *name)
     return 0;
 }
 
+static int check_length(const config_t *cfg, vocab_cache_t *vocab, const config_message_t *m,
+                        const char *where)
+{
+    rendered_audio_t r = message_render(cfg, vocab, m->name, -1.0);
+    int bad = r.n > (size_t)MESSAGE_MAX_SECONDS * 8000;
+    if (bad)
+        LOGE("config: line %d: messages.%s: %zu s long%s%s, the limit is %d s\n",
+             m->line, m->name, (r.n + 7999) / 8000, where ? " during " : "", where ? where : "",
+             MESSAGE_MAX_SECONDS);
+    free(r.samples);
+    return bad;
+}
+
 int message_validate(const config_t *cfg, vocab_cache_t *vocab)
 {
     int errors = 0;
@@ -209,16 +222,35 @@ int message_validate(const config_t *cfg, vocab_cache_t *vocab)
                 }
             }
         }
-        if (errors != before)
-            continue;
-        rendered_audio_t r = message_render(cfg, vocab, m->name, -1.0);
-        if (r.n > (size_t)MESSAGE_MAX_SECONDS * 8000) {
-            LOGE("config: line %d: messages.%s: %zu s long, the limit is %d s\n",
-                 m->line, m->name, (r.n + 7999) / 8000, MESSAGE_MAX_SECONDS);
-            errors++;
-        }
-        free(r.samples);
+        if (errors == before)
+            errors += check_length(cfg, vocab, m, NULL);
     }
+    return errors;
+}
+
+int message_check_schedule(const config_t *cfg, vocab_cache_t *vocab)
+{
+    int errors = 0;
+    config_t *open = malloc(sizeof(*open));
+    if (!open)
+        return 0;
+    for (int i = 0; i < cfg->nschedule; i++) {
+        const config_schedule_t *e = &cfg->schedule[i];
+        bool audio = false;
+        for (int j = 0; j < e->nsets; j++)
+            audio |= e->sets[j].offset >= offsetof(config_t, audio)
+                  && e->sets[j].offset < offsetof(config_t, audio) + sizeof(cfg->audio);
+        if (!audio)
+            continue;
+        *open = *cfg;
+        for (int j = 0; j < e->nsets; j++)
+            config_apply_override(open, &e->sets[j]);
+        char where[64];
+        snprintf(where, sizeof(where), "schedule.%s", e->name);
+        for (int m = 0; m < open->nmessages; m++)
+            errors += check_length(open, vocab, &open->messages[m], where);
+    }
+    free(open);
     return errors;
 }
 
