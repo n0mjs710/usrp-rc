@@ -1634,9 +1634,51 @@ static void check_consistency(const config_t *cfg)
 
 /* Settings that are legal but worth a second look. For a window, only what it
  * changes: the file's own settings have already had their say. */
+static bool message_uses(const config_t *cfg, const char *name, int type)
+{
+    const config_message_t *m = name[0] ? config_find_message(cfg, name) : NULL;
+    for (int i = 0; m && i < m->nelements; i++)
+        if ((int)m->elements[i].type == type)
+            return true;
+    return false;
+}
+
+/* Does any ID other than the impolite one use this kind of part? */
+static bool id_uses(const config_t *cfg, int type)
+{
+    const config_events_t *ev = &cfg->events;
+    for (int i = 0; i < ev->n_initial_ids; i++)
+        if (message_uses(cfg, ev->initial_ids[i], type))
+            return true;
+    for (int i = 0; i < ev->n_mandatory_ids; i++)
+        if (message_uses(cfg, ev->mandatory_ids[i], type))
+            return true;
+    return message_uses(cfg, ev->anxious_id, type);
+}
+
+static bool cw_id_fast(const config_t *c)
+{
+    return c->audio.morse_wpm > 20
+        && (id_uses(c, ELEM_CW) || message_uses(c, c->events.impolite_id, ELEM_CW));
+}
+static bool cw_id_silent(const config_t *c)     { return c->audio.morse_level == 0.0 && id_uses(c, ELEM_CW); }
+static bool voice_id_silent(const config_t *c)
+{
+    return c->audio.voice_level == 0.0
+        && (id_uses(c, ELEM_VOICE) || message_uses(c, c->events.impolite_id, ELEM_VOICE));
+}
+static bool impolite_silent(const config_t *c)
+{
+    return c->audio.impolite_morse_level == 0.0 && message_uses(c, c->events.impolite_id, ELEM_CW);
+}
+
+/* Settings that are legal but worth a second look. For a window, only what it
+ * changes: the file's own settings have already had their say. The ID warnings
+ * cite US rules; elsewhere they may not apply, so they don't stop a start. */
 static void warn_settings(const config_t *cfg, const config_t *base)
 {
 #define NEWLY(member, test) (cfg->member test && !(base && base->member test))
+#define NEWLY_P(pred) (pred(cfg) && !(base && pred(base)))
     if (NEWLY(timers.timeout, == 0.0))
         LOGW("config: " WHERE_FMT "timers.timeout is 0: a local carrier can hold the transmitter on with no limit\n",
              WHERE_ARGS);
@@ -1644,8 +1686,21 @@ static void warn_settings(const config_t *cfg, const config_t *base)
         LOGW("config: " WHERE_FMT "timers.link_timeout is 0: the link can hold the transmitter on with no limit\n",
              WHERE_ARGS);
     if (NEWLY(timers.id_interval, > 600.0))
-        LOGW("config: " WHERE_FMT "timers.id_interval is %g s, longer than the FCC 10-minute limit\n",
+        LOGW("config: " WHERE_FMT "timers.id_interval is %g s; in the US the limit is 10 minutes (FCC 97.119(a))\n",
              WHERE_ARGS, cfg->timers.id_interval);
+    if (NEWLY_P(cw_id_fast))
+        LOGW("config: " WHERE_FMT "audio.morse_wpm is %d and an ID uses CW; in the US an automatic CW ID "
+             "may not exceed 20 wpm (FCC 97.119(b)(1))\n", WHERE_ARGS, cfg->audio.morse_wpm);
+    if (NEWLY(audio.master_gain, == 0.0))
+        LOGW("config: " WHERE_FMT "audio.master_gain is 0: IDs and all other controller audio are silent\n",
+             WHERE_ARGS);
+    if (NEWLY_P(cw_id_silent))
+        LOGW("config: " WHERE_FMT "audio.morse_level is 0: CW IDs are silent\n", WHERE_ARGS);
+    if (NEWLY_P(voice_id_silent))
+        LOGW("config: " WHERE_FMT "audio.voice_level is 0: voice IDs are silent\n", WHERE_ARGS);
+    if (NEWLY_P(impolite_silent))
+        LOGW("config: " WHERE_FMT "audio.impolite_morse_level is 0: the impolite ID is silent\n", WHERE_ARGS);
+#undef NEWLY_P
 #undef NEWLY
 }
 

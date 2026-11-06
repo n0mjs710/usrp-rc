@@ -164,6 +164,8 @@ static void ctrl_buf_pull_frame(port_t *p, int16_t out[160], uint64_t now)
          * transmitter on silence indefinitely. */
         c->buf.len = 0;
         c->pos     = 0;
+        p->voice_id_active = false;
+        p->id_playing      = false;
         port_cont_fn cb = c->on_drain;
         c->on_drain = NULL;
         if (!cb)
@@ -246,7 +248,32 @@ static void schedule_id(port_t *p, uint64_t now)
 /* ── transitions ────────────────────────────────────────────────────────── */
 
 static void do_impolite_id(port_t *p, uint64_t now);
+static void impolite_id_after_mix(port_t *p, uint64_t now);
 static void ct_after_drain(port_t *p, uint64_t now);
+
+/* A keyup over any ID: voice gives way to the impolite ID, and CW carries on under the
+ * repeated audio. Either way it finishes as the impolite ID does, and counts as sent. */
+static void id_keyed_over(port_t *p, uint64_t now)
+{
+    if (p->voice_id_active) {
+        do_impolite_id(p, now);
+        return;
+    }
+    if (p->impolite_id_playing)
+        return;   /* already identifying under the audio */
+    size_t n = p->ctrl.buf.len - p->ctrl.pos;
+    int16_t *rest = malloc(n * sizeof(int16_t));
+    if (!rest)
+        return;
+    memcpy(rest, p->ctrl.buf.data + p->ctrl.pos, n * sizeof(int16_t));
+    LOGI("id: keyed over, CW carries on underneath\n");
+    free(p->mix_buf);
+    p->mix_buf = rest;
+    p->mix_len = n;
+    p->mix_pos = 0;
+    p->impolite_id_playing = true;
+    p->mix_on_drain = impolite_id_after_mix;
+}
 
 static void port_transition(port_t *p, port_state_t new_state, uint64_t now)
 {
@@ -258,21 +285,14 @@ static void port_transition(port_t *p, port_state_t new_state, uint64_t now)
 
     if (new_state == PORT_ACTIVE) {
         p->tx_activity = true;
-        if ((old == PORT_IDLE || old == PORT_PENDING) && p->id_deadline == 0 &&
-            !ctrl_buf_playing(p) && !p->id_playing) {
-            p->initial_id_pending = true;
-        }
         if (ctrl_buf_playing(p)) {
-            bool cw_id_freeze = p->id_playing && !p->voice_id_active;
-            if (!cw_id_freeze) {
-                bool was_voice_id = p->voice_id_active;
-                p->initial_id_pending = false;
-                p->id_epoch++;
-                ctrl_buf_clear(p);   /* also resets voice_id_active/id_playing */
-                if (was_voice_id)
-                    do_impolite_id(p, now);
-            }
+            if (p->id_playing)
+                id_keyed_over(p, now);
+            p->id_epoch++;
+            ctrl_buf_clear(p);
         }
+        if ((old == PORT_IDLE || old == PORT_PENDING) && p->id_deadline == 0 && !p->impolite_id_playing)
+            p->initial_id_pending = true;
     }
 }
 
@@ -446,13 +466,14 @@ static void mandatory_id_render_and_queue(port_t *p, uint64_t now)
     } else {
         LOGI("id: mandatory  '%s'  (impolite_id, as there's no mandatory ID)\n", name);
     }
+    /* Keyed already, the ID joins whatever is playing and counts as sent; it's
+     * still an ID playing until the buffer drains, should anyone key over it. */
+    if (p->job_was_ptt)
+        mandatory_id_finish(p, now);
     p->voice_id_active = message_has_voice(p->cfg, name);
     p->id_playing = true;
     queue_message(p, name, -1.0);
-
-    if (p->job_was_ptt)
-        mandatory_id_finish(p, now);
-    else
+    if (!p->job_was_ptt)
         p->ctrl.on_drain = mandatory_id_after_drain;
 }
 
@@ -689,10 +710,13 @@ static void on_ct_delay(port_t *p, uint64_t now)
     p->ct_delay_deadline = 0;
     if (p->state != PORT_TAIL)
         return;
-    if (ctrl_buf_playing(p))
-        return;   /* a frozen CW ID (or other leftover) is still draining;
-                   * its own natural-completion path re-arms ct_delay once
-                   * it finishes */
+    /* An ID that came due in the delay finishes first, then the same pause as after
+     * any other message. */
+    if (ctrl_buf_playing(p)) {
+        if (!p->ctrl.on_drain)
+            p->ctrl.on_drain = reply_after_drain;
+        return;
+    }
 
     if (p->reply) {
         ctrl_buf_queue(p, p->reply, p->reply_len);
@@ -762,6 +786,12 @@ static void on_hang(port_t *p, uint64_t now)
     p->hang_deadline = 0;
     if (cor_active(p))
         return;
+    /* Never drop PTT over audio: an ID that came due in the hang finishes first. */
+    if (ctrl_buf_playing(p)) {
+        if (!p->ctrl.on_drain)
+            p->ctrl.on_drain = on_hang;
+        return;
+    }
     reply_discard(p);
 
     /* Checked once, as each hang ends: enough tails and enough time since a message
@@ -1042,6 +1072,7 @@ void port_set_repeater_down(port_t *p, bool down, int16_t *reply, size_t n, uint
          * and then nothing more is owed. */
         if (!(reply && n) && !p->tx_activity) {
             free(reply);
+            set_ptt(p, false, now, "repeater-down");
             return;
         }
         set_ptt(p, true, now, "repeater-down");

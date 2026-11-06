@@ -497,7 +497,7 @@ nothing.
 | Setting | Plays | Lists |
 | --- | --- | --- |
 | `initial_ids` | At the end of the first transmission when no ID timer operates | Yes |
-| `mandatory_ids` | When the ID timer (`timers.id_interval`) expires and the repeater is not in use | Yes |
+| `mandatory_ids` | When the ID timer (`timers.id_interval`) expires and no station transmits. In a tail, the ID plays in full. The courtesy tone and the end of the hang wait for it. | Yes |
 | `anxious_id` | In a tail during the last `timers.id_anxious` seconds before the ID timer expires. Thus, the ID does not have to key the transmitter later. | No |
 | `impolite_id` | When the ID timer expires during a transmission. The ID mixes with the conversation. CW plays at `audio.impolite_morse_level`. **Necessary.** | No |
 
@@ -535,12 +535,37 @@ This protects ID integrity against configuration mistakes.
 
 `anxious_id` has no protection. If it is empty, the repeater waits for the mandatory ID.
 
+#### US rules
+
+In the US, FCC §97.119 applies to the ID. `--check` shows a warning for each of these
+items. It does not stop the start, because the rules of other countries are different.
+
+| Rule | Warning |
+| --- | --- |
+| An ID at least each 10 minutes (§97.119(a)) | `id_interval` is more than 600 |
+| An automatic CW ID at 20 words per minute or less (§97.119(b)(1)) | `morse_wpm` is more than 20 and an ID uses CW |
+| The ID must be heard | An ID level is 0: `master_gain`, `morse_level`, `voice_level` or `impolite_morse_level` |
+
+- Each ID must contain the call sign. Use `{call}`, or a site voice clip that speaks the
+  call sign. `--check` does not examine this.
+- The ID timer starts when an ID ends. Thus, the time from the start of one ID to the
+  start of the next is `id_interval` plus the length of the ID, plus `pre_message_ms`
+  if the ID keys the transmitter. For a margin below 10 minutes, set `id_interval` to
+  less than 600, for example 540.
+- The rule asks for an ID at the end of each communication. Without an initial ID, the
+  ID after a short communication comes when the ID timer expires. This is the usual
+  practice of repeater controllers. For an ID nearer to the end of each communication,
+  set `initial_ids` and `anxious_id`.
+
 #### Key-up during an ID
 
 | ID type | Result of a key-up |
 | --- | --- |
 | Voice | The ID stops. The impolite ID plays in its place. |
 | CW | The ID continues under the repeated audio. |
+
+This applies to each ID type. In both cases, the ID counts as sent, and the ID timer
+starts again when it ends.
 
 ### 6.2 Courtesy tones
 
@@ -1107,7 +1132,7 @@ the ports to agree with `MMDVM-Host.ini`. For the procedure, see
 | `hang` | `2.5` | 0-600 | Time that the transmitter stays on after the courtesy tone |
 | `timeout` | `180` | 0-3600 | Local time-out timer. It resets at the courtesy tone (the end of `ct_delay`), also with no tone set. 0 is off. |
 | `link_timeout` | `180` | 0-3600 | Link time-out timer. It resets each time the link unkeys. 0 is off. |
-| `id_interval` | `600` | 1-86400 | ID timer. A value above 600 (the FCC limit of 10 minutes) causes a warning. |
+| `id_interval` | `600` | 1-86400 | ID timer, from the end of an ID. A value above 600 (the US limit of 10 minutes) causes a warning. See [6.1](#61-identification). |
 | `id_anxious` | `60` | 0-3600 | Anxious ID period before the ID timer expires. Must be less than `id_interval`. |
 | `tail_every` | `0` | 0-1000 | Tails between tail messages. 0 disables tail messages. |
 | `tail_min_interval` | `0` | 0-86400 | Minimum seconds between tail messages. 0 is no limit. |
@@ -1117,7 +1142,7 @@ the ports to agree with `MMDVM-Host.ini`. For the procedure, see
 | Setting | Default | Range | Function |
 | --- | --- | --- | --- |
 | `master_gain` | `1.0` | 0-10 | Last multiplier on all controller audio. Set it for the transmitter deviation. |
-| `morse_wpm` | `20` | 5-60 | CW speed, in words per minute |
+| `morse_wpm` | `20` | 5-60 | CW speed, in words per minute. Above 20 with a CW ID causes a warning. See [6.1](#61-identification). |
 | `morse_pitch` | `700` | 100-3400 | CW frequency, in Hz |
 | `morse_level` | `0.9` | 0-2 | CW level |
 | `impolite_morse_level` | `0.3` | 0-2 | CW level for an impolite ID |

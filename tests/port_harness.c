@@ -517,6 +517,7 @@ static bool scenario_command_reply(config_t *base, vocab_cache_t *vocab)
     printf("\n[8] command reply plays in the tail ahead of the CT, and a keyup interrupts it\n");
     bool ok = true;
     config_t cfg = *base;
+    cfg.timers.id_interval = 3600.0;   /* keep the ID timer out of the reply's way */
     port_t *p = fresh_port(&cfg, vocab);
     prime(p);
 
@@ -1186,6 +1187,94 @@ static bool scenario_repeater_down(config_t *base, vocab_cache_t *vocab)
     return ok;
 }
 
+/* Keys up and unkeys so the ID timer runs out `before_ms` before the unkey would
+ * reach it. With nothing else armed, the next deadline is the ID timer. */
+static uint64_t unkey_before_id(port_t *p, int before_ms)
+{
+    uint64_t id_at = port_next_deadline_ms(p);
+    while (g_now + (uint64_t)before_ms + 500 < id_at)
+        tick(p);
+    key_local(p, true);
+    while (g_now + (uint64_t)before_ms < id_at)
+        tick(p);
+    key_local(p, false);
+    return id_at;
+}
+
+static bool scenario_id_in_tail(config_t *base, vocab_cache_t *vocab)
+{
+    printf("\n[19] a mandatory ID that comes due in the tail plays whole, then the tail ends\n");
+    bool ok = true;
+    config_t cfg = *base;
+    cfg.timers.hang = 1.0;
+    cfg.events.n_initial_ids = 0;
+    port_t *p;
+    char *log;
+    const int id_ms = 1200;   /* "TEST" in CW at 20 wpm is about 1.26 s */
+
+    /* Due during ct_delay (0.2 s). */
+    RUN_CAPTURED(&cfg, {
+        activity_pulse(p);
+        uint64_t id_at = unkey_before_id(p, 100);
+        CHECK(wait_until_idle(p, 10000), "due in ct_delay: the transmitter drops");
+        CHECK(g_ptt[g_ptt_n - 1].ms >= id_at + id_ms, "... after the whole ID (%d ms after it was due)",
+              (int)(g_ptt[g_ptt_n - 1].ms - id_at));
+    });
+    CHECK(strstr(log, "id: mandatory") && strstr(strstr(log, "id: mandatory"), "hang: armed"),
+          "... with a hang after the ID");
+    free(log); port_destroy(p);
+
+    /* Due during the hang. */
+    RUN_CAPTURED(&cfg, {
+        activity_pulse(p);
+        uint64_t id_at = unkey_before_id(p, 600);
+        CHECK(wait_until_idle(p, 10000), "due in the hang: the transmitter drops");
+        CHECK(g_ptt[g_ptt_n - 1].ms >= id_at + id_ms, "... after the whole ID (%d ms after it was due)",
+              (int)(g_ptt[g_ptt_n - 1].ms - id_at));
+        CHECK(g_ptt[g_ptt_n - 1].ms <= id_at + id_ms + 200, "... at once, with no second courtesy tone or hang");
+    });
+    CHECK(count_occurrences(log, "hang: armed") == 2, "... one hang for that tail (%d in all)",
+          count_occurrences(log, "hang: armed"));
+    free(log); port_destroy(p);
+
+    /* A keyup partway through: the CW ID carries on under the repeated audio and
+     * counts as sent; the tail ends normally. */
+    RUN_CAPTURED(&cfg, {
+        activity_pulse(p);
+        unkey_before_id(p, 100);
+        wait_ms(p, 500);
+        key_local(p, true);
+        wait_ms(p, 500);
+        key_local(p, false);
+        uint64_t unkeyed = g_now;
+        wait_until_idle(p, 10000);
+        int held = (int)(g_now - unkeyed);
+        CHECK(!port_ptt(p), "keyup during it: the tail still ends");
+        /* About 360 ms of ID is left at the unkey; CT + hang alone is about 1060 ms. */
+        CHECK(held >= 1300, "... after the rest of the ID (%d ms)", held);
+    });
+    CHECK(strstr(log, "CW carries on underneath") && count_occurrences(log, "id: mandatory") == 1,
+          "... which carried on under the audio, once");
+    free(log); port_destroy(p);
+
+    /* Down with no reply, after an impolite ID paid what the transmission owed. */
+    RUN_CAPTURED(&cfg, {
+        activity_pulse(p);
+        key_local(p, true);
+        wait_for_log(p, "id: impolite", 8000);
+        wait_ms(p, 2000);
+        key_local(p, false);
+        wait_ms(p, 40);
+        port_set_repeater_down(p, true, NULL, 0, g_now);
+        wait_ms(p, 40);
+        CHECK(!port_ptt(p), "down with no reply and no ID owed: the transmitter drops");
+    });
+    free(log); port_destroy(p);
+
+    printf(ok ? "[19] PASS\n" : "[19] FAIL\n");
+    return ok;
+}
+
 /* ── driver ───────────────────────────────────────────────────────────── */
 
 static bool scenario_no_courtesy_tone(config_t *base, vocab_cache_t *vocab)
@@ -1276,6 +1365,7 @@ int main(void)
         scenario_timeout_per_source,
         scenario_repeater_down,
         scenario_no_courtesy_tone,
+        scenario_id_in_tail,
     };
     int n = (int)(sizeof(scenarios) / sizeof(scenarios[0]));
 

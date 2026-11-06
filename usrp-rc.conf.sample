@@ -125,7 +125,7 @@ default_cw    = cw: {call}/R
 # master_gain is a final multiplier on ALL generated controller audio: set it
 # once for your modulator's headroom, then balance sounds with the levels below.
 #master_gain          = 1.0
-#morse_wpm            = 20
+#morse_wpm            = 20     # above 20 warns if an ID uses CW (US: FCC 97.119(b)(1))
 #morse_pitch          = 700
 #morse_level          = 0.9
 #impolite_morse_level = 0.3    # CW level when IDing over an active QSO (ducking)
@@ -145,7 +145,7 @@ default_cw    = cw: {call}/R
 #timeout     = 180     # local time-out timer (TOT); resets at the courtesy tone
                        # (the end of ct_delay, also with no tone); 0 = off
 #link_timeout = 180    # link time-out timer; resets each time the link unkeys; 0 = off
-#id_interval = 600     # mandatory ID interval (FCC: at most 10 minutes)
+#id_interval = 600     # mandatory ID interval, from the end of an ID (US: at most 10 minutes)
 #id_anxious  = 60      # sneak an anxious ID this far before the deadline
 #tail_every  = 0       # play events.tail_messages every this many tails; 0 = off
 #tail_min_interval = 0 # ... but at least this many seconds apart; 0 = no limit

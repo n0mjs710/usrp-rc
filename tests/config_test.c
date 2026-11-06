@@ -366,6 +366,20 @@ int main(void)
         check("and end with it", run.timers.timeout == 180.0 && run.timers.hang == s_cfg.timers.hang);
     }
 
+    rc = load_text(BASE "[messages]\nc = cw: W1XYZ\n[events]\nimpolite_id = c\n" "[audio]\nmorse_wpm = 25\n");
+    check("a CW ID over 20 wpm warns, citing the US rule, but loads",
+          rc == 0 && strstr(s_log, "may not exceed 20 wpm") != NULL);
+    rc = load_text(BASE "[messages]\nv = voice: THISIS\n[events]\ninitial_ids = v\nmandatory_ids = v\nimpolite_id = v\n[audio]\nmorse_wpm = 25\n");
+    check("... but not when no ID uses CW", rc == 0 && !strstr(s_log, "20 wpm"));
+    rc = load_text(BASE "[messages]\nc = cw: W1XYZ\n[events]\nimpolite_id = c\n" "[schedule]\nfast = sat 08:00-09:00 morse_wpm=30\n");
+    check("... and from a window, naming it", rc == 0 && strstr(s_log, "schedule.fast: audio.morse_wpm is 30"));
+    rc = load_text(BASE "[timers]\nid_interval = 900\n");
+    check("an ID interval over 10 minutes warns, but loads", rc == 0 && strstr(s_log, "97.119(a)"));
+    rc = load_text(BASE "[messages]\nc = cw: W1XYZ\n[events]\nimpolite_id = c\n" "[audio]\nimpolite_morse_level = 0\n");
+    check("a silent impolite ID warns", rc == 0 && strstr(s_log, "impolite ID is silent"));
+    rc = load_text(BASE "[audio]\nmaster_gain = 0\n");
+    check("a master gain of 0 warns", rc == 0 && strstr(s_log, "master_gain is 0"));
+
     printf("[6] shipped configs load\n");
     check("usrp-rc.conf.sample", capture_load("usrp-rc.conf.sample") == 0);
     check("tests/harness.conf", capture_load("tests/harness.conf") == 0);
