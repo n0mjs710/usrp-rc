@@ -4,9 +4,11 @@ This document lists the configuration changes necessary for each new version. Af
 each change, examine the configuration with `usrp-rc --check <file>`. `--check` shows
 each out-of-date setting by line number.
 
-## November 2026: DTMF control, schedule and new configuration rules
+## 1.0b (November 2026)
 
-These changes apply when you update from a `main` before November 2026.
+Version 1.0b is the first numbered version. It adds DTMF control, the schedule and new
+configuration rules. These changes apply when you update from a `main` before 1.0b. To
+see the installed version, enter `usrp-rc --version`.
 
 ### Necessary changes
 

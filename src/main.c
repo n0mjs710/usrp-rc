@@ -13,6 +13,7 @@
 #include "stats.h"
 #include "util.h"
 #include "log.h"
+#include "version.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -849,8 +850,11 @@ int main(int argc, char *argv[])
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--check") == 0) {
             check_only = true;
+        } else if (strcmp(argv[i], "--version") == 0) {
+            printf("usrp-rc %s\n", USRP_RC_VERSION);
+            return 0;
         } else if (argv[i][0] == '-') {
-            LOGE("usage: usrp-rc [--check] [config-file]\n");
+            LOGE("usage: usrp-rc [--check] [--version] [config-file]\n");
             return 2;
         } else {
             config_path = argv[i];
@@ -1000,7 +1004,7 @@ int main(int argc, char *argv[])
      * alive rather than one-way traffic. */
     a->fm_ping_deadline = monotonic_ms() + FM_PING_INTERVAL_MS;
 
-    printf("usrp-rc: ready\n");
+    printf("usrp-rc %s: ready\n", USRP_RC_VERSION);
 
     struct epoll_event events[MAX_EVENTS];
     while (!g_stop) {

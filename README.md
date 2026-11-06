@@ -6,6 +6,8 @@ functions of MMDVM-Host.
 
 For operation and the settings reference, see [MANUAL.md](MANUAL.md).
 
+Version: 1.0b (beta). To update from an earlier `main`, see [UPGRADE.md](UPGRADE.md).
+
 > [!WARNING]
 > **MMDVM-Host FM audio quality.** At the date of this document (November 2026),
 > MMDVM-Host has defects that decrease the audio quality of FM mode. The symptoms are
