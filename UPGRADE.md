@@ -29,6 +29,13 @@ These changes apply when you update from 1.0b.
   replies and time-out replies. They no longer add a pause before an ID in a tail.
 - "Repeater up" when the repeater is already up is an ordinary command reply. It no
   longer restarts the time-out timer.
+- DTMF entry no longer takes the link down for the rest of the transmission. The link
+  stays keyed and gets the cover tone (the beep) during the mute, the same as the
+  repeater. The new `[dtmf]` settings `local_cover_tone` and `link_cover_tone` replace
+  the cover tone with silence on either path.
+- Digits that cannot be the start of a command are discarded at once, and the audio
+  goes out as usual. A false digit in speech no longer mutes the rest of the
+  transmission. DTMF that is not a command for this repeater now goes to the link.
 
 ## 1.0b (November 2026)
 

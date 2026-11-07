@@ -200,7 +200,6 @@ typedef struct {
     int        got;         /* commands completed mid-transmission */
     command_t  cmd;
     int        muted_frames;
-    int        link_cut;
     int        beep_frames;
 } session_run_t;
 
@@ -220,7 +219,6 @@ static void session_frame(const int16_t frame[160], void *arg)
             }
         }
     }
-    r->link_cut = command_session_link_cut(r->s);
 }
 
 static config_t s_cfg;
@@ -421,14 +419,26 @@ static void test_commands(void)
     check("an overlong sequence is ignored", strcmp(end(&r), "") == 0);
     command_session_destroy(r.s);
 
-    printf("\nmuting and link\n");
+    printf("\nmuting\n");
 
     r = new_session();
     play(&SILENCE, 500, session_frame, &r);
-    check("nothing muted before a tone", r.muted_frames == 0 && !r.link_cut);
+    check("nothing muted before a tone", r.muted_frames == 0);
+    press(&r, '9');
+    check("a digit no command starts with doesn't mute", !command_session_muted(r.s));
+    press(&r, '#');
+    check("nor does a cancel", !command_session_muted(r.s));
+    press(&r, '7');
+    check("a digit that can start a command mutes", command_session_muted(r.s));
+    press(&r, '9');
+    check("a digit that kills the entry unmutes", !command_session_muted(r.s));
+    check("... and drops it", strcmp(end(&r), "") == 0);
+    press_all(&r, "79");
+    press_all(&r, "512");
+    check("a fresh entry after a dead one works", strcmp(end(&r), "12") == 0);
+
     press(&r, '5');
     check("first digit mutes", command_session_muted(r.s));
-    check("first digit takes the link down", r.link_cut);
 
     play(&SILENCE, 1800, session_frame, &r);
     check("still muted inside the hang", command_session_muted(r.s));
@@ -437,13 +447,11 @@ static void test_commands(void)
     check("another digit extends the hang", command_session_muted(r.s));
     play(&SILENCE, 400, session_frame, &r);
     check("unmuted once the hang expires", !command_session_muted(r.s));
-    check("the link stays down for the transmission", r.link_cut);
 
     press(&r, '5');
     check("a later digit mutes again", command_session_muted(r.s));
     end(&r);
     check("the unkey clears the mute", !command_session_muted(r.s));
-    check("... and the link cut", !command_session_link_cut(r.s));
     command_session_destroy(r.s);
 
     /* Beep cadence: 100 ms on of every 1000. */

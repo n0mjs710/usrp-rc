@@ -135,6 +135,8 @@ typedef struct {
     int  beep_hz;
     int  beep_on_ms;
     int  beep_off_ms;
+    bool local_cover_tone;   /* false = the mute is silent on that path */
+    bool link_cover_tone;
     char pad_test_prefix[CFG_DTMF_PREFIX_STR];   /* empty = pad test off */
     char time_code[CFG_DTMF_PREFIX_STR];         /* empty = command off, likewise below */
     char stats_code[CFG_DTMF_PREFIX_STR];

@@ -625,8 +625,6 @@ static void mmdvm_rx_frame(app_t *a, const int16_t frame_in[160], uint64_t now)
         if (command_session_frame(a->cmd, frame_in, &c))
             run_command(a, &c);
         muted = command_session_muted(a->cmd);
-        if (command_session_link_cut(a->cmd))
-            link_tx_end(a);
     }
 
     /* STE delay line, shared by both destinations: real audio once the
@@ -637,18 +635,24 @@ static void mmdvm_rx_frame(app_t *a, const int16_t frame_in[160], uint64_t now)
     if (!ste_push(a->ste, frame_in, ste_out))
         memset(ste_out, 0, sizeof(ste_out));
 
+    /* During a DTMF mute each path carries the cover tone, or silence where it is off. */
+    int16_t beep[160], silence[160] = {0};
+    const int16_t *local = ste_out, *link = ste_out;
+    if (muted) {
+        command_session_fill_mute(a->cmd, beep);
+        local = a->cfg.dtmf.local_cover_tone ? beep : silence;
+        link  = a->cfg.dtmf.link_cover_tone ? beep : silence;
+    }
+
     /* Flow 1: local repeat, mmdvm RX -> mmdvm TX (+ impolite-ID mix). */
     int16_t frame[160];
-    if (muted)
-        command_session_fill_mute(a->cmd, frame);
-    else
-        memcpy(frame, ste_out, sizeof(frame));
+    memcpy(frame, local, sizeof(frame));
     port_mix_apply(a->port, frame, now);
     send_mmdvm_voice(a, frame);
 
     /* Flow 2: mmdvm RX -> link TX. */
     if (a->link_sock >= 0 && !a->link_tx_ended)
-        send_link_voice(a, ste_out);
+        send_link_voice(a, link);
 }
 
 static void handle_mmdvm(app_t *a)

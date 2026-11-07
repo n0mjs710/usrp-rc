@@ -65,6 +65,8 @@ void config_defaults(config_t *cfg)
     cfg->dtmf.beep_hz       = 440;
     cfg->dtmf.beep_on_ms    = 100;
     cfg->dtmf.beep_off_ms   = 900;
+    cfg->dtmf.local_cover_tone = true;
+    cfg->dtmf.link_cover_tone  = true;
     cfg->dtmf.regen_tone_ms = 100;
     cfg->dtmf.regen_gap_ms  = 100;
     cfg->dtmf.regen_lead_ms = 200;
@@ -189,6 +191,8 @@ static const field_t FIELDS[] = {
     INT("dtmf",  "beep_hz",       dtmf.beep_hz, 100, 3400),
     INT("dtmf",  "beep_on_ms",    dtmf.beep_on_ms, 0, 10000),
     INT("dtmf",  "beep_off_ms",   dtmf.beep_off_ms, 0, 10000),
+    BOOL("dtmf", "local_cover_tone", dtmf.local_cover_tone),
+    BOOL("dtmf", "link_cover_tone",  dtmf.link_cover_tone),
     STR("dtmf",  "pad_test_prefix", dtmf.pad_test_prefix),
     STR("dtmf",  "time_code",     dtmf.time_code),
     STR("dtmf",  "stats_code",    dtmf.stats_code),
@@ -1204,6 +1208,7 @@ static const char *not_schedulable(const field_t *f)
     static const char *const STARTUP_SECTIONS[] = {"", "log", "mmdvm", "link", "stats", "state", NULL};
     static const char *const STARTUP_KEYS[] = {
         "dtmf.enabled", "dtmf.min_tone_ms", "dtmf.beep_hz", "dtmf.beep_on_ms", "dtmf.beep_off_ms",
+        "dtmf.local_cover_tone", "dtmf.link_cover_tone",
         "dtmf.regen_code", "dtmf.regen_tone_ms", "dtmf.regen_gap_ms", "dtmf.regen_lead_ms",
         "dtmf.regen_level",
         "audio.ste_delay_ms", "audio.lead_trim_ms", NULL,

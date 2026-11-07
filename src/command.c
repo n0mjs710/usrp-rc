@@ -27,7 +27,6 @@ struct command_session {
     int  last_tone_ms;      /* when a tone was last heard; drives the mute hang */
 
     bool muted;
-    bool link_cut;
 
     int16_t *beep;
     size_t   beep_len;
@@ -128,6 +127,32 @@ static bool evaluate(command_session_t *s, command_t *out)
     return false;
 }
 
+/* Could more digits still make a command? The pad test and regen take anything after
+ * their codes. */
+static bool live(const command_session_t *s)
+{
+    const config_dtmf_t *d = &s->cfg->dtmf;
+    const char *codes[] = {d->time_code, d->stats_code, d->link_on_code, d->link_off_code,
+                           d->link_status_code, d->repeater_code, d->regen_code,
+                           d->pad_test_prefix};
+    size_t n = (size_t)s->ndigits;
+    for (size_t i = 0; i < sizeof(codes) / sizeof(codes[0]); i++) {
+        size_t len = strlen(codes[i]);
+        if (!len)
+            continue;
+        if (strncmp(s->digits, codes[i], n < len ? n : len) != 0)
+            continue;
+        if (n <= len)
+            return true;
+        if (codes[i] == d->repeater_code && n == len + 1
+            && (s->digits[len] == '0' || s->digits[len] == '1'))
+            return true;
+        if (codes[i] == d->regen_code || codes[i] == d->pad_test_prefix)
+            return true;
+    }
+    return false;
+}
+
 static void on_digit(command_session_t *s, char digit, bool *terminated)
 {
     if (s->ndigits > 0 && s->now_ms - s->last_digit_ms > s->cfg->dtmf.interdigit_ms) {
@@ -168,6 +193,11 @@ static void on_digit(command_session_t *s, char digit, bool *terminated)
         s->capturing = true;
         LOGD("dtmf: '%s': every key to the unkey counts\n", s->digits);
     }
+
+    if (!s->overflowed && !live(s)) {
+        LOGI("dtmf: '%s': ABANDONED no command starts this way\n", s->digits);
+        clear_digits(s);
+    }
 }
 
 bool command_session_frame(command_session_t *s, const int16_t frame[160], command_t *out)
@@ -186,13 +216,14 @@ bool command_session_frame(command_session_t *s, const int16_t frame[160], comma
                 s->beep_pos = 0;
                 LOGD("dtmf: muting repeat audio\n");
             }
-            if (!s->link_cut) {
-                s->link_cut = true;
-                if (s->cfg->link.enabled)
-                    LOGI("dtmf: link down for the rest of this transmission\n");
-            }
             s->tone_rejected = false;
             on_digit(s, events[i].digit, &terminated);
+            /* Only a live entry keeps the mute: a stray tone, a cancel or an executed
+             * command gives the audio straight back. */
+            if (s->ndigits == 0 && s->muted) {
+                s->muted = false;
+                LOGD("dtmf: unmuting repeat audio\n");
+            }
         } else {
             LOGD("dtmf: digit '%c' released after %d ms\n", events[i].digit, events[i].ms);
             s->tone_rejected = false;
@@ -226,7 +257,6 @@ static void reset_for_next_tx(command_session_t *s)
     s->last_tone_ms = 0;
     s->tone_rejected = false;
     s->muted = false;
-    s->link_cut = false;
     s->beep_pos = 0;
 }
 
@@ -259,11 +289,6 @@ void command_session_end_of_tx_discard(command_session_t *s, const char *why)
 bool command_session_muted(const command_session_t *s)
 {
     return s->muted;
-}
-
-bool command_session_link_cut(const command_session_t *s)
-{
-    return s->link_cut;
 }
 
 void command_session_fill_mute(command_session_t *s, int16_t frame[160])

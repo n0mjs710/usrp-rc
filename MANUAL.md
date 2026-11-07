@@ -121,11 +121,16 @@ The reply plays after the unkey, before the courtesy tone. A key-up stops the re
 
 During digit entry:
 
-- The repeater transmits a beep in place of the DTMF tones. The beep occurs
-  approximately one time each second.
+- The repeater transmits a cover tone in place of the DTMF tones: a beep approximately
+  one time each second. The link gets the same cover tone, and stays keyed. The operator
+  can replace the cover tone with silence, on the repeater, on the link, or on both.
 - The start of the first digit can go out as a short blip.
-- The repeater does not send the transmission to the link. This starts at the first digit
-  and continues until the unkey. Audio before the first digit has already gone to the link.
+- The cover tone stops a short time after the last digit. Then the repeater and the link
+  get the transmission again.
+- If the digits cannot be the start of a command, the repeater discards them at once and
+  sends the audio as usual. Thus a stray tone in speech, or DTMF for the system at the
+  other end of the link, goes through. To send DTMF over the link reliably, use DTMF
+  regen ([2.6](#26-dtmf-regen)).
 
 ### 2.4 Discarded entries
 
@@ -137,6 +142,7 @@ The repeater discards an entry for these conditions:
 | The pause between two digits is too long | 4 seconds. Only the digits before the pause are discarded. |
 | The transmission continues too long after the last digit | 8 seconds |
 | The entry has too many digits | 32 |
+| No command can start with the digits | None. The repeater discards them at once. |
 
 If the repeater has no link, `70`, `72` and `73` reply "No link service".
 
@@ -183,7 +189,7 @@ enters. It sends only the new tones.
 | Sound | Meaning |
 | --- | --- |
 | Courtesy tone | The transmission has ended. The next station can transmit. Different tones can show local traffic, link traffic and link off. |
-| Beep, one time each second | A station enters a DTMF command. |
+| Cover tone: a beep, one time each second | A station enters a DTMF command. |
 | Short falling tones | The time-out timer stopped a long transmission. Unkey to reset the timer. |
 | "Repeater" replies with no repeated audio | The repeater is timed out. A command that ends with `D` gets a reply. |
 
@@ -802,7 +808,7 @@ A window can change each setting in these sections:
 
 - `[timers]`
 - `[audio]`, but not `ste_delay_ms` or `lead_trim_ms`
-- `[dtmf]`, but not `enabled`, `min_tone_ms`, the `beep_` settings or the `regen_`
+- `[dtmf]`, but not `enabled`, `min_tone_ms`, the `beep_` and `_cover_tone` settings or the `regen_`
   settings
 - `[events]`, but not `startup_message`
 
@@ -940,9 +946,15 @@ future use.
 
 ### 9.4 Muting
 
-At the first valid tone, the repeater mutes the repeated audio. A beep replaces the
-audio: 100 ms on, 900 ms off, by default. The mute stops `mute_hang_ms` after the last
-tone. A new tone starts the mute again.
+At the first valid tone, the repeater mutes the repeated audio and the audio to the link.
+The link stays keyed. A cover tone replaces the audio: a beep, 100 ms on and 900 ms off by
+default. `local_cover_tone` and `link_cover_tone` select the cover tone or silence for
+each path. The mute stops `mute_hang_ms` after the last tone. A new tone starts the mute
+again.
+
+The mute continues only while the digits can still become a command. A digit that no code
+starts with, `#`, or a command that `D` executes stops the mute at once. The delayed
+audio, the tone included, then goes out as usual.
 
 If `audio.ste_delay_ms` is 0, the start of the first tone goes out before the mute
 starts. To prevent this blip, set `audio.ste_delay_ms` longer than `min_tone_ms`.
@@ -951,10 +963,10 @@ starts. To prevent this blip, set `audio.ste_delay_ms` longer than `min_tone_ms`
 
 | Condition | Action |
 | --- | --- |
-| Voice causes false digits | Increase `min_tone_ms`. |
+| Voice causes false digits | Increase `min_tone_ms`. A false digit that no code starts with has no effect. |
 | The repeater does not detect short tones from some radios | Decrease `min_tone_ms`. The minimum is 30. |
 | The first tone goes out as a blip | Set `audio.ste_delay_ms` longer than `min_tone_ms`, for example 60. This delays all repeated audio and link audio by the same time. |
-| The beep continues too long | Decrease `mute_hang_ms`. Keep it longer than `ste_delay_ms` and shorter than `interdigit_ms`. |
+| The cover tone continues too long | Decrease `mute_hang_ms`. Keep it longer than `ste_delay_ms` and shorter than `interdigit_ms`. |
 | The system at the other end of the link misses the first regen tone | Increase `regen_lead_ms`. |
 | The system at the other end of the link misses regen tones | Increase `regen_tone_ms` and `regen_gap_ms`, or change `regen_level`. |
 
@@ -1149,7 +1161,7 @@ the ports to agree with `MMDVM-Host.ini`. For the procedure, see
 | `morse_level` | `0.9` | 0-2 | CW level |
 | `impolite_morse_level` | `0.3` | 0-2 | CW level for an impolite ID |
 | `voice_level` | `0.9` | 0-2 | Voice clip level |
-| `tone_level` | `0.5` | 0-2 | Level of tones without `@LEVEL`, and of the DTMF beep. The beep uses the value at startup. |
+| `tone_level` | `0.5` | 0-2 | Level of tones without `@LEVEL`, and of the DTMF cover tone. The cover tone uses the value at startup. |
 | `voice_gap_ms` | `150` | 0-10000 | Length of a `_` pause |
 | `ste_delay_ms` | `0` | 0-2000 | Delay of repeated audio and link audio, for squelch tail elimination. 0 is off. |
 | `lead_trim_ms` | `0` | 0-2000 | Mute at the start of each transmission. 0 is off. |
@@ -1180,9 +1192,11 @@ Levels above 1.0 are permitted, but they can cause clipping.
 | `interdigit_ms` | `4000` | 100-60000 | A longer pause discards the digits before it. |
 | `end_of_tx_ms` | `8000` | 100-600000 | A longer time from the last digit to the unkey discards the entry. |
 | `mute_hang_ms` | `2000` | 0-60000 | Mute time after the last tone. Must be less than `interdigit_ms`. |
-| `beep_hz` | `440` | 100-3400 | Beep frequency during the mute |
-| `beep_on_ms` | `100` | 0-10000 | Beep length |
-| `beep_off_ms` | `900` | 0-10000 | Time between beeps |
+| `beep_hz` | `440` | 100-3400 | Cover tone frequency during the mute |
+| `beep_on_ms` | `100` | 0-10000 | Cover tone length |
+| `beep_off_ms` | `900` | 0-10000 | Time between cover tones |
+| `local_cover_tone` | `true` | true, false | The cover tone on the repeater during the mute. `false` is silence. |
+| `link_cover_tone` | `true` | true, false | The cover tone on the link during the mute. `false` is silence. |
 
 ### 11.8 `[stats]`
 
