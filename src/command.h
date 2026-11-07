@@ -50,9 +50,8 @@ bool command_session_end_of_tx(command_session_t *s, command_t *out);
 /* The transmission ended, but nothing entered may run: start clean, logging why. */
 void command_session_end_of_tx_discard(command_session_t *s, const char *why);
 
-/* Should repeat and link audio be replaced right now? Set by the first valid tone,
- * cleared at once if no command can start that way, else when the mute hang expires
- * with no further tone. */
+/* Should repeat and link audio be replaced right now? Set by any valid tone, command
+ * or not, until the mute hang expires with no further tone. */
 bool command_session_muted(const command_session_t *s);
 
 /* Replace a frame with what plays during the mute: silence and the beep cadence. */

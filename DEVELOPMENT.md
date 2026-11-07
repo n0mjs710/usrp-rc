@@ -63,8 +63,8 @@ the same slot the anxious ID uses.
 The pad test and regen codes switch `command.c` into capturing: every key after
 them, `#` and `D` included, goes into the entry until the unkey, which is why
 `check_consistency()` won't let another code start with either. Otherwise an entry
-that no code starts with is dropped at the digit that kills it, and the mute ends
-with it: the mute lasts only while a command is still possible. Regen's link copy
+that no code starts with is dropped at the digit that kills it. The mute doesn't
+care: any valid tone mutes both paths, so no DTMF leaks. Regen's link copy
 is the only controller audio that goes to the link. `main.c` keys the link and paces
 it on its own 20 ms deadline (`regen_tick()`), independent of the port's tail, and a
 local transmission that starts meanwhile isn't sent to the link.

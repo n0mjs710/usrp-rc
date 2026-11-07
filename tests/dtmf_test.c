@@ -425,14 +425,10 @@ static void test_commands(void)
     play(&SILENCE, 500, session_frame, &r);
     check("nothing muted before a tone", r.muted_frames == 0);
     press(&r, '9');
-    check("a digit no command starts with doesn't mute", !command_session_muted(r.s));
-    press(&r, '#');
-    check("nor does a cancel", !command_session_muted(r.s));
-    press(&r, '7');
-    check("a digit that can start a command mutes", command_session_muted(r.s));
-    press(&r, '9');
-    check("a digit that kills the entry unmutes", !command_session_muted(r.s));
-    check("... and drops it", strcmp(end(&r), "") == 0);
+    check("a digit no command starts with still mutes", command_session_muted(r.s));
+    end(&r);
+    press_all(&r, "79");
+    check("an entry no command can complete is dropped", strcmp(end(&r), "") == 0);
     press_all(&r, "79");
     press_all(&r, "512");
     check("a fresh entry after a dead one works", strcmp(end(&r), "12") == 0);
