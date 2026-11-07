@@ -132,9 +132,9 @@ typedef struct {
     int  interdigit_ms;   /* a longer gap between digits discards what came before */
     int  end_of_tx_ms;    /* a longer gap from last digit to unkey discards the sequence */
     int  mute_hang_ms;    /* repeat audio stays muted this long after the last tone */
-    int  beep_hz;
-    int  beep_on_ms;
-    int  beep_off_ms;
+    int  cover_tone_hz;
+    int  cover_tone_on_ms;
+    int  cover_tone_off_ms;
     bool local_cover_tone;   /* false = the mute is silent on that path */
     bool link_cover_tone;
     char pad_test_prefix[CFG_DTMF_PREFIX_STR];   /* empty = pad test off */

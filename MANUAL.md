@@ -808,8 +808,7 @@ A window can change each setting in these sections:
 
 - `[timers]`
 - `[audio]`, but not `ste_delay_ms` or `lead_trim_ms`
-- `[dtmf]`, but not `enabled`, `min_tone_ms`, the `beep_` and `_cover_tone` settings or the `regen_`
-  settings
+- `[dtmf]`, but not `enabled`, `min_tone_ms`, the cover tone settings or the `regen_` settings
 - `[events]`, but not `startup_message`
 
 The other settings take effect only at startup. `--check` rejects them in a window.
@@ -1192,9 +1191,9 @@ Levels above 1.0 are permitted, but they can cause clipping.
 | `interdigit_ms` | `4000` | 100-60000 | A longer pause discards the digits before it. |
 | `end_of_tx_ms` | `8000` | 100-600000 | A longer time from the last digit to the unkey discards the entry. |
 | `mute_hang_ms` | `2000` | 0-60000 | Mute time after the last tone. Must be less than `interdigit_ms`. |
-| `beep_hz` | `440` | 100-3400 | Cover tone frequency during the mute |
-| `beep_on_ms` | `100` | 0-10000 | Cover tone length |
-| `beep_off_ms` | `900` | 0-10000 | Time between cover tones |
+| `cover_tone_hz` | `440` | 100-3400 | Cover tone frequency during the mute |
+| `cover_tone_on_ms` | `100` | 0-10000 | Cover tone length |
+| `cover_tone_off_ms` | `900` | 0-10000 | Time between cover tones |
 | `local_cover_tone` | `true` | true, false | The cover tone on the repeater during the mute. `false` is silence. |
 | `link_cover_tone` | `true` | true, false | The cover tone on the link during the mute. `false` is silence. |
 

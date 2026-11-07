@@ -200,7 +200,7 @@ typedef struct {
     int        got;         /* commands completed mid-transmission */
     command_t  cmd;
     int        muted_frames;
-    int        beep_frames;
+    int        cover_frames;
 } session_run_t;
 
 static void session_frame(const int16_t frame[160], void *arg)
@@ -214,7 +214,7 @@ static void session_frame(const int16_t frame[160], void *arg)
         command_session_fill_mute(r->s, out);
         for (int i = 0; i < 160; i++) {
             if (out[i] != 0) {
-                r->beep_frames++;
+                r->cover_frames++;
                 break;
             }
         }
@@ -465,7 +465,7 @@ static void test_commands(void)
         prev = loud;
         on += loud;
     }
-    check("the beep repeats once a second", starts == 10);
+    check("the cover tone repeats once a second", starts == 10);
     check("for about 100 ms", on >= 50 && on <= 60);
     command_session_destroy(r.s);
 

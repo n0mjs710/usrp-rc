@@ -51,6 +51,7 @@ static const test_case_t CASES[] = {
     {"zero port",           BASE "[mmdvm]\nrpt_port = 0\n", "mmdvm.rpt_port: 0 is not a valid port"},
     {"bad codec",           BASE "codec = opsu\n", "link.codec: 'opsu' is not valid (expected one of: pcm, opus)"},
     {"removed access mode", "access_mode = cor\n" BASE, "access_mode: removed, delete this line"},
+    {"renamed beep",        BASE "[dtmf]\nbeep_hz = 600\n", "dtmf.beep_hz: renamed to dtmf.cover_tone_hz"},
     {"bad log level",       BASE "[log]\nlevel = loud\n", "log.level: 'loud' is not valid"},
 
     {"negative hang",       BASE "[timers]\nhang = -5.0\n", "timers.hang: -5 is out of range"},
@@ -146,7 +147,7 @@ static const test_case_t CASES[] = {
     {"schedule wrong section", BASE "[schedule]\na = wed 07:00-08:00 audio.hang=3\n", "schedule.a: 'audio.hang' is not a setting (did you mean timers.hang?)"},
     {"schedule ambiguous",  BASE "[schedule]\na = wed 07:00-08:00 enabled=false\n", "'enabled' is in more than one section; write it as section.enabled"},
     {"schedule regen",      BASE "[schedule]\na = wed 07:00-08:00 regen_tone_ms=80\n", "dtmf.regen_tone_ms can't be scheduled: it only takes effect at startup"},
-    {"schedule beep",       BASE "[schedule]\na = wed 07:00-08:00 beep_hz=600\n", "dtmf.beep_hz can't be scheduled: it only takes effect at startup"},
+    {"schedule beep",       BASE "[schedule]\na = wed 07:00-08:00 cover_tone_hz=600\n", "dtmf.cover_tone_hz can't be scheduled: it only takes effect at startup"},
     {"schedule startup only", BASE "[schedule]\na = wed 07:00-08:00 link.enabled=false\n", "schedule.a: link.enabled can't be scheduled: it only takes effect at startup"},
     {"schedule callsign",   BASE "[schedule]\na = wed 07:00-08:00 callsign=N0CALL\n", "callsign can't be scheduled: it only takes effect at startup"},
     {"schedule startup",    BASE "[schedule]\na = wed 07:00-08:00 startup_message=\n", "events.startup_message can't be scheduled: it only plays at startup"},

@@ -54,7 +54,7 @@ void command_session_end_of_tx_discard(command_session_t *s, const char *why);
  * or not, until the mute hang expires with no further tone. */
 bool command_session_muted(const command_session_t *s);
 
-/* Replace a frame with what plays during the mute: silence and the beep cadence. */
+/* Replace a frame with what plays during the mute: silence and the cover tone cadence. */
 void command_session_fill_mute(command_session_t *s, int16_t frame[160]);
 
 /* The voice clip name that speaks a digit: ZERO..NINE, A, B, C, D, SIERRA for

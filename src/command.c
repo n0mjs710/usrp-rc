@@ -28,10 +28,10 @@ struct command_session {
 
     bool muted;
 
-    int16_t *beep;
-    size_t   beep_len;
-    size_t   beep_period;
-    size_t   beep_pos;
+    int16_t *cover;
+    size_t   cover_len;
+    size_t   cover_period;
+    size_t   cover_pos;
 };
 
 static void clear_digits(command_session_t *s)
@@ -213,7 +213,7 @@ bool command_session_frame(command_session_t *s, const int16_t frame[160], comma
             LOGD("dtmf: digit '%c'\n", events[i].digit);
             if (!s->muted) {
                 s->muted = true;
-                s->beep_pos = 0;
+                s->cover_pos = 0;
                 LOGD("dtmf: muting repeat audio\n");
             }
             s->tone_rejected = false;
@@ -251,7 +251,7 @@ static void reset_for_next_tx(command_session_t *s)
     s->last_tone_ms = 0;
     s->tone_rejected = false;
     s->muted = false;
-    s->beep_pos = 0;
+    s->cover_pos = 0;
 }
 
 bool command_session_end_of_tx(command_session_t *s, command_t *out)
@@ -288,10 +288,10 @@ bool command_session_muted(const command_session_t *s)
 void command_session_fill_mute(command_session_t *s, int16_t frame[160])
 {
     for (int i = 0; i < FRAME_SAMPLES; i++) {
-        frame[i] = s->beep_pos < s->beep_len ? s->beep[s->beep_pos] : 0;
-        s->beep_pos++;
-        if (s->beep_pos >= s->beep_period)
-            s->beep_pos = 0;
+        frame[i] = s->cover_pos < s->cover_len ? s->cover[s->cover_pos] : 0;
+        s->cover_pos++;
+        if (s->cover_pos >= s->cover_period)
+            s->cover_pos = 0;
     }
 }
 
@@ -315,16 +315,16 @@ const char *command_digit_clip(char digit)
 
 /* Rendered once, at startup: this plays continuously during a mute, on the audio path,
  * so its levels don't follow a schedule window. */
-static void render_beep(command_session_t *s)
+static void render_cover_tone(command_session_t *s)
 {
     const config_t *cfg = s->cfg;
-    s->beep = tone_render((double)cfg->dtmf.beep_hz, 0.0, cfg->dtmf.beep_on_ms,
-                          cfg->audio.tone_level, &s->beep_len);
-    if (s->beep) {
-        sbuf_t b = {.data = s->beep, .len = s->beep_len, .cap = s->beep_len};
+    s->cover = tone_render((double)cfg->dtmf.cover_tone_hz, 0.0, cfg->dtmf.cover_tone_on_ms,
+                          cfg->audio.tone_level, &s->cover_len);
+    if (s->cover) {
+        sbuf_t b = {.data = s->cover, .len = s->cover_len, .cap = s->cover_len};
         sbuf_scale(&b, cfg->audio.master_gain);
     }
-    s->beep_period = s->beep_len + (size_t)cfg->dtmf.beep_off_ms * (TONE_SAMPLE_RATE / 1000);
+    s->cover_period = s->cover_len + (size_t)cfg->dtmf.cover_tone_off_ms * (TONE_SAMPLE_RATE / 1000);
 }
 
 int command_session_create(command_session_t **out, const config_t *cfg)
@@ -339,7 +339,7 @@ int command_session_create(command_session_t **out, const config_t *cfg)
         return -1;
     }
 
-    render_beep(s);
+    render_cover_tone(s);
     *out = s;
     return 0;
 }
@@ -350,6 +350,6 @@ void command_session_destroy(command_session_t *s)
     if (!s)
         return;
     dtmf_decoder_destroy(s->decoder);
-    free(s->beep);
+    free(s->cover);
     free(s);
 }
