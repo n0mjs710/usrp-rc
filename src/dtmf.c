@@ -42,6 +42,65 @@ static const char   KEYS[4][4] = {
     {'*', '0', '#', 'D'},
 };
 
+/* Instrumentation: what each analysis measured, and the worst of a run of them. */
+typedef struct {
+    double level;           /* weaker tone, dBFS */
+    double frac;            /* the pair's share of the window energy */
+    double dom_low, dom_high;   /* dB over the runner-up in the group */
+    double twist;           /* low over high, dB */
+    double h2_low, h2_high; /* 2nd harmonic over its fundamental, dB */
+    double balance;         /* weaker half over stronger half of the window */
+} metrics_t;
+
+typedef struct {
+    int    n;
+    double level_min, level_max, frac_min, dom_low_min, dom_high_min;
+    double twist_min, twist_max, h2_low_max, h2_high_max, balance_min;
+} run_t;
+
+static double db(double ratio)
+{
+    return ratio > 0.0 ? 10.0 * log10(ratio) : -99.0;
+}
+
+static void run_start(run_t *r, const metrics_t *m)
+{
+    r->n = 1;
+    r->level_min = r->level_max = m->level;
+    r->frac_min = m->frac;
+    r->dom_low_min = m->dom_low;
+    r->dom_high_min = m->dom_high;
+    r->twist_min = r->twist_max = m->twist;
+    r->h2_low_max = m->h2_low;
+    r->h2_high_max = m->h2_high;
+    r->balance_min = m->balance;
+}
+
+static void run_add(run_t *r, const metrics_t *m)
+{
+    r->n++;
+    r->level_min = fmin(r->level_min, m->level);
+    r->level_max = fmax(r->level_max, m->level);
+    r->frac_min = fmin(r->frac_min, m->frac);
+    r->dom_low_min = fmin(r->dom_low_min, m->dom_low);
+    r->dom_high_min = fmin(r->dom_high_min, m->dom_high);
+    r->twist_min = fmin(r->twist_min, m->twist);
+    r->twist_max = fmax(r->twist_max, m->twist);
+    r->h2_low_max = fmax(r->h2_low_max, m->h2_low);
+    r->h2_high_max = fmax(r->h2_high_max, m->h2_high);
+    r->balance_min = fmin(r->balance_min, m->balance);
+}
+
+static void run_log(const run_t *r, char key, const char *what, int ms)
+{
+    LOGI("dtmf-metrics: '%c' %s %d ms, %d windows: level %.1f..%.1f dBFS, frac min %.2f, "
+         "dom min L %.1f H %.1f dB, twist %+.1f..%+.1f dB, h2 max L %.1f H %.1f dB, "
+         "balance min %.2f\n",
+         key, what, ms, r->n, r->level_min, r->level_max, r->frac_min,
+         r->dom_low_min, r->dom_high_min, r->twist_min, r->twist_max,
+         r->h2_low_max, r->h2_high_max, r->balance_min);
+}
+
 struct dtmf_decoder {
     float samples[WINDOW_SAMPLES];   /* ring buffer */
     int   head;
@@ -50,6 +109,9 @@ struct dtmf_decoder {
 
     float low_coef[4];
     float high_coef[4];
+    float low_h2_coef[4];
+    float high_h2_coef[4];
+    run_t run;              /* the current candidate or active tone */
 
     int   hits_required;
 
@@ -91,7 +153,7 @@ static int strongest(const double p[4], double *ratio)
 }
 
 /* The DTMF key in the current window, or 0. */
-static char analyze(const dtmf_decoder_t *d)
+static char analyze(const dtmf_decoder_t *d, metrics_t *m)
 {
     float x[WINDOW_SAMPLES];
     double first = 0.0, second = 0.0;
@@ -131,6 +193,15 @@ static char analyze(const dtmf_decoder_t *d)
     if ((pl + ph) / 2.0 < MIN_ENERGY_FRAC * energy)
         return 0;
 
+    m->level    = db(pl < ph ? pl : ph);
+    m->frac     = (pl + ph) / 2.0 / energy;
+    m->dom_low  = db(low_ratio);
+    m->dom_high = db(high_ratio);
+    m->twist    = db(pl / ph);
+    m->h2_low   = db(goertzel_power(x, d->low_h2_coef[r]) / pl);
+    m->h2_high  = db(goertzel_power(x, d->high_h2_coef[c]) / ph);
+    m->balance  = lesser / greater;
+
     return KEYS[r][c];
 }
 
@@ -140,7 +211,7 @@ static int active_ms(const dtmf_decoder_t *d)
 }
 
 /* Runs one analysis of the window through the debounce. Returns events written. */
-static int step(dtmf_decoder_t *d, char key, dtmf_event_t *out)
+static int step(dtmf_decoder_t *d, char key, const metrics_t *m, dtmf_event_t *out)
 {
     int n = 0;
 
@@ -148,6 +219,7 @@ static int step(dtmf_decoder_t *d, char key, dtmf_event_t *out)
         if (key == d->active) {
             d->active_hits++;
             d->misses = 0;
+            run_add(&d->run, m);
             return 0;
         }
         /* A different key can't be the same press; anything else may be noise. */
@@ -157,6 +229,7 @@ static int step(dtmf_decoder_t *d, char key, dtmf_event_t *out)
         out[n].type  = DTMF_TONE_OFF;
         out[n].digit = d->active;
         out[n].ms    = active_ms(d);
+        run_log(&d->run, d->active, "valid", out[n].ms);
         n++;
         d->active = 0;
         d->misses = 0;
@@ -165,6 +238,8 @@ static int step(dtmf_decoder_t *d, char key, dtmf_event_t *out)
     }
 
     if (!key) {
+        if (d->candidate && d->candidate_hits >= 2)
+            run_log(&d->run, d->candidate, "short", WINDOW_MS + (d->candidate_hits - 1) * HOP_MS);
         if (d->candidate)
             LOGD("dtmf: ignored '%c' after %d window(s), under the minimum tone time\n",
                  d->candidate, d->candidate_hits);
@@ -175,9 +250,11 @@ static int step(dtmf_decoder_t *d, char key, dtmf_event_t *out)
 
     if (key == d->candidate) {
         d->candidate_hits++;
+        run_add(&d->run, m);
     } else {
         d->candidate = key;
         d->candidate_hits = 1;
+        run_start(&d->run, m);
     }
 
     if (d->candidate_hits >= d->hits_required) {
@@ -206,8 +283,11 @@ int dtmf_decoder_push(dtmf_decoder_t *d, const int16_t frame[160],
         if (--d->hop_left > 0)
             continue;
         d->hop_left = HOP_SAMPLES;
-        if (d->filled == WINDOW_SAMPLES && n <= DTMF_MAX_EVENTS - 2)
-            n += step(d, analyze(d), &out[n]);
+        if (d->filled == WINDOW_SAMPLES && n <= DTMF_MAX_EVENTS - 2) {
+            metrics_t m;
+            char key = analyze(d, &m);
+            n += step(d, key, &m, &out[n]);
+        }
     }
     return n;
 }
@@ -219,6 +299,8 @@ int dtmf_decoder_active_ms(const dtmf_decoder_t *d)
 
 void dtmf_decoder_reset(dtmf_decoder_t *d)
 {
+    if (d->active)
+        run_log(&d->run, d->active, "cut by unkey", active_ms(d));
     memset(d->samples, 0, sizeof(d->samples));
     d->head = 0;
     d->filled = 0;
@@ -239,6 +321,8 @@ int dtmf_decoder_create(dtmf_decoder_t **out, int min_tone_ms)
     for (int i = 0; i < 4; i++) {
         d->low_coef[i]  = (float)(2.0 * cos(2.0 * M_PI * LOW_HZ[i] / SAMPLE_RATE));
         d->high_coef[i] = (float)(2.0 * cos(2.0 * M_PI * HIGH_HZ[i] / SAMPLE_RATE));
+        d->low_h2_coef[i]  = (float)(2.0 * cos(2.0 * M_PI * 2.0 * LOW_HZ[i] / SAMPLE_RATE));
+        d->high_h2_coef[i] = (float)(2.0 * cos(2.0 * M_PI * 2.0 * HIGH_HZ[i] / SAMPLE_RATE));
     }
 
     /* The first hit proves one window's worth of tone; each later one adds a hop. */
