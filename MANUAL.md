@@ -127,10 +127,10 @@ During digit entry:
 - The start of the first digit can go out as a short blip.
 - The cover tone stops a short time after the last digit. Then the repeater and the link
   get the transmission again.
-- If the digits cannot be the start of a command, the repeater discards them at once and
-  sends the audio as usual. Thus a stray tone in speech, or DTMF for the system at the
-  other end of the link, goes through. To send DTMF over the link reliably, use DTMF
-  regen ([2.6](#26-dtmf-regen)).
+- Every DTMF tone is muted, also tones that are not a command. To send DTMF to the
+  system at the other end of the link, use DTMF regen ([2.6](#26-dtmf-regen)).
+- If the digits cannot be the start of a command, the repeater discards them at once.
+  The next digit starts a new entry.
 
 ### 2.4 Discarded entries
 
@@ -952,9 +952,9 @@ default. `local_cover_tone` and `link_cover_tone` select the cover tone or silen
 each path. The mute stops `mute_hang_ms` after the last tone. A new tone starts the mute
 again.
 
-The mute continues only while the digits can still become a command. A digit that no code
-starts with, `#`, or a command that `D` executes stops the mute at once. The delayed
-audio, the tone included, then goes out as usual.
+Every valid tone starts the mute, also a tone that cannot be part of a command. Thus no
+DTMF goes out on the repeater or the link. Digits that no code starts with are discarded
+at once, but the mute continues to `mute_hang_ms` after the tone.
 
 If `audio.ste_delay_ms` is 0, the start of the first tone goes out before the mute
 starts. To prevent this blip, set `audio.ste_delay_ms` longer than `min_tone_ms`.
@@ -963,7 +963,7 @@ starts. To prevent this blip, set `audio.ste_delay_ms` longer than `min_tone_ms`
 
 | Condition | Action |
 | --- | --- |
-| Voice causes false digits | Increase `min_tone_ms`. A false digit that no code starts with has no effect. |
+| Voice causes false digits | Increase `min_tone_ms`. A false digit that no code starts with mutes for `mute_hang_ms`, but does not enter a command. |
 | The repeater does not detect short tones from some radios | Decrease `min_tone_ms`. The minimum is 30. |
 | The first tone goes out as a blip | Set `audio.ste_delay_ms` longer than `min_tone_ms`, for example 60. This delays all repeated audio and link audio by the same time. |
 | The cover tone continues too long | Decrease `mute_hang_ms`. Keep it longer than `ste_delay_ms` and shorter than `interdigit_ms`. |

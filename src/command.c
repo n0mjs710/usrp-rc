@@ -218,12 +218,6 @@ bool command_session_frame(command_session_t *s, const int16_t frame[160], comma
             }
             s->tone_rejected = false;
             on_digit(s, events[i].digit, &terminated);
-            /* Only a live entry keeps the mute: a stray tone, a cancel or an executed
-             * command gives the audio straight back. */
-            if (s->ndigits == 0 && s->muted) {
-                s->muted = false;
-                LOGD("dtmf: unmuting repeat audio\n");
-            }
         } else {
             LOGD("dtmf: digit '%c' released after %d ms\n", events[i].digit, events[i].ms);
             s->tone_rejected = false;

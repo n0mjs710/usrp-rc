@@ -33,9 +33,9 @@ These changes apply when you update from 1.0b.
   stays keyed and gets the cover tone (the beep) during the mute, the same as the
   repeater. The new `[dtmf]` settings `local_cover_tone` and `link_cover_tone` replace
   the cover tone with silence on either path.
-- Digits that cannot be the start of a command are discarded at once, and the audio
-  goes out as usual. A false digit in speech no longer mutes the rest of the
-  transmission. DTMF that is not a command for this repeater now goes to the link.
+- Digits that cannot be the start of a command are discarded at once. They still
+  mute for `mute_hang_ms`, but a false digit in speech no longer holds an entry open
+  until the unkey.
 
 ## 1.0b (November 2026)
 
