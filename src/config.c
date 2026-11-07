@@ -62,11 +62,11 @@ void config_defaults(config_t *cfg)
     cfg->dtmf.interdigit_ms = 4000;
     cfg->dtmf.end_of_tx_ms  = 8000;
     cfg->dtmf.mute_hang_ms  = 2000;
-    cfg->dtmf.beep_hz       = 440;
-    cfg->dtmf.beep_on_ms    = 100;
-    cfg->dtmf.beep_off_ms   = 900;
-    cfg->dtmf.local_cover_tone = true;
-    cfg->dtmf.link_cover_tone  = true;
+    cfg->dtmf.cover_tone_hz     = 440;
+    cfg->dtmf.cover_tone_on_ms  = 100;
+    cfg->dtmf.cover_tone_off_ms = 900;
+    cfg->dtmf.local_cover_tone  = true;
+    cfg->dtmf.link_cover_tone   = true;
     cfg->dtmf.regen_tone_ms = 100;
     cfg->dtmf.regen_gap_ms  = 100;
     cfg->dtmf.regen_lead_ms = 200;
@@ -188,11 +188,11 @@ static const field_t FIELDS[] = {
     INT("dtmf",  "interdigit_ms", dtmf.interdigit_ms, 100, 60000),
     INT("dtmf",  "end_of_tx_ms",  dtmf.end_of_tx_ms, 100, 600000),
     INT("dtmf",  "mute_hang_ms",  dtmf.mute_hang_ms, 0, 60000),
-    INT("dtmf",  "beep_hz",       dtmf.beep_hz, 100, 3400),
-    INT("dtmf",  "beep_on_ms",    dtmf.beep_on_ms, 0, 10000),
-    INT("dtmf",  "beep_off_ms",   dtmf.beep_off_ms, 0, 10000),
-    BOOL("dtmf", "local_cover_tone", dtmf.local_cover_tone),
-    BOOL("dtmf", "link_cover_tone",  dtmf.link_cover_tone),
+    INT("dtmf",  "cover_tone_hz",     dtmf.cover_tone_hz, 100, 3400),
+    INT("dtmf",  "cover_tone_on_ms",  dtmf.cover_tone_on_ms, 0, 10000),
+    INT("dtmf",  "cover_tone_off_ms", dtmf.cover_tone_off_ms, 0, 10000),
+    BOOL("dtmf", "local_cover_tone",  dtmf.local_cover_tone),
+    BOOL("dtmf", "link_cover_tone",   dtmf.link_cover_tone),
     STR("dtmf",  "pad_test_prefix", dtmf.pad_test_prefix),
     STR("dtmf",  "time_code",     dtmf.time_code),
     STR("dtmf",  "stats_code",    dtmf.stats_code),
@@ -335,6 +335,10 @@ static void err_unknown_setting(const char *section, const char *key)
     }
     if (strcmp(section, "events") == 0 && strcmp(key, "tail_message") == 0) {
         cfg_err("%s: renamed to events.tail_messages, a comma-separated list\n", have);
+        return;
+    }
+    if (strcmp(section, "dtmf") == 0 && strncmp(key, "beep_", 5) == 0) {
+        cfg_err("%s: renamed to dtmf.cover_tone_%s (see UPGRADE.md)\n", have, key + 5);
         return;
     }
     if ((strcmp(section, "audio") == 0 && strcmp(key, "voice_filter") == 0)
@@ -1207,8 +1211,8 @@ static const char *not_schedulable(const field_t *f)
 {
     static const char *const STARTUP_SECTIONS[] = {"", "log", "mmdvm", "link", "stats", "state", NULL};
     static const char *const STARTUP_KEYS[] = {
-        "dtmf.enabled", "dtmf.min_tone_ms", "dtmf.beep_hz", "dtmf.beep_on_ms", "dtmf.beep_off_ms",
-        "dtmf.local_cover_tone", "dtmf.link_cover_tone",
+        "dtmf.enabled", "dtmf.min_tone_ms", "dtmf.cover_tone_hz", "dtmf.cover_tone_on_ms",
+        "dtmf.cover_tone_off_ms", "dtmf.local_cover_tone", "dtmf.link_cover_tone",
         "dtmf.regen_code", "dtmf.regen_tone_ms", "dtmf.regen_gap_ms", "dtmf.regen_lead_ms",
         "dtmf.regen_level",
         "audio.ste_delay_ms", "audio.lead_trim_ms", NULL,

@@ -17,6 +17,9 @@ These changes apply when you update from 1.0b.
    now shows this error.
 3. If `[link]` `codec = opus`, one frame must be 256 bytes or less:
    `opus_bitrate` × `opus_frame_ms` / 8000. `--check` shows a setting that is too high.
+4. In `[dtmf]`, rename `beep_hz`, `beep_on_ms` and `beep_off_ms` to `cover_tone_hz`,
+   `cover_tone_on_ms` and `cover_tone_off_ms`, if they are there. The old names cause
+   an error.
 
 `libsystemd-dev` is no longer necessary to build `usrp-rc`.
 

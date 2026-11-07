@@ -636,12 +636,12 @@ static void mmdvm_rx_frame(app_t *a, const int16_t frame_in[160], uint64_t now)
         memset(ste_out, 0, sizeof(ste_out));
 
     /* During a DTMF mute each path carries the cover tone, or silence where it is off. */
-    int16_t beep[160], silence[160] = {0};
+    int16_t cover[160], silence[160] = {0};
     const int16_t *local = ste_out, *link = ste_out;
     if (muted) {
-        command_session_fill_mute(a->cmd, beep);
-        local = a->cfg.dtmf.local_cover_tone ? beep : silence;
-        link  = a->cfg.dtmf.link_cover_tone ? beep : silence;
+        command_session_fill_mute(a->cmd, cover);
+        local = a->cfg.dtmf.local_cover_tone ? cover : silence;
+        link  = a->cfg.dtmf.link_cover_tone ? cover : silence;
     }
 
     /* Flow 1: local repeat, mmdvm RX -> mmdvm TX (+ impolite-ID mix). */
