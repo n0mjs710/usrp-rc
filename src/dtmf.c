@@ -16,18 +16,24 @@
 #define HOP_MS         10
 #define WINDOW_MS      26
 
-/* Signal-quality gates. Deliberately permissive: the minimum tone time is the
- * main defense against voice, and these get tuned on the air if they need to. */
+/* Signal-quality gates. Energy share and dominance reject voice: on the air, real keys
+ * read >= 0.84 and >= 14.5 dB, and voice, clipped voice included, rarely passed 0.60 and
+ * 12 dB. */
 #define MIN_TONE_POWER  1.0e-4   /* each tone at least -40 dBFS (amplitude^2) */
 #define MAX_TWIST_RATIO 6.3      /* the two tones within 8 dB of each other */
-#define MIN_DOMINANCE   4.0      /* 6 dB above the runner-up in the same group */
-#define MIN_ENERGY_FRAC 0.40     /* the pair is this share of the window's energy */
+#define MIN_DOMINANCE   10.0     /* 10 dB above the runner-up in the same group */
+#define MIN_ENERGY_FRAC 0.65     /* the pair is this share of the window's energy */
 
 /* The two halves of the window must hold similar energy. Windows overlap, so
  * without this a burst counts in every window it merely touches, and min_tone_ms
  * would pass tones much shorter than it says. A ratio of 0.5 means the tone fills
  * at least 3/4 of the window. */
 #define MIN_HALF_BALANCE 0.5
+
+/* The bins are only about +-20 Hz wide, so each tone is also measured 1% either side
+ * of nominal and the strongest of the three counts. That keeps the standard's +-1.5%
+ * accepted at the energy share above, and +-3.5% is still rejected. */
+#define SIDE_BIN 0.01
 
 /* A valid tone ends after this many consecutive analyses without it, so one bad
  * window on a noisy signal doesn't split a digit in two. */
@@ -48,8 +54,8 @@ struct dtmf_decoder {
     int   filled;
     int   hop_left;
 
-    float low_coef[4];
-    float high_coef[4];
+    float low_coef[4][3];    /* nominal, then 1% below and above */
+    float high_coef[4][3];
 
     int   hits_required;
 
@@ -73,6 +79,14 @@ static double goertzel_power(const float *x, float coef)
     /* Normalize so a full-window sine of amplitude A reads as A^2. */
     double norm = 2.0 / WINDOW_SAMPLES;
     return p * norm * norm;
+}
+
+static double tone_power(const float *x, const float coef[3])
+{
+    double p = goertzel_power(x, coef[0]);
+    for (int i = 1; i < 3; i++)
+        p = fmax(p, goertzel_power(x, coef[i]));
+    return p;
 }
 
 /* Index of the strongest of four powers; *ratio is how far it clears the rest. */
@@ -112,8 +126,8 @@ static char analyze(const dtmf_decoder_t *d)
 
     double low[4], high[4];
     for (int i = 0; i < 4; i++) {
-        low[i]  = goertzel_power(x, d->low_coef[i]);
-        high[i] = goertzel_power(x, d->high_coef[i]);
+        low[i]  = tone_power(x, d->low_coef[i]);
+        high[i] = tone_power(x, d->high_coef[i]);
     }
 
     double low_ratio, high_ratio;
@@ -236,9 +250,12 @@ int dtmf_decoder_create(dtmf_decoder_t **out, int min_tone_ms)
     if (!d)
         return -1;
 
+    static const double SCALE[3] = {1.0, 1.0 - SIDE_BIN, 1.0 + SIDE_BIN};
     for (int i = 0; i < 4; i++) {
-        d->low_coef[i]  = (float)(2.0 * cos(2.0 * M_PI * LOW_HZ[i] / SAMPLE_RATE));
-        d->high_coef[i] = (float)(2.0 * cos(2.0 * M_PI * HIGH_HZ[i] / SAMPLE_RATE));
+        for (int j = 0; j < 3; j++) {
+            d->low_coef[i][j]  = (float)(2.0 * cos(2.0 * M_PI * LOW_HZ[i] * SCALE[j] / SAMPLE_RATE));
+            d->high_coef[i][j] = (float)(2.0 * cos(2.0 * M_PI * HIGH_HZ[i] * SCALE[j] / SAMPLE_RATE));
+        }
     }
 
     /* The first hit proves one window's worth of tone; each later one adds a hop. */
