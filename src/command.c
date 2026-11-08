@@ -47,7 +47,7 @@ static void clear_digits(command_session_t *s)
  *   Programming: a stub for now. The config file is the programming interface;
  *                a DTMF unlock would go here if a use for one turns up.
  *   Control op:  no commands yet. They'll sit behind a definable prefix.
- *   User:        the pad test, time, usage figures, link on, link off, link status,
+ *   User:        the pad test, time, usage figures, echo test, link on, link off, link status,
  *                DTMF regen, and repeater down/up (its code plus 0 or 1; no code by
  *                default, as anyone could use it until the control operator tier exists).
  */
@@ -67,6 +67,7 @@ static bool evaluate(command_session_t *s, command_t *out)
     static const struct { command_type_t type; size_t offset; const char *name; } CODES[] = {
         {COMMAND_TIME,     offsetof(config_dtmf_t, time_code),     "time"},
         {COMMAND_STATS,    offsetof(config_dtmf_t, stats_code),    "usage"},
+        {COMMAND_ECHO,     offsetof(config_dtmf_t, echo_code),     "echo test"},
         {COMMAND_LINK_ON,  offsetof(config_dtmf_t, link_on_code),  "link on"},
         {COMMAND_LINK_OFF, offsetof(config_dtmf_t, link_off_code), "link off"},
         {COMMAND_LINK_STATUS, offsetof(config_dtmf_t, link_status_code), "link status"},
@@ -132,9 +133,9 @@ static bool evaluate(command_session_t *s, command_t *out)
 static bool live(const command_session_t *s)
 {
     const config_dtmf_t *d = &s->cfg->dtmf;
-    const char *codes[] = {d->time_code, d->stats_code, d->link_on_code, d->link_off_code,
-                           d->link_status_code, d->repeater_code, d->regen_code,
-                           d->pad_test_prefix};
+    const char *codes[] = {d->time_code, d->stats_code, d->echo_code, d->link_on_code,
+                           d->link_off_code, d->link_status_code, d->repeater_code,
+                           d->regen_code, d->pad_test_prefix};
     size_t n = (size_t)s->ndigits;
     for (size_t i = 0; i < sizeof(codes) / sizeof(codes[0]); i++) {
         size_t len = strlen(codes[i]);

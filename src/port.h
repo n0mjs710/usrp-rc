@@ -46,6 +46,12 @@ void port_on_link_keyup(port_t *p, bool active, uint64_t now);
  * In TIMEOUT it plays at once on its own transmission, without receiver audio. */
 void port_queue_reply(port_t *p, int16_t *samples, size_t n);
 
+/* Echo test. Arming waits for the next local keyup, which port_take_echo() claims for
+ * recording. If the tail ends first, echo_cancel_message plays. Arming fails when the
+ * repeater is down or timed out. */
+bool port_arm_echo(port_t *p);
+bool port_take_echo(port_t *p);
+
 /* Tell the port whether the link is on, which selects the local courtesy tone.
  * With no link configured, it stays off. */
 void port_set_link_up(port_t *p, bool up);

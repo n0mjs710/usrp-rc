@@ -1302,6 +1302,56 @@ static bool scenario_message_pads(config_t *base, vocab_cache_t *vocab)
     return ok;
 }
 
+static bool scenario_echo(config_t *base, vocab_cache_t *vocab)
+{
+    printf("\n[21] echo test: the next local keyup is recorded, or the tail ends with a cancel\n");
+    bool ok = true;
+    config_t cfg = *base;
+    cfg.timers.id_interval = 3600.0;
+    port_t *p;
+    char *log;
+
+    /* No keyup: the cancel plays before the drop. */
+    RUN_CAPTURED(&cfg, {
+        prime(p);
+        key_local(p, true);
+        wait_ms(p, 150);
+        CHECK(port_arm_echo(p), "armed by the command");
+        key_local(p, false);
+        CHECK(wait_for_log(p, "echo: cancelled", 8000), "no keyup: cancelled as the tail ends");
+        CHECK(port_ptt(p), "... with the transmitter still on");
+        CHECK(ms_until_audio(p, 500) >= 0, "... for the cancel message");
+        CHECK(wait_until_idle(p, 8000), "... then it drops");
+        CHECK(!port_take_echo(p), "... and nothing is left armed");
+    });
+    free(log); port_destroy(p);
+
+    /* A local keyup in the tail is claimed for recording, and nothing cancels. */
+    RUN_CAPTURED(&cfg, {
+        prime(p);
+        key_local(p, true);
+        wait_ms(p, 150);
+        port_arm_echo(p);
+        key_local(p, false);
+        wait_ms(p, 300);
+        CHECK(port_take_echo(p), "a local keyup in the tail is recorded");
+        key_local(p, true);
+        wait_ms(p, 1000);
+        key_local(p, false);
+        wait_until_idle(p, 8000);
+    });
+    CHECK(!strstr(log, "echo: cancelled"), "... and the tail ends without a cancel");
+    free(log); port_destroy(p);
+
+    p = fresh_port(&cfg, vocab);
+    port_set_repeater_down(p, true, NULL, 0, g_now);
+    CHECK(!port_arm_echo(p), "not available with the repeater down");
+    port_destroy(p);
+
+    printf(ok ? "[21] PASS\n" : "[21] FAIL\n");
+    return ok;
+}
+
 /* ── driver ───────────────────────────────────────────────────────────── */
 
 static bool scenario_no_courtesy_tone(config_t *base, vocab_cache_t *vocab)
@@ -1394,6 +1444,7 @@ int main(void)
         scenario_no_courtesy_tone,
         scenario_id_in_tail,
         scenario_message_pads,
+        scenario_echo,
     };
     int n = (int)(sizeof(scenarios) / sizeof(scenarios[0]));
 

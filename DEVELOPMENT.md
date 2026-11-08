@@ -69,6 +69,11 @@ is the only controller audio that goes to the link. `main.c` keys the link and p
 it on its own 20 ms deadline (`regen_tick()`), independent of the port's tail, and a
 local transmission that starts meanwhile isn't sent to the link.
 
+The echo test is split the same way. `port.c` owns the arming, because only the port
+knows when the tail ends (`on_hang()` plays the cancel). `main.c` claims the next local
+keyup with `port_take_echo()`, records what it repeats, keeps that transmission off
+the link, and queues the recording as the reply at the unkey.
+
 The reference controllers are the ACC RC-96 (command structure and behavior) and
 the Arcom RC-210 (mute timer, tail message triggers). Their macro sets, patches,
 and multi-port routing are deliberately not the model here.

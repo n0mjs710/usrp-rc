@@ -27,6 +27,7 @@ typedef enum {
     COMMAND_REPEATER,   /* digits: "0" = down, "1" = up */
     COMMAND_NO_LINK,    /* a link command on a repeater with no link */
     COMMAND_REGEN,      /* send `digits` as fresh DTMF, here and over the link */
+    COMMAND_ECHO,       /* record the next local transmission and play it back */
 } command_type_t;
 
 typedef struct {

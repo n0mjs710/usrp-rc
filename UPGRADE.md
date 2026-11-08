@@ -20,8 +20,18 @@ These changes apply when you update from 1.0b.
 4. In `[dtmf]`, rename `beep_hz`, `beep_on_ms` and `beep_off_ms` to `cover_tone_hz`,
    `cover_tone_on_ms` and `cover_tone_off_ms`, if they are there. The old names cause
    an error.
+5. The new echo test has the code `30` by default. If another `[dtmf]` code is `30`,
+   change that code, or set `echo_code` to a different code or to empty. `--check`
+   shows the conflict.
 
 `libsystemd-dev` is no longer necessary to build `usrp-rc`.
+
+### New functions
+
+- Echo test: enter `30`, then key up and talk. The repeater plays back the first 10
+  seconds of that transmission. It does not go to the link. See MANUAL.md 2.7. The new
+  `[events]` `echo_message` and `echo_cancel_message` are its prompt and the reply when
+  no station keys up.
 
 ### Changes in operation
 

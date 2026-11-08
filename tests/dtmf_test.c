@@ -327,6 +327,9 @@ static void test_commands(void)
         check("... but time still works", command_session_end_of_tx(r.s, &c) && c.type == COMMAND_TIME);
         s_cfg.link.enabled = true;
 
+        press_all(&r, "30");
+        check("echo test is 30 by default", command_session_end_of_tx(r.s, &c) && c.type == COMMAND_ECHO);
+
         strcpy(s_cfg.dtmf.time_code, "");
         press_all(&r, "39");
         check("an empty code turns its command off", !command_session_end_of_tx(r.s, &c));

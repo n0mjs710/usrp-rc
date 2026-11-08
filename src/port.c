@@ -95,6 +95,9 @@ struct port {
     int16_t     *reply;
     size_t       reply_len;
 
+    /* The echo test is waiting for a local keyup to record, until the tail ends. */
+    bool         echo_armed;
+
     void (*activity_cb)(void *arg, double seconds);
     void  *activity_arg;
 
@@ -599,6 +602,16 @@ static void on_hang(port_t *p, uint64_t now)
     }
     reply_discard(p);
 
+    if (p->echo_armed) {
+        p->echo_armed = false;
+        LOGI("echo: cancelled, no keyup before the tail ended\n");
+        if (queue_message(p, p->ev->echo_cancel_message, -1.0)) {
+            pad_before_drop(p);
+            p->ctrl.on_drain = on_hang;
+            return;
+        }
+    }
+
     /* Checked once, as each hang ends: enough tails and enough time since a message
      * last started. A keyup over one doesn't undo that it played. */
     if (p->ev->n_tail_messages > 0 && p->cfg->timers.tail_every > 0) {
@@ -803,6 +816,21 @@ static void timeout_reply_after_drain(port_t *p, uint64_t now)
         set_ptt(p, false, "timeout-reply-done");
 }
 
+bool port_arm_echo(port_t *p)
+{
+    if (p->down || p->state == PORT_TIMEOUT)
+        return false;
+    p->echo_armed = true;
+    return true;
+}
+
+bool port_take_echo(port_t *p)
+{
+    bool armed = p->echo_armed && !p->down;
+    p->echo_armed = false;
+    return armed;
+}
+
 void port_queue_reply(port_t *p, int16_t *samples, size_t n)
 {
     reply_discard(p);
@@ -855,6 +883,7 @@ static void quiesce(port_t *p, uint64_t now)
     p->impolite_id_playing = false;
     p->mix_len = p->mix_pos = 0;
     p->mix_on_drain = NULL;
+    p->echo_armed = false;
     reply_discard(p);
     ctrl_buf_clear(p);
     port_transition(p, PORT_IDLE, now);
