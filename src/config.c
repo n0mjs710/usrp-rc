@@ -76,12 +76,15 @@ void config_defaults(config_t *cfg)
     strncpy(cfg->dtmf.pad_test_prefix, "5", sizeof(cfg->dtmf.pad_test_prefix) - 1);
     strncpy(cfg->dtmf.time_code, "39", sizeof(cfg->dtmf.time_code) - 1);
     strncpy(cfg->dtmf.stats_code, "38", sizeof(cfg->dtmf.stats_code) - 1);
+    strncpy(cfg->dtmf.echo_code, "30", sizeof(cfg->dtmf.echo_code) - 1);
     strncpy(cfg->dtmf.link_on_code, "72", sizeof(cfg->dtmf.link_on_code) - 1);
     strncpy(cfg->dtmf.link_off_code, "73", sizeof(cfg->dtmf.link_off_code) - 1);
     strncpy(cfg->dtmf.link_status_code, "70", sizeof(cfg->dtmf.link_status_code) - 1);
 
     strncpy(cfg->events.time_message, "time_readback", sizeof(cfg->events.time_message) - 1);
     strncpy(cfg->events.stats_message, "stats_readback", sizeof(cfg->events.stats_message) - 1);
+    strncpy(cfg->events.echo_message, "echo_reply", sizeof(cfg->events.echo_message) - 1);
+    strncpy(cfg->events.echo_cancel_message, "echo_cancel_reply", sizeof(cfg->events.echo_cancel_message) - 1);
     strncpy(cfg->stats.file, "/var/local/usrp-rc/stats", sizeof(cfg->stats.file) - 1);
     strncpy(cfg->state.file, "/var/local/usrp-rc/state", sizeof(cfg->state.file) - 1);
     strncpy(cfg->events.link_on_message, "link_on_reply", sizeof(cfg->events.link_on_message) - 1);
@@ -196,6 +199,7 @@ static const field_t FIELDS[] = {
     STR("dtmf",  "pad_test_prefix", dtmf.pad_test_prefix),
     STR("dtmf",  "time_code",     dtmf.time_code),
     STR("dtmf",  "stats_code",    dtmf.stats_code),
+    STR("dtmf",  "echo_code",     dtmf.echo_code),
     STR("dtmf",  "link_on_code",  dtmf.link_on_code),
     STR("dtmf",  "link_off_code", dtmf.link_off_code),
     STR("dtmf",  "link_status_code", dtmf.link_status_code),
@@ -220,6 +224,8 @@ static const field_t FIELDS[] = {
     NAMES("tail_messages", events.tail_messages, events.n_tail_messages),
     STR("events", "time_message",           events.time_message),
     STR("events", "stats_message",          events.stats_message),
+    STR("events", "echo_message",           events.echo_message),
+    STR("events", "echo_cancel_message",    events.echo_cancel_message),
     STR("events", "link_on_message",        events.link_on_message),
     STR("events", "link_off_message",       events.link_off_message),
     STR("events", "link_none_message",      events.link_none_message),
@@ -1047,6 +1053,8 @@ static void load_builtin_messages(config_t *cfg)
         {"repeater_up_reply", "REPEATER UP"},
         {"repeater_down_reply", "REPEATER DOWN"},
         {"stats_readback", "{keyups_day} KEY UP _S _ {minutes_day} MINUTES"},
+        {"echo_reply", "ECHO TEST READY"},
+        {"echo_cancel_reply", "ECHO TEST CANCEL"},
     };
     for (size_t i = 0; i < sizeof(BUILTIN) / sizeof(BUILTIN[0]); i++) {
         char words[128];
@@ -1589,6 +1597,7 @@ static void check_consistency(const config_t *cfg)
         {"regen_code",      offsetof(config_dtmf_t, regen_code)},
         {"time_code",       offsetof(config_dtmf_t, time_code)},
         {"stats_code",      offsetof(config_dtmf_t, stats_code)},
+        {"echo_code",       offsetof(config_dtmf_t, echo_code)},
         {"link_on_code",    offsetof(config_dtmf_t, link_on_code)},
         {"link_off_code",   offsetof(config_dtmf_t, link_off_code)},
         {"link_status_code", offsetof(config_dtmf_t, link_status_code)},

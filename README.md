@@ -48,7 +48,7 @@ The controller functions are:
 - Squelch tail elimination
 - CW, voice and tone messages, and tail messages
 - Clock and calendar schedule
-- DTMF commands, and DTMF regen to send commands over the link
+- DTMF commands, DTMF regen to send commands over the link, and an echo test
 - Usage statistics
 
 All controller functions operate locally. They do not need a network connection or a

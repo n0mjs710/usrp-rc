@@ -331,13 +331,13 @@ int main(void)
     rc = load_text(BASE);
     const config_elem_t *catalog = element("yellow_jacket", 2);
     check("available without being in the config", rc == 0 && catalog && catalog->freq1 == 660 && catalog->ms == 50);
-    check("all 28 tones and 7 built-in replies loaded", s_cfg.nmessages == 35);
+    check("all 28 tones and 9 built-in replies loaded", s_cfg.nmessages == 37);
     check("loud warning keeps its own level", element("timeout_warn", 0) && element("timeout_warn", 0)->amp == 0.9);
 
     rc = load_text(BASE "[messages]\nyellow_jacket = tone: 100:10\nmine = tone: 200:20\n");
     const config_message_t *over = config_find_message(&s_cfg, "yellow_jacket");
     check("same name replaces the catalog tone", rc == 0 && over && over->nelements == 1 && over->elements[0].freq1 == 100);
-    check("replacing doesn't add a message, a new tone does", s_cfg.nmessages == 36);
+    check("replacing doesn't add a message, a new tone does", s_cfg.nmessages == 38);
 
     printf("[5b] schedule settings and warnings\n");
     rc = load_text(BASE "[schedule]\nnet = wed 19:00-20:00 timeout=0\n");
@@ -714,7 +714,7 @@ int main(void)
         char many[4096] = BASE "[messages]\n";
         for (int i = 0; i < 70; i++)
             snprintf(many + strlen(many), sizeof(many) - strlen(many), "m%d = cw: A\n", i);
-        check("no limit on how many are defined", load_text(many) == 0 && s_cfg.nmessages == 105);
+        check("no limit on how many are defined", load_text(many) == 0 && s_cfg.nmessages == 107);
     }
 
     printf("[11] clips and messages over 3 minutes\n");

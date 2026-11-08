@@ -90,6 +90,7 @@ commands operate only if the operator sets `[dtmf] enabled = true`.
 | --- | --- | --- |
 | `39` | Time | "Good morning, the time is seven thirty A M" |
 | `38` | Usage | "*n* key ups, *n* minutes": key-ups and minutes of traffic in the last 24 hours |
+| `30` | Echo test | "Echo test ready". Then your next transmission plays back. See [2.7](#27-echo-test). |
 | `72` | Link on | "Link on" |
 | `73` | Link off | "Link off" |
 | `70` | Link status | "Link on" or "Link off". The link state does not change. |
@@ -184,7 +185,25 @@ enters. It sends only the new tones.
 - A local transmission that starts while the tones go to the link is not sent to the
   link.
 
-### 2.7 Repeater sounds
+### 2.7 Echo test
+
+Use this command to hear how your signal sounds through the repeater.
+
+1. Key the radio, enter `30` and unkey. The repeater says "Echo test ready".
+2. Before the courtesy tone and the hang end, key the radio and talk. Then unkey.
+3. The repeater plays back the first 10 seconds of the transmission.
+
+- If no station keys up before the tail ends, the repeater says "Echo test cancel".
+- The repeater repeats the recorded transmission as usual, but does not send it to the
+  link. The prompt and the playback also do not go to the link. Stations on the link
+  would hear only one part of the test, and could think that you call them.
+- The playback is what the repeater transmitted. A DTMF tone plays back as the cover
+  tone.
+- A key-up stops the playback.
+- The playback takes the place of the reply to a command in the same transmission.
+- The echo test is not available when the repeater has timed out a local transmission.
+
+### 2.8 Repeater sounds
 
 | Sound | Meaning |
 | --- | --- |
@@ -640,6 +659,8 @@ During a local time-out, the repeater continues to decode DTMF from the receiver
 | --- | --- | --- |
 | `time_message` | Reply to the time command | `time_readback` |
 | `stats_message` | Reply to the usage command | `stats_readback` |
+| `echo_message` | Prompt for the echo test | `echo_reply`: "Echo test ready" |
+| `echo_cancel_message` | Echo test with no key-up before the tail ends | `echo_cancel_reply`: "Echo test cancel" |
 | `link_on_message` | Reply to the link-on command | `link_on_reply` |
 | `link_off_message` | Reply to the link-off command | `link_off_reply` |
 | `link_none_message` | Reply to a link command when the repeater has no link | `link_none_reply` |
@@ -1177,6 +1198,7 @@ Levels above 1.0 are permitted, but they can cause clipping.
 | `pad_test_prefix` | `5` | 1-7 keys | Pad test prefix. Empty is off. |
 | `time_code` | `39` | 2-7 keys | Time command. Empty is off. |
 | `stats_code` | `38` | 2-7 keys | Usage command. Empty is off. |
+| `echo_code` | `30` | 2-7 keys | Echo test. Empty is off. See [2.7](#27-echo-test). |
 | `link_on_code` | `72` | 2-7 keys | Link-on command. Empty is off. |
 | `link_off_code` | `73` | 2-7 keys | Link-off command. Empty is off. |
 | `link_status_code` | `70` | 2-7 keys | Link-status command. Empty is off. |
@@ -1229,6 +1251,8 @@ event's message in its place.
 | `tail_messages` | Empty | Yes | [6.6](#66-tail-messages) |
 | `time_message` | `time_readback` | No | [6.4](#64-command-replies) |
 | `stats_message` | `stats_readback` | No | [6.4](#64-command-replies) |
+| `echo_message` | `echo_reply` | No | [6.4](#64-command-replies) |
+| `echo_cancel_message` | `echo_cancel_reply` | No | [6.4](#64-command-replies) |
 | `link_on_message` | `link_on_reply` | No | [6.4](#64-command-replies) |
 | `link_off_message` | `link_off_reply` | No | [6.4](#64-command-replies) |
 | `link_none_message` | `link_none_reply` | No | [6.4](#64-command-replies) |

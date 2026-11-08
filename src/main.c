@@ -60,6 +60,8 @@ static void sig_handler(int sig)
     g_stop = 1;
 }
 
+#define ECHO_SAMPLES (10 * 8000)
+
 typedef struct {
     config_t        cfg;
     vocab_cache_t  *vocab;
@@ -93,6 +95,10 @@ typedef struct {
     size_t   regen_len;
     size_t   regen_pos;
     uint64_t regen_deadline;
+
+    int16_t *echo;            /* echo test recording, ECHO_SAMPLES; allocated on first use */
+    size_t   echo_len;
+    bool     echo_recording;
 
     uint64_t mmdvm_watchdog_deadline;
     uint64_t link_watchdog_deadline;
@@ -341,6 +347,15 @@ static void mmdvm_key_edge(app_t *a, uint64_t now)
         LOGI("link: still sending DTMF, this transmission stays local\n");
         to_link = false;
     }
+    if (port_take_echo(a->port)) {
+        /* Not to the link: listeners there can't hear the prompt or the playback. */
+        LOGI("echo: recording, this transmission stays local\n");
+        if (!a->echo)
+            a->echo = xrealloc(NULL, ECHO_SAMPLES * sizeof(int16_t));
+        a->echo_len = 0;
+        a->echo_recording = true;
+        to_link = false;
+    }
     a->link_tx_ended = !to_link;
     if (to_link) {
         send_link_key(a, true);
@@ -520,6 +535,10 @@ static void run_command(app_t *a, const command_t *c)
     case COMMAND_LINK_STATUS:
         reply_with_message(a, a->link_up ? a->cfg.events.link_on_message : a->cfg.events.link_off_message);
         break;
+    case COMMAND_ECHO:
+        if (port_arm_echo(a->port))
+            reply_with_message(a, a->cfg.events.echo_message);
+        break;
     case COMMAND_NO_LINK:
         reply_with_message(a, a->cfg.events.link_none_message);
         break;
@@ -576,15 +595,34 @@ static void mmdvm_unkey_edge(app_t *a, uint64_t now)
         have = command_session_end_of_tx(a->cmd, &c);
     a->link_tx_ended = false;
 
+    int16_t *echo = NULL;
+    size_t echo_len = a->echo_len;
+    if (a->echo_recording) {
+        a->echo_recording = false;
+        a->echo_len = 0;
+        if (port_local_timed_out(a->port)) {
+            LOGI("echo: timed out, nothing to play back\n");
+        } else if (echo_len) {
+            echo = xrealloc(NULL, echo_len * sizeof(int16_t));
+            memcpy(echo, a->echo, echo_len * sizeof(int16_t));
+        }
+    }
+
     /* Repeater up/down acts on the repeater as a whole, so it follows the unkey; a reply
      * goes first so it's in place when the tail starts. */
     if (have && c.type == COMMAND_REPEATER) {
+        free(echo);
         port_on_mmdvm_keyup(a->port, false, now);
         run_command(a, &c);
         return;
     }
     if (have)
         run_command(a, &c);
+    /* The playback takes the place of any other reply. */
+    if (echo) {
+        LOGI("echo: playing back %.1f s\n", (double)echo_len / 8000.0);
+        port_queue_reply(a->port, echo, echo_len);
+    }
     port_on_mmdvm_keyup(a->port, false, now);
 }
 
@@ -642,6 +680,13 @@ static void mmdvm_rx_frame(app_t *a, const int16_t frame_in[160], uint64_t now)
         command_session_fill_mute(a->cmd, cover);
         local = a->cfg.dtmf.local_cover_tone ? cover : silence;
         link  = a->cfg.dtmf.link_cover_tone ? cover : silence;
+    }
+
+    /* What was repeated, so the playback can't carry DTMF either. */
+    if (a->echo_recording && a->echo_len < ECHO_SAMPLES) {
+        size_t n = ECHO_SAMPLES - a->echo_len < 160 ? ECHO_SAMPLES - a->echo_len : 160;
+        memcpy(a->echo + a->echo_len, local, n * sizeof(int16_t));
+        a->echo_len += n;
     }
 
     /* Flow 1: local repeat, mmdvm RX -> mmdvm TX (+ impolite-ID mix). */
@@ -1121,6 +1166,7 @@ int main(int argc, char *argv[])
     stats_save(a->stats);
     stats_destroy(a->stats);
     port_destroy(a->port);
+    free(a->echo);
     vocab_cache_destroy(a->vocab);
     config_free(&a->cfg);
     free(a);

@@ -40,6 +40,8 @@ timeout_message = timeout_warn
 #tail_messages          =               # see timers.tail_every; empty = none
 #time_message           = time_readback  # replies to DTMF commands; empty = no reply
 #stats_message          = stats_readback
+#echo_message           = echo_reply      # echo test prompt
+#echo_cancel_message    = echo_cancel_reply   # no keyup to record before the tail ended
 #link_on_message        = link_on_reply
 #link_off_message       = link_off_reply
 #link_none_message      = link_none_reply # link commands when link.enabled = false
@@ -172,6 +174,7 @@ default_cw    = cw: {call}/R
 #pad_test_prefix = 5      # pad test: prefix, then keys to read back. Empty = off.
 #time_code       = 39     # speak the time. Empty = off, likewise the codes below.
 #stats_code      = 38     # speak usage over the last 24 hours (events.stats_message)
+#echo_code       = 30     # record the next local transmission, up to 10 s, and play it back
 #link_on_code    = 72
 #link_off_code   = 73
 #link_status_code = 70   # says link on or link off, without a change

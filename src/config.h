@@ -140,6 +140,7 @@ typedef struct {
     char pad_test_prefix[CFG_DTMF_PREFIX_STR];   /* empty = pad test off */
     char time_code[CFG_DTMF_PREFIX_STR];         /* empty = command off, likewise below */
     char stats_code[CFG_DTMF_PREFIX_STR];
+    char echo_code[CFG_DTMF_PREFIX_STR];
     char link_on_code[CFG_DTMF_PREFIX_STR];
     char link_off_code[CFG_DTMF_PREFIX_STR];
     char link_status_code[CFG_DTMF_PREFIX_STR];
@@ -166,6 +167,8 @@ typedef struct {
     int  n_tail_messages;
     char time_message[CFG_NAME_STR];
     char stats_message[CFG_NAME_STR];
+    char echo_message[CFG_NAME_STR];          /* echo test prompt */
+    char echo_cancel_message[CFG_NAME_STR];   /* no keyup to record before the tail ended */
     char link_on_message[CFG_NAME_STR];
     char link_off_message[CFG_NAME_STR];
     char link_none_message[CFG_NAME_STR];      /* link commands when there's no link */
