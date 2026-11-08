@@ -580,6 +580,15 @@ static void run_command(app_t *a, const command_t *c)
     }
 }
 
+/* Nothing said during an echo test recording is a command, repeater up/down included. */
+static void run_or_drop_command(app_t *a, const command_t *c)
+{
+    if (a->echo_recording)
+        LOGI("dtmf: command dropped, echo test recording\n");
+    else
+        run_command(a, c);
+}
+
 static void mmdvm_unkey_edge(app_t *a, uint64_t now)
 {
     ste_reset(a->ste);
@@ -589,7 +598,9 @@ static void mmdvm_unkey_edge(app_t *a, uint64_t now)
      * Timed out, a command has to end in D: an unkey doesn't enter it. */
     command_t c;
     bool have = false;
-    if (a->cmd && port_local_timed_out(a->port))
+    if (a->cmd && a->echo_recording)
+        command_session_end_of_tx_discard(a->cmd, "echo test recording");
+    else if (a->cmd && port_local_timed_out(a->port))
         command_session_end_of_tx_discard(a->cmd, "timed out, a command must end with D");
     else if (a->cmd)
         have = command_session_end_of_tx(a->cmd, &c);
@@ -611,14 +622,12 @@ static void mmdvm_unkey_edge(app_t *a, uint64_t now)
     /* Repeater up/down acts on the repeater as a whole, so it follows the unkey; a reply
      * goes first so it's in place when the tail starts. */
     if (have && c.type == COMMAND_REPEATER) {
-        free(echo);
         port_on_mmdvm_keyup(a->port, false, now);
         run_command(a, &c);
         return;
     }
     if (have)
         run_command(a, &c);
-    /* The playback takes the place of any other reply. */
     if (echo) {
         LOGI("echo: playing back %.1f s\n", (double)echo_len / 8000.0);
         port_queue_reply(a->port, echo, echo_len);
@@ -651,7 +660,7 @@ static void mmdvm_rx_frame(app_t *a, const int16_t frame_in[160], uint64_t now)
             link_tx_end(a);
             command_t c;
             if (a->cmd && command_session_frame(a->cmd, frame_in, &c))
-                run_command(a, &c);
+                run_or_drop_command(a, &c);
         }
         return;
     }
@@ -661,7 +670,7 @@ static void mmdvm_rx_frame(app_t *a, const int16_t frame_in[160], uint64_t now)
     if (a->cmd) {
         command_t c;
         if (command_session_frame(a->cmd, frame_in, &c))
-            run_command(a, &c);
+            run_or_drop_command(a, &c);
         muted = command_session_muted(a->cmd);
     }
 
