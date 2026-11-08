@@ -179,7 +179,7 @@ default_cw    = cw: {call}/R
 #link_off_code   = 73
 #link_status_code = 70   # says link on or link off, without a change
 #repeater_code   =        # + 0 = repeater down, + 1 = up. Empty = off: anyone could use it
-#regen_code      =        # + keys to send as fresh DTMF, here and over the link if it's on
+#regen_code      = 31     # + keys to send as fresh DTMF, here and over the link if it's on
 #regen_tone_ms   = 100    # regen settings take effect at startup only
 #regen_gap_ms    = 100
 #regen_lead_ms   = 200    # silence on the link before the first tone

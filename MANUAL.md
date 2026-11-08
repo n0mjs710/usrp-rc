@@ -95,7 +95,7 @@ commands operate only if the operator sets `[dtmf] enabled = true`.
 | `73` | Link off | "Link off" |
 | `70` | Link status | "Link on" or "Link off". The link state does not change. |
 | `5` + keys | Pad test | The keys. Use this command to test the DTMF tones of a radio. |
-| Code + keys | DTMF regen | The keys, as new DTMF tones. No code by default. See [2.6](#26-dtmf-regen). |
+| `31` + keys | DTMF regen | The keys, as new DTMF tones. See [2.6](#26-dtmf-regen). |
 
 ### 2.2 Special keys
 
@@ -952,8 +952,8 @@ stats_code   =
 - `#` and `D` are not available in codes. They cancel and execute.
 - An empty code disables its command. In the example above, `stats_code` is empty.
 - The pad test prefix and the regen code take each key after them, to the unkey. Thus,
-  no other code can start with one of them. With the default prefix `5`, no code can
-  start with `5`. `--check` shows each code that does.
+  no other code can start with one of them. With the defaults, no code can start with
+  `5` or `31`. `--check` shows each code that does.
 
 > **Note:** DTMF gives no security. A station that monitors the repeater can hear a code
 > and use it. Select the enabled commands with this risk in mind.
@@ -1003,7 +1003,7 @@ dtmf: '38': ACCEPTED command = usage
 | Result | Meaning | Example |
 | --- | --- | --- |
 | `ACCEPTED` | The command executed. | `'5123': ACCEPTED command = DTMF test + 123` |
-| | | `'69*3': ACCEPTED command = regen *3` |
+| | | `'31*3': ACCEPTED command = regen *3` |
 | `ERROR` | The entry is complete, but no command can execute. | `'99': ERROR no command matched` |
 | | A link command on a repeater with no link. The reply is "No link service". | `'70': ERROR command = link status, no link service` |
 | `ABANDONED` | The entry stopped before it was complete. | `'12#': ABANDONED user terminated` |
@@ -1046,17 +1046,17 @@ station immediately. The reply plays in its tail.
 
 ### 9.8 DTMF regen
 
-`regen_code` is empty by default. Thus, the command is off until the operator sets a
-code. For use, see [2.6](#26-dtmf-regen).
+`regen_code` is `31` by default. For use, see [2.6](#26-dtmf-regen). To turn the
+command off, set it empty:
 
 ```ini
 [dtmf]
 enabled    = true
-regen_code = 69
+regen_code =
 ```
 
 > **CAUTION:** Each station that hears the code can send DTMF to the system at the other
-> end of the link. Set a code only if this risk is acceptable.
+> end of the link. If this risk is not acceptable, set the code empty.
 
 | Setting | Default | Function |
 | --- | --- | --- |
@@ -1204,7 +1204,7 @@ Levels above 1.0 are permitted, but they can cause clipping.
 | `link_off_code` | `73` | 2-7 keys | Link-off command. Empty is off. |
 | `link_status_code` | `70` | 2-7 keys | Link-status command. Empty is off. |
 | `repeater_code` | Empty | 2-7 keys | Repeater command: code + `0` is down, code + `1` is up. Empty is off. See [9.7](#97-repeater-down-and-up). |
-| `regen_code` | Empty | 2-7 keys | DTMF regen: code + keys to send. Empty is off. See [9.8](#98-dtmf-regen). |
+| `regen_code` | `31` | 2-7 keys | DTMF regen: code + keys to send. Empty is off. See [9.8](#98-dtmf-regen). |
 | `regen_tone_ms` | `100` | 40-1000 | Regen tone length |
 | `regen_gap_ms` | `100` | 40-1000 | Silence between regen tones |
 | `regen_lead_ms` | `200` | 0-2000 | Silence on the link before the first regen tone |

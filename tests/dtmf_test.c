@@ -348,8 +348,9 @@ static void test_commands(void)
         check("the code alone does nothing", !command_session_end_of_tx(r.s, &c));
         strcpy(s_cfg.dtmf.repeater_code, "");
 
-        press_all(&r, "69*31234");
-        check("no regen code by default", !command_session_end_of_tx(r.s, &c));
+        press_all(&r, "31*1234");
+        check("regen is 31 by default",
+              command_session_end_of_tx(r.s, &c) && c.type == COMMAND_REGEN && strcmp(c.digits, "*1234") == 0);
         strcpy(s_cfg.dtmf.regen_code, "69");
         press_all(&r, "69*31234");
         check("regen sends everything after its code",

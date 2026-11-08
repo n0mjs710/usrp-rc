@@ -94,6 +94,7 @@ static const test_case_t CASES[] = {
     {"regen under pad test", BASE "[dtmf]\nregen_code = 59\n", "dtmf.regen_code: '59' starts with dtmf.pad_test_prefix '5'"},
     {"code under regen",     BASE "[dtmf]\nregen_code = 69\nlink_on_code = 691\n", "dtmf.link_on_code: '691' starts with dtmf.regen_code '69'"},
     {"repeater under regen", BASE "[dtmf]\nregen_code = 69\nrepeater_code = 690\n", "dtmf.repeater_code: '690' starts with dtmf.regen_code '69'"},
+    {"code under default regen", BASE "[dtmf]\ntime_code = 315\n", "dtmf.time_code: '315' starts with dtmf.regen_code '31'"},
     {"regen level range",    BASE "[dtmf]\nregen_level = 1.5\n", "regen_level"},
     {"repeater code",        BASE "[dtmf]\nrepeater_code = 11\n", NULL},
     {"dtmf codes can be off", BASE "[dtmf]\ntime_code =\nlink_on_code =\nlink_off_code =\n", NULL},
