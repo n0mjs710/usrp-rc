@@ -23,6 +23,10 @@ These changes apply when you update from 1.0b.
 5. The new echo test has the code `30` by default. If another `[dtmf]` code is `30`,
    change that code, or set `echo_code` to a different code or to empty. `--check`
    shows the conflict.
+6. DTMF regen now has the code `31` by default, if `regen_code` is not set. If another
+   `[dtmf]` code is `31` or starts with `31`, change that code, or set `regen_code` to
+   a different code or to empty. `--check` shows the conflict. A site that does not
+   want regen must now set `regen_code` empty.
 
 `libsystemd-dev` is no longer necessary to build `usrp-rc`.
 

@@ -77,6 +77,7 @@ void config_defaults(config_t *cfg)
     strncpy(cfg->dtmf.time_code, "39", sizeof(cfg->dtmf.time_code) - 1);
     strncpy(cfg->dtmf.stats_code, "38", sizeof(cfg->dtmf.stats_code) - 1);
     strncpy(cfg->dtmf.echo_code, "30", sizeof(cfg->dtmf.echo_code) - 1);
+    strncpy(cfg->dtmf.regen_code, "31", sizeof(cfg->dtmf.regen_code) - 1);
     strncpy(cfg->dtmf.link_on_code, "72", sizeof(cfg->dtmf.link_on_code) - 1);
     strncpy(cfg->dtmf.link_off_code, "73", sizeof(cfg->dtmf.link_off_code) - 1);
     strncpy(cfg->dtmf.link_status_code, "70", sizeof(cfg->dtmf.link_status_code) - 1);
