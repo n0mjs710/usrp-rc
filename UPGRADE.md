@@ -29,7 +29,8 @@ These changes apply when you update from 1.0b.
 ### New functions
 
 - Echo test: enter `30`, then key up and talk. The repeater plays back the first 10
-  seconds of that transmission. It does not go to the link. See MANUAL.md 2.7. The new
+  seconds of that transmission. It does not go to the link, and DTMF commands in it
+  are ignored. See MANUAL.md 2.7. The new
   `[events]` `echo_message` and `echo_cancel_message` are its prompt and the reply when
   no station keys up.
 

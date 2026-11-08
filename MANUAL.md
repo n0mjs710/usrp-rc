@@ -200,7 +200,8 @@ Use this command to hear how your signal sounds through the repeater.
 - The playback is what the repeater transmitted. A DTMF tone plays back as the cover
   tone.
 - A key-up stops the playback.
-- The playback takes the place of the reply to a command in the same transmission.
+- The repeater ignores DTMF commands in the recorded transmission, including repeater
+  up and down. The tones are still muted.
 - The echo test is not available when the repeater has timed out a local transmission.
 
 ### 2.8 Repeater sounds

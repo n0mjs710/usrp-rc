@@ -72,7 +72,7 @@ local transmission that starts meanwhile isn't sent to the link.
 The echo test is split the same way. `port.c` owns the arming, because only the port
 knows when the tail ends (`on_hang()` plays the cancel). `main.c` claims the next local
 keyup with `port_take_echo()`, records what it repeats, keeps that transmission off
-the link, and queues the recording as the reply at the unkey.
+the link, drops any command in it, and queues the recording as the reply at the unkey.
 
 The reference controllers are the ACC RC-96 (command structure and behavior) and
 the Arcom RC-210 (mute timer, tail message triggers). Their macro sets, patches,
