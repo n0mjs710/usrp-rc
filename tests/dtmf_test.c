@@ -155,7 +155,10 @@ static void test_decoder(void)
     check("6 dB twist decodes, high tone low", ({ sound_t s = key_sound('1', 0.2); s.high_amp = 0.1; single(&s, 80, '1'); }));
     check("6 dB twist decodes, low tone low", ({ sound_t s = key_sound('1', 0.2); s.low_amp = 0.1; single(&s, 80, '1'); }));
     check("14 dB twist is rejected", ({ sound_t s = key_sound('1', 0.2); s.high_amp = 0.04; single(&s, 80, 0); }));
-    check("1.5% off frequency decodes", ({ sound_t s = key_sound('D', 0.2); s.low *= 1.015; s.high *= 1.015; single(&s, 80, 'D'); }));
+    check("1.5% high decodes", ({ sound_t s = key_sound('D', 0.2); s.low *= 1.015; s.high *= 1.015; single(&s, 80, 'D'); }));
+    check("1.5% low decodes", ({ sound_t s = key_sound('1', 0.2); s.low *= 0.985; s.high *= 0.985; single(&s, 80, '1'); }));
+    check("3.5% high is rejected", ({ sound_t s = key_sound('D', 0.2); s.low *= 1.035; s.high *= 1.035; single(&s, 80, 0); }));
+    check("3.5% low is rejected", ({ sound_t s = key_sound('1', 0.2); s.low *= 0.965; s.high *= 0.965; single(&s, 80, 0); }));
     check("a lone tone is rejected", ({ sound_t s = key_sound('5', 0.2); s.high = 0; single(&s, 200, 0); }));
     check("tone with noise 12 dB below decodes", ({ sound_t s = key_sound('9', 0.2); s.noise = 0.1; single(&s, 100, '9'); }));
 
