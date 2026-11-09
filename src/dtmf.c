@@ -17,8 +17,8 @@
 #define WINDOW_MS      26
 
 /* Signal-quality gates. Energy share and dominance reject voice: on the air, real keys
- * read >= 0.84 and >= 14.5 dB, and voice, clipped voice included, rarely passed 0.60 and
- * 12 dB. */
+ * read >= 0.77 and >= 14 dB, and no voice window passed both. The measurements are in
+ * DEVELOPMENT.md. */
 #define MIN_TONE_POWER  1.0e-4   /* each tone at least -40 dBFS (amplitude^2) */
 #define MAX_TWIST_RATIO 6.3      /* the two tones within 8 dB of each other */
 #define MIN_DOMINANCE   10.0     /* 10 dB above the runner-up in the same group */
@@ -48,81 +48,6 @@ static const char   KEYS[4][4] = {
     {'*', '0', '#', 'D'},
 };
 
-/* Instrumentation (dtmf-metrics branch only). Every window that passes the old, loose
- * gates is measured, and each run of one key is logged when it ends, with how many of
- * its windows passed the real gates. That shows how close voice gets to them. */
-#define LOOSE_DOMINANCE  4.0     /* 6 dB */
-#define LOOSE_ENERGY_FRAC 0.40
-
-typedef struct {
-    double level;               /* weaker tone, dBFS */
-    double frac;                /* the pair's share of the window energy */
-    double dom_low, dom_high;   /* dB over the runner-up in the group */
-    double twist;               /* low over high, dB */
-    double h2_low, h2_high;     /* 2nd harmonic over its fundamental, dB */
-    double balance;             /* weaker half over stronger half of the window */
-} metrics_t;
-
-typedef struct {
-    char   key;
-    int    n, strict;
-    double level_min, level_max, frac_min, frac_max, dom_low_min, dom_high_min;
-    double twist_min, twist_max, h2_low_max, h2_high_max, balance_min;
-} run_t;
-
-static double db(double ratio)
-{
-    return ratio > 0.0 ? 10.0 * log10(ratio) : -99.0;
-}
-
-static void run_log(const run_t *r)
-{
-    if (r->n < 2)
-        return;
-    LOGI("dtmf-metrics: '%c' %d ms, %d windows, %d strict: level %.1f..%.1f dBFS, "
-         "frac %.2f..%.2f, dom min L %.1f H %.1f dB, twist %+.1f..%+.1f dB, "
-         "h2 max L %.1f H %.1f dB, balance min %.2f\n",
-         r->key, WINDOW_MS + (r->n - 1) * HOP_MS, r->n, r->strict,
-         r->level_min, r->level_max, r->frac_min, r->frac_max,
-         r->dom_low_min, r->dom_high_min, r->twist_min, r->twist_max,
-         r->h2_low_max, r->h2_high_max, r->balance_min);
-}
-
-/* One window's loose key (0 = none) and whether it also passed the real gates. */
-static void run_feed(run_t *r, char loose, bool strict, const metrics_t *m)
-{
-    if (loose != r->key) {
-        run_log(r);
-        memset(r, 0, sizeof(*r));
-        r->key = loose;
-        if (!loose)
-            return;
-        r->level_min = r->level_max = m->level;
-        r->frac_min = r->frac_max = m->frac;
-        r->dom_low_min = m->dom_low;
-        r->dom_high_min = m->dom_high;
-        r->twist_min = r->twist_max = m->twist;
-        r->h2_low_max = m->h2_low;
-        r->h2_high_max = m->h2_high;
-        r->balance_min = m->balance;
-    } else if (!loose) {
-        return;
-    }
-    r->n++;
-    r->strict += strict;
-    r->level_min = fmin(r->level_min, m->level);
-    r->level_max = fmax(r->level_max, m->level);
-    r->frac_min = fmin(r->frac_min, m->frac);
-    r->frac_max = fmax(r->frac_max, m->frac);
-    r->dom_low_min = fmin(r->dom_low_min, m->dom_low);
-    r->dom_high_min = fmin(r->dom_high_min, m->dom_high);
-    r->twist_min = fmin(r->twist_min, m->twist);
-    r->twist_max = fmax(r->twist_max, m->twist);
-    r->h2_low_max = fmax(r->h2_low_max, m->h2_low);
-    r->h2_high_max = fmax(r->h2_high_max, m->h2_high);
-    r->balance_min = fmin(r->balance_min, m->balance);
-}
-
 struct dtmf_decoder {
     float samples[WINDOW_SAMPLES];   /* ring buffer */
     int   head;
@@ -131,9 +56,6 @@ struct dtmf_decoder {
 
     float low_coef[4][3];    /* nominal, then 1% below and above */
     float high_coef[4][3];
-    float low_h2_coef[4];
-    float high_h2_coef[4];
-    run_t run;
 
     int   hits_required;
 
@@ -183,9 +105,8 @@ static int strongest(const double p[4], double *ratio)
 }
 
 /* The DTMF key in the current window, or 0. */
-static char analyze(const dtmf_decoder_t *d, char *loose, metrics_t *m)
+static char analyze(const dtmf_decoder_t *d)
 {
-    *loose = 0;
     float x[WINDOW_SAMPLES];
     double first = 0.0, second = 0.0;
     for (int i = 0; i < WINDOW_SAMPLES; i++) {
@@ -216,29 +137,14 @@ static char analyze(const dtmf_decoder_t *d, char *loose, metrics_t *m)
 
     if (pl < MIN_TONE_POWER || ph < MIN_TONE_POWER)
         return 0;
-    if (low_ratio < LOOSE_DOMINANCE || high_ratio < LOOSE_DOMINANCE)
+    if (low_ratio < MIN_DOMINANCE || high_ratio < MIN_DOMINANCE)
         return 0;
     if (pl / ph > MAX_TWIST_RATIO || ph / pl > MAX_TWIST_RATIO)
         return 0;
     /* A sine of amplitude A carries A^2/2 of energy. */
-    double frac = (pl + ph) / 2.0 / energy;
-    if (frac < LOOSE_ENERGY_FRAC)
+    if ((pl + ph) / 2.0 < MIN_ENERGY_FRAC * energy)
         return 0;
 
-    *loose = KEYS[r][c];
-    m->level    = db(pl < ph ? pl : ph);
-    m->frac     = frac;
-    m->dom_low  = db(low_ratio);
-    m->dom_high = db(high_ratio);
-    m->twist    = db(pl / ph);
-    m->h2_low   = db(goertzel_power(x, d->low_h2_coef[r]) / pl);
-    m->h2_high  = db(goertzel_power(x, d->high_h2_coef[c]) / ph);
-    m->balance  = lesser / greater;
-
-    if (low_ratio < MIN_DOMINANCE || high_ratio < MIN_DOMINANCE)
-        return 0;
-    if (frac < MIN_ENERGY_FRAC)
-        return 0;
     return KEYS[r][c];
 }
 
@@ -314,13 +220,8 @@ int dtmf_decoder_push(dtmf_decoder_t *d, const int16_t frame[160],
         if (--d->hop_left > 0)
             continue;
         d->hop_left = HOP_SAMPLES;
-        if (d->filled == WINDOW_SAMPLES && n <= DTMF_MAX_EVENTS - 2) {
-            char loose;
-            metrics_t m;
-            char key = analyze(d, &loose, &m);
-            run_feed(&d->run, loose, key != 0, &m);
-            n += step(d, key, &out[n]);
-        }
+        if (d->filled == WINDOW_SAMPLES && n <= DTMF_MAX_EVENTS - 2)
+            n += step(d, analyze(d), &out[n]);
     }
     return n;
 }
@@ -332,8 +233,6 @@ int dtmf_decoder_active_ms(const dtmf_decoder_t *d)
 
 void dtmf_decoder_reset(dtmf_decoder_t *d)
 {
-    run_log(&d->run);
-    memset(&d->run, 0, sizeof(d->run));
     memset(d->samples, 0, sizeof(d->samples));
     d->head = 0;
     d->filled = 0;
@@ -357,8 +256,6 @@ int dtmf_decoder_create(dtmf_decoder_t **out, int min_tone_ms)
             d->low_coef[i][j]  = (float)(2.0 * cos(2.0 * M_PI * LOW_HZ[i] * SCALE[j] / SAMPLE_RATE));
             d->high_coef[i][j] = (float)(2.0 * cos(2.0 * M_PI * HIGH_HZ[i] * SCALE[j] / SAMPLE_RATE));
         }
-        d->low_h2_coef[i]  = (float)(2.0 * cos(2.0 * M_PI * 2.0 * LOW_HZ[i] / SAMPLE_RATE));
-        d->high_h2_coef[i] = (float)(2.0 * cos(2.0 * M_PI * 2.0 * HIGH_HZ[i] / SAMPLE_RATE));
     }
 
     /* The first hit proves one window's worth of tone; each later one adds a hop. */

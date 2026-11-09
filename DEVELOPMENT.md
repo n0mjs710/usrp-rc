@@ -50,8 +50,8 @@ audio-quality headroom to be won on the mmdvm side by changing framing.
 
 ## DTMF control
 
-`src/dtmf.c` finds tones and `src/command.c` turns them into commands, mutes and
-link cuts. Neither has a clock of its own: both count the 20 ms audio frames they
+`src/dtmf.c` finds tones and `src/command.c` turns them into commands and
+mutes. Neither has a clock of its own: both count the 20 ms audio frames they
 are fed, so `tests/dtmf_test.c` runs them on synthesized audio with no sockets.
 That test also feeds the whole of `vocab_8k/` through the decoder as a
 false-detection check on real speech.
@@ -73,6 +73,29 @@ The echo test is split the same way. `port.c` owns the arming, because only the 
 knows when the tail ends (`on_hang()` plays the cancel). `main.c` claims the next local
 keyup with `port_take_echo()`, records what it repeats, keeps that transmission off
 the link, drops any command in it, and queues the recording as the reply at the unkey.
+
+### Decoder limits
+
+The energy share (0.65) and group dominance (10 dB) limits were set from on-air
+measurements on lecompton in November 2026, where voice at `min_tone_ms` 80 still
+made false digits. Each tone is the strongest of its nominal bin and bins 1% either
+side, so the standard's +-1.5% passes; +-3.5% doesn't. The instrumented decoder is
+kept at tag `dtmf-metrics-2026-11`: it logs one `dtmf-metrics:` line per run of a key
+that passes loose limits (0.40, 6 dB), with how many windows also pass the real ones.
+To measure again, build that tag, or merge main into a branch from it.
+
+| | Energy share | Dominance | Twist (low over high) | Low 2nd harmonic |
+| --- | --- | --- | --- | --- |
+| Real keys, narrow bins | 0.84 and up | 14.5 dB and up | +2 to +7.5 dB | |
+| Real keys, side bins | 0.77 and up | 14 dB and up | +3.3 to +7.2 dB | -23.8 dB or lower |
+| Voice (about 110 runs) | mostly 0.40-0.60, at most 0.74 | | | up to +0.2 dB |
+| Voice windows passing both limits, side bins | none of about 60 runs | | | |
+
+With narrow bins, one 3-window voice run passed both limits. The others that came
+close were probably overdeviated users. Margins to watch if keys stop decoding:
+twist reached +7.5 dB against the 8 dB limit, and half balance 0.53 against 0.5. A
+2nd-harmonic limit would reject more voice, but keys 6 and B read about -13.6 dB
+there, as 1477 Hz leaks into the 2 x 770 Hz bin.
 
 The reference controllers are the ACC RC-96 (command structure and behavior) and
 the Arcom RC-210 (mute timer, tail message triggers). Their macro sets, patches,
