@@ -17,6 +17,7 @@
 #include "log.h"
 #include "version.h"
 
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -96,8 +97,9 @@ typedef struct {
     size_t   echo_len;
     bool     echo_recording;
 
-    uint64_t mmdvm_watchdog_deadline;
+    uint64_t mmdvm_watchdog_deadline;   /* armed only while keyed */
     uint64_t link_watchdog_deadline;
+    uint64_t port_deadline;             /* port_next_deadline_ms(), for the timer table */
 
     uint64_t pace_deadline;   /* 20 ms mmdvm-TX pacing timer; armed while port PTT is on */
     uint64_t ptt_start_ms;    /* set on each PTT-on edge; used to log PTT-off duration */
@@ -341,8 +343,9 @@ static void regen_start(app_t *a, int16_t *samples, size_t n, uint64_t now)
     LOGI("link: KEY -> peer (DTMF)\n");
 }
 
-static void regen_tick(app_t *a)
+static void regen_tick(app_t *a, uint64_t now)
 {
+    (void)now;
     int16_t frame[160] = {0};
     size_t left = a->regen_len - a->regen_pos;
     size_t take = left < 160 ? left : 160;
@@ -632,6 +635,33 @@ static void mmdvm_rx_frame(app_t *a, const int16_t frame_in[160], uint64_t now)
         send_link_voice(a, link);
 }
 
+/* Each packet of a transmission keys it, if it isn't already, and feeds the watchdog. */
+static void mmdvm_rx_start(app_t *a, uint64_t now)
+{
+    a->mmdvm_watchdog_deadline = now + WATCHDOG_MS;
+    if (a->prev_mmdvm_keyup)
+        return;
+    a->prev_mmdvm_keyup = true;
+    mmdvm_key_edge(a, now);
+}
+
+/* The transmission is over: FME, or the watchdog, which `why` names as a warning. On the
+ * watchdog, the partial frame is discarded rather than bleed into the next one. */
+static void mmdvm_rx_end(app_t *a, uint64_t now, const char *why)
+{
+    if (!a->prev_mmdvm_keyup)
+        return;
+    a->prev_mmdvm_keyup = false;
+    a->mmdvm_watchdog_deadline = 0;
+    if (why) {
+        LOGW("mmdvm: RX ended, %s\n", why);
+        fm_reframe_reset(&a->mmdvm_rx_reframe);
+    } else {
+        LOGI("mmdvm: RX ended\n");
+    }
+    mmdvm_unkey_edge(a, now);
+}
+
 static void handle_mmdvm(app_t *a)
 {
     uint8_t buf[FM_MAX_PKT_LEN + 64];
@@ -654,8 +684,6 @@ static void handle_mmdvm(app_t *a)
         if (pkt.type == FM_PKT_PING || pkt.type == FM_PKT_NONE)
             continue;
 
-        a->mmdvm_watchdog_deadline = now + WATCHDOG_MS;
-
         switch (pkt.type) {
         case FM_PKT_START:
             /* Explicit start-of-transmission -- no edge inference needed.
@@ -668,20 +696,13 @@ static void handle_mmdvm(app_t *a)
                 LOGI("mmdvm: RX started\n");
             }
             fm_reframe_reset(&a->mmdvm_rx_reframe);
-            if (!a->prev_mmdvm_keyup) {
-                a->prev_mmdvm_keyup = true;
-                mmdvm_key_edge(a, now);
-            }
+            mmdvm_rx_start(a, now);
             break;
 
         case FM_PKT_DATA: {
             /* MMDVM-Host can start sending FMD without a preceding FMS if
              * we came up mid-transmission; key up on first audio too. */
-            if (!a->prev_mmdvm_keyup) {
-                a->prev_mmdvm_keyup = true;
-                mmdvm_key_edge(a, now);
-            }
-
+            mmdvm_rx_start(a, now);
             fm_reframe_push(&a->mmdvm_rx_reframe, pkt.audio, pkt.nsamples);
 
             int16_t frame[160];
@@ -696,13 +717,7 @@ static void handle_mmdvm(app_t *a)
             int16_t frame[160];
             if (fm_reframe_flush(&a->mmdvm_rx_reframe, frame))
                 mmdvm_rx_frame(a, frame, now);
-
-            if (a->prev_mmdvm_keyup) {
-                a->prev_mmdvm_keyup = false;
-                a->mmdvm_watchdog_deadline = 0;
-                mmdvm_unkey_edge(a, now);
-            }
-            LOGI("mmdvm: RX ended\n");
+            mmdvm_rx_end(a, now, NULL);
             break;
         }
 
@@ -733,12 +748,11 @@ static void handle_link(app_t *a)
             continue;   /* keep draining the socket, but don't act on any of it */
 
         uint64_t now = monotonic_ms();
-        a->link_watchdog_deadline = now + WATCHDOG_MS;
-
         if (!pkt.keyup) {
             link_rx_end(a, now, NULL);
             continue;
         }
+        a->link_watchdog_deadline = now + WATCHDOG_MS;
         if (!a->prev_link_keyup) {
             a->prev_link_keyup = true;
             port_on_link_keyup(a->port, true, now);
@@ -802,24 +816,59 @@ static void schedule_update(app_t *a, uint64_t now)
 
 /* ── timer aggregation ─────────────────────────────────────────────────── */
 
+static void stats_tick(app_t *a, uint64_t now)
+{
+    stats_save(a->stats);
+    a->stats_deadline = now + STATS_SAVE_INTERVAL_MS;
+}
+
+static void port_tick(app_t *a, uint64_t now)
+{
+    port_check_timers(a->port, now);
+}
+
+/* Backstops: MMDVM-Host ends a transmission with FME, and the link with an unkey. */
+static void mmdvm_watchdog(app_t *a, uint64_t now)
+{
+    mmdvm_rx_end(a, now, "watchdog timeout, no FME received");
+}
+
+static void link_watchdog(app_t *a, uint64_t now)
+{
+    link_rx_end(a, now, "watchdog timeout, no unkey received");
+}
+
+/* Every timer: an absolute deadline in app_t (0 = off), fired in this order. The schedule
+ * goes first, as everything after it reads the settings, and the port's timers ahead of
+ * the pacing tick that plays what they queue. */
+static const struct {
+    size_t offset;
+    void (*fire)(app_t *a, uint64_t now);
+} TIMERS[] = {
+    {offsetof(app_t, schedule_deadline),       schedule_update},
+    {offsetof(app_t, stats_deadline),          stats_tick},
+    {offsetof(app_t, port_deadline),           port_tick},
+    {offsetof(app_t, pace_deadline),           pace_tick},
+    {offsetof(app_t, regen_deadline),          regen_tick},
+    {offsetof(app_t, mmdvm_watchdog_deadline), mmdvm_watchdog},
+    {offsetof(app_t, link_watchdog_deadline),  link_watchdog},
+};
+#define NTIMERS (sizeof(TIMERS) / sizeof(TIMERS[0]))
+
+static uint64_t *deadline(app_t *a, size_t i)
+{
+    return (uint64_t *)((char *)a + TIMERS[i].offset);
+}
+
 static int next_timeout_ms(app_t *a, uint64_t now)
 {
+    a->port_deadline = port_next_deadline_ms(a->port);
     uint64_t min = 0;
-    uint64_t cand[12];
-    int nc = 0;
-
-    uint64_t pd = port_next_deadline_ms(a->port);
-    if (pd) cand[nc++] = pd;
-    if (a->pace_deadline) cand[nc++] = a->pace_deadline;
-    if (a->prev_mmdvm_keyup && a->mmdvm_watchdog_deadline) cand[nc++] = a->mmdvm_watchdog_deadline;
-    if (a->prev_link_keyup && a->link_watchdog_deadline)   cand[nc++] = a->link_watchdog_deadline;
-    if (a->schedule_deadline) cand[nc++] = a->schedule_deadline;
-    if (a->stats_deadline) cand[nc++] = a->stats_deadline;
-    if (a->regen_deadline) cand[nc++] = a->regen_deadline;
-
-    for (int i = 0; i < nc; i++)
-        if (min == 0 || cand[i] < min) min = cand[i];
-
+    for (size_t i = 0; i < NTIMERS; i++) {
+        uint64_t d = *deadline(a, i);
+        if (d && (min == 0 || d < min))
+            min = d;
+    }
     if (min == 0) return -1;
     if (min <= now) return 0;
     uint64_t diff = min - now;
@@ -828,36 +877,12 @@ static int next_timeout_ms(app_t *a, uint64_t now)
 
 static void check_all_timers(app_t *a, uint64_t now)
 {
-    if (a->schedule_deadline && now >= a->schedule_deadline)
-        schedule_update(a, now);
-
-    if (a->stats_deadline && now >= a->stats_deadline) {
-        stats_save(a->stats);
-        a->stats_deadline = now + STATS_SAVE_INTERVAL_MS;
+    a->port_deadline = port_next_deadline_ms(a->port);
+    for (size_t i = 0; i < NTIMERS; i++) {
+        uint64_t d = *deadline(a, i);
+        if (d && now >= d)
+            TIMERS[i].fire(a, now);
     }
-
-    port_check_timers(a->port, now);
-
-    if (a->pace_deadline && now >= a->pace_deadline)
-        pace_tick(a, now);
-
-    if (a->regen_deadline && now >= a->regen_deadline)
-        regen_tick(a);
-
-    if (a->prev_mmdvm_keyup && a->mmdvm_watchdog_deadline && now >= a->mmdvm_watchdog_deadline) {
-        /* Backstop only — MMDVM-Host normally ends a transmission with FME.
-         * Reaching here means the FME went missing or Host stopped mid-
-         * transmission, so discard the partial frame rather than letting it
-         * bleed into whatever comes next. */
-        LOGW("mmdvm: watchdog timeout — treating as unkey (no FME received)\n");
-        a->prev_mmdvm_keyup = false;
-        a->mmdvm_watchdog_deadline = 0;
-        fm_reframe_reset(&a->mmdvm_rx_reframe);
-        mmdvm_unkey_edge(a, now);
-    }
-
-    if (a->prev_link_keyup && a->link_watchdog_deadline && now >= a->link_watchdog_deadline)
-        link_rx_end(a, now, "watchdog timeout, no unkey received");
 }
 
 /* ── main ──────────────────────────────────────────────────────────────── */
