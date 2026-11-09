@@ -27,6 +27,9 @@ These changes apply when you update from 1.0b.
    `[dtmf]` code is `31` or starts with `31`, change that code, or set `regen_code` to
    a different code or to empty. `--check` shows the conflict. A site that does not
    want regen must now set `regen_code` empty.
+7. In `[audio]`, rename `pre_message_ms` to `keyup_delay_ms` and `post_message_ms` to
+   `message_gap_ms`, if they are there. The old names cause an error. `message_gap_ms`
+   now also goes between messages: see Changes in operation.
 
 `libsystemd-dev` is no longer necessary to build `usrp-rc`.
 
@@ -44,9 +47,12 @@ These changes apply when you update from 1.0b.
   commands are ignored, also with `D`.
 - The ID timer starts when an ID starts, not when it ends. The time between the
   starts of two IDs is now `id_interval`.
-- `pre_message_ms` and `post_message_ms` now apply each time the controller keys the
-  transmitter for its own audio and drops it after: also for repeater up and down
-  replies and time-out replies. They no longer add a pause before an ID in a tail.
+- `keyup_delay_ms` (was `pre_message_ms`) goes before controller audio each time the
+  controller keys the transmitter for it. `message_gap_ms` (was `post_message_ms`)
+  goes wherever one item ends and the next begins: between two messages, between
+  repeat audio and a message that follows it, and after the last message before the
+  transmitter drops. `ct_delay` and the hang are silences of their own, so no gap is
+  added to them.
 - "Repeater up" when the repeater is already up is an ordinary command reply. It no
   longer restarts the time-out timer.
 - DTMF entry no longer takes the link down for the rest of the transmission. The link

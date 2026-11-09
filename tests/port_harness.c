@@ -1258,38 +1258,50 @@ static int ms_until_audio(port_t *p, int max_ms)
     return -1;
 }
 
-static bool scenario_message_pads(config_t *base, vocab_cache_t *vocab)
+/* Ticks until audio stops and PTT drops; how long PTT stayed up after the last audio. */
+static int ms_held_after_audio(port_t *p, int max_ms)
 {
-    printf("\n[20] pre/post message pauses: where the controller keys up and where it drops\n");
-    bool ok = true;
-    config_t cfg = *base;
-    cfg.audio.pre_message_ms  = 300;
-    cfg.audio.post_message_ms = 300;
-    cfg.timers.id_interval    = 3.0;
-    port_t *p = fresh_port(&cfg, vocab);
-
-    key_local(p, true);
-    wait_ms(p, 150);
-    key_local(p, false);
-    int start = ms_until_audio(p, 1000);
-    CHECK(start >= 0 && start <= 2 * TICK_MS, "the initial ID in the tail has no pause before it (%d ms)", start);
-    wait_until_idle(p, 8000);
-
-    key_local(p, true);
-    wait_ms(p, 150);
-    key_local(p, false);
-    wait_until_idle(p, 8000);
-    while (!port_ptt(p))
-        tick(p);                  /* the timer keys up for the mandatory ID */
-    start = ms_until_audio(p, 2000);
-    CHECK(start >= 300, "keyed up for an ID, the pause comes first (%d ms)", start);
     int last_audio = 0, t = 0;
-    while (port_ptt(p) && t < 8000) {
+    while (port_ptt(p) && t < max_ms) {
         t += TICK_MS;
         if (tick(p))
             last_audio = t;
     }
-    CHECK(!port_ptt(p) && t - last_audio >= 300, "... and another before it drops (%d ms)", t - last_audio);
+    return port_ptt(p) ? -1 : t - last_audio;
+}
+
+static bool scenario_message_pads(config_t *base, vocab_cache_t *vocab)
+{
+    printf("\n[20] key-up delay and message gap: where each goes, and where ct_delay and hang are the gap\n");
+    bool ok = true;
+    config_t cfg = *base;
+    cfg.audio.keyup_delay_ms = 300;
+    cfg.audio.message_gap_ms = 200;
+    cfg.timers.id_interval   = 3.0;
+    port_t *p = fresh_port(&cfg, vocab);
+
+    /* ct_delay 0.2 s, hang 0.3 s in harness.conf */
+    key_local(p, true);
+    wait_ms(p, 150);
+    key_local(p, false);
+    int start = ms_until_audio(p, 1000);
+    CHECK(start >= 200 && start < 300, "the initial ID right after repeat audio: the gap first (%d ms)", start);
+    wait_until_idle(p, 8000);
+
+    key_local(p, true);
+    wait_ms(p, 150);
+    key_local(p, false);
+    start = ms_until_audio(p, 1000);
+    CHECK(start >= 200 && start < 260, "the courtesy tone: ct_delay is the gap, nothing added (%d ms)", start);
+    int held = ms_held_after_audio(p, 8000);
+    CHECK(held >= 300 && held < 360, "the drop after the hang: the hang is the gap, nothing added (%d ms)", held);
+
+    while (!port_ptt(p))
+        tick(p);                  /* the timer keys up for the mandatory ID */
+    start = ms_until_audio(p, 2000);
+    CHECK(start >= 300, "keyed up for an ID: the key-up delay first (%d ms)", start);
+    held = ms_held_after_audio(p, 8000);
+    CHECK(held >= 200 && held < 260, "... and the gap before it drops (%d ms)", held);
     port_destroy(p);
 
     printf(ok ? "[20] PASS\n" : "[20] FAIL\n");

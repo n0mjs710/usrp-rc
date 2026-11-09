@@ -78,6 +78,10 @@ struct port {
 
     bool ptt;
 
+    /* What last went out, for the silences between items: repeat audio, controller
+     * audio, or nothing since a timer's own silence (ct_delay, hang) or the drop. */
+    enum { LAST_NONE, LAST_REPEAT, LAST_CTRL } last_audio;
+
     ctrl_buf_t ctrl;
 
     /* An ID under the repeated audio: the impolite ID, or a CW ID keyed over. It is
@@ -109,9 +113,22 @@ struct port {
 
 /* ── ctrl buffer ────────────────────────────────────────────────────────── */
 
+static void pad(port_t *p, int ms)
+{
+    sbuf_append_silence(&p->ctrl.buf, (size_t)ms * 8u);
+}
+
+/* Every item of controller audio comes through here. keyup_delay_ms goes ahead of one
+ * that keys the transmitter, and message_gap_ms ahead of one that follows other audio.
+ * A timer's silence already is that gap. */
 static void ctrl_buf_queue(port_t *p, const int16_t *samples, size_t n)
 {
+    if (!p->ptt)
+        pad(p, p->cfg->audio.keyup_delay_ms);
+    else if (p->last_audio != LAST_NONE)
+        pad(p, p->cfg->audio.message_gap_ms);
     sbuf_append(&p->ctrl.buf, samples, n);
+    p->last_audio = LAST_CTRL;
 }
 
 static bool ctrl_buf_playing(const port_t *p)
@@ -206,29 +223,19 @@ static void update_ptt(port_t *p)
     else
         why = p->down ? "repeater-down" : p->state == PORT_TIMEOUT ? "timed-out" : "idle";
     bool want = strcmp(why, "repeater-down") && strcmp(why, "timed-out") && strcmp(why, "idle");
+    /* Controller audio is followed by a gap before the drop. */
+    if (!want && p->ptt && p->last_audio == LAST_CTRL && p->cfg->audio.message_gap_ms > 0) {
+        pad(p, p->cfg->audio.message_gap_ms);
+        p->last_audio = LAST_NONE;
+        return;
+    }
     if (want == p->ptt)
         return;
     p->ptt = want;
+    if (!want)
+        p->last_audio = LAST_NONE;
     if (p->set_ptt_cb)
         p->set_ptt_cb(p->set_ptt_arg, want, why);
-}
-
-static void pad(port_t *p, int ms)
-{
-    sbuf_append_silence(&p->ctrl.buf, (size_t)ms * 8u);
-}
-
-/* Ahead of controller audio that will key the transmitter: pre_message_ms of silence. */
-static void lead_in(port_t *p)
-{
-    if (!p->ptt)
-        pad(p, p->cfg->audio.pre_message_ms);
-}
-
-/* The last controller audio before PTT drops: post_message_ms of silence follows. */
-static void pad_before_drop(port_t *p)
-{
-    pad(p, p->cfg->audio.post_message_ms);
 }
 
 /* False if there was nothing to play. */
@@ -251,14 +258,17 @@ static void reply_discard(port_t *p)
     p->reply_len = 0;
 }
 
+/* ct_delay and the hang are silences of their own: they serve as the gap. */
 static void schedule_hang(port_t *p, uint64_t now)
 {
+    p->last_audio = LAST_NONE;
     p->hang_deadline = now + (uint64_t)(p->cfg->timers.hang * 1000.0);
     LOGI("hang: armed  %.1fs\n", p->cfg->timers.hang);
 }
 
 static void schedule_ct_delay(port_t *p, uint64_t now)
 {
+    p->last_audio = LAST_NONE;
     p->ct_delay_deadline = now + (uint64_t)(p->cfg->timers.ct_delay * 1000.0);
 }
 
@@ -315,6 +325,7 @@ static void port_transition(port_t *p, port_state_t new_state, uint64_t now)
 
     if (new_state == PORT_ACTIVE) {
         p->tx_activity = true;
+        p->last_audio = LAST_REPEAT;
         if (ctrl_buf_playing(p)) {
             if (p->ctrl.id != ID_NONE)
                 id_keyed_over(p, now);
@@ -327,8 +338,7 @@ static void port_transition(port_t *p, port_state_t new_state, uint64_t now)
 
 static void do_timeout_announce(port_t *p)
 {
-    if (queue_message(p, p->ev->timeout_message, -1.0))
-        pad_before_drop(p);
+    queue_message(p, p->ev->timeout_message, -1.0);
 }
 
 static void do_timeout_recovery(port_t *p)
@@ -425,11 +435,7 @@ static void do_mandatory_id(port_t *p, uint64_t now)
     const char *name = mandatory_id_next(p);
     LOGI("id: mandatory  '%s'%s\n", name,
          p->ev->n_mandatory_ids ? "" : "  (impolite_id, as there's no mandatory ID)");
-    bool own = !p->ptt;
-    lead_in(p);
     queue_id(p, name, now);
-    if (own)
-        pad_before_drop(p);
 }
 
 /* The next initial ID, or NULL if none are set. */
@@ -487,7 +493,6 @@ static void startup_id(port_t *p, uint64_t now)
         schedule_id(p, now);
         p->tx_activity = true;
     }
-    pad_before_drop(p);
 }
 
 void port_start(port_t *p, uint64_t now)
@@ -500,7 +505,6 @@ void port_start(port_t *p, uint64_t now)
         LOGI("port: no startup_message configured — starting quietly in IDLE\n");
         return;
     }
-    lead_in(p);
     if (queue_message(p, p->ev->startup_message, -1.0))
         p->ctrl.on_drain = startup_id;
     else
@@ -570,7 +574,6 @@ static bool tail_play(port_t *p, uint64_t now)
         return false;
     p->tail_rot = (idx + 1) % p->ev->n_tail_messages;
     LOGI("tail: '%s'\n", p->tail_name);
-    pad_before_drop(p);
     p->ctrl.on_drain = tail_finish;
     p->tails_since_message = 0;
     p->tail_last_ms = now;
@@ -594,7 +597,6 @@ static void on_hang(port_t *p, uint64_t now)
         p->echo_armed = false;
         LOGI("echo: cancelled, no keyup before the tail ended\n");
         if (queue_message(p, p->ev->echo_cancel_message, -1.0)) {
-            pad_before_drop(p);
             p->ctrl.on_drain = on_hang;
             return;
         }
@@ -715,7 +717,6 @@ static void timeout_released(port_t *p, port_source_t source, uint64_t now)
     if (p->state != PORT_TIMEOUT || p->local_timed_out || p->link_timed_out)
         return;
     LOGI("state: TIMEOUT -> TAIL  (recovered)\n");
-    lead_in(p);
     port_transition(p, PORT_TAIL, now);
     do_timeout_recovery(p);
 }
@@ -848,13 +849,11 @@ void port_set_repeater_down(port_t *p, bool down, int16_t *reply, size_t n, uint
         /* The reply is a transmission, so the station identifies on its way down,
          * and then nothing more is owed. */
         if ((reply && n) || p->tx_activity) {
-            lead_in(p);
             if (reply && n)
                 ctrl_buf_queue(p, reply, n);
             const char *id = mandatory_id_next(p);
             LOGI("id: mandatory  '%s'  (repeater going down)\n", id);
             queue_id(p, id, now);
-            pad_before_drop(p);
         }
         free(reply);
         update_ptt(p);
@@ -889,10 +888,8 @@ void port_set_repeater_down(port_t *p, bool down, int16_t *reply, size_t n, uint
         p->tx_activity = true;
         if (p->id_deadline == 0)
             schedule_id(p, now);
-        lead_in(p);
         ctrl_buf_queue(p, reply, n);
         free(reply);
-        pad_before_drop(p);
     } else {
         free(reply);
     }

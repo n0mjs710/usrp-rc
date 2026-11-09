@@ -579,7 +579,7 @@ items. It does not stop the start, because the rules of other countries are diff
 - Each ID must contain the call sign. Use `{call}`, or a site voice clip that speaks the
   call sign. `--check` does not examine this.
 - The ID timer starts when an ID starts. Thus, the time from the start of one ID to the
-  start of the next is `id_interval`, plus `pre_message_ms` if the ID keys the
+  start of the next is `id_interval`, plus `keyup_delay_ms` if the ID keys the
   transmitter.
 - The rule asks for an ID at the end of each communication. Without an initial ID, the
   ID after a short communication comes when the ID timer expires. This is the usual
@@ -1186,8 +1186,8 @@ the ports to agree with `MMDVM-Host.ini`. For the procedure, see
 | `voice_gap_ms` | `150` | 0-10000 | Length of a `_` pause |
 | `ste_delay_ms` | `0` | 0-2000 | Delay of repeated audio and link audio, for squelch tail elimination. 0 is off. |
 | `lead_trim_ms` | `0` | 0-2000 | Mute at the start of each transmission. 0 is off. |
-| `pre_message_ms` | `0` | 0-10000 | Silence after the controller keys the transmitter for its own audio, before that audio. Not used when the transmitter is already on. |
-| `post_message_ms` | `0` | 0-10000 | Silence after the controller's audio, before the controller drops the transmitter |
+| `keyup_delay_ms` | `0` | 0-10000 | Silence after the controller keys the transmitter for its own audio, before that audio. Not used when the transmitter is already on. |
+| `message_gap_ms` | `0` | 0-10000 | Silence between two messages, between repeated audio and a message that follows it, and after the last message before the transmitter drops. `ct_delay` and the hang are silences of their own, so no gap is added to them. |
 
 Levels above 1.0 are permitted, but they can cause clipping.
 

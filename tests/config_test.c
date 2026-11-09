@@ -52,6 +52,8 @@ static const test_case_t CASES[] = {
     {"bad codec",           BASE "codec = opsu\n", "link.codec: 'opsu' is not valid (expected one of: pcm, opus)"},
     {"removed access mode", "access_mode = cor\n" BASE, "access_mode: removed, delete this line"},
     {"renamed beep",        BASE "[dtmf]\nbeep_hz = 600\n", "dtmf.beep_hz: renamed to dtmf.cover_tone_hz"},
+    {"renamed pre_message", BASE "[audio]\npre_message_ms = 200\n", "audio.pre_message_ms: renamed to audio.keyup_delay_ms"},
+    {"renamed post_message", BASE "[audio]\npost_message_ms = 200\n", "audio.post_message_ms: renamed to audio.message_gap_ms"},
     {"bad log level",       BASE "[log]\nlevel = loud\n", "log.level: 'loud' is not valid"},
 
     {"negative hang",       BASE "[timers]\nhang = -5.0\n", "timers.hang: -5 is out of range"},

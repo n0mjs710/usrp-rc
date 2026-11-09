@@ -106,8 +106,8 @@ typedef struct {
     int      voice_gap_ms;   /* default pause length for a bare "_" word */
     int      ste_delay_ms;
     int      lead_trim_ms;   /* mute this much mmdvm-RX audio at the start of each transmission */
-    int      pre_message_ms;
-    int      post_message_ms;
+    int      keyup_delay_ms;    /* before controller audio that keys the transmitter */
+    int      message_gap_ms;    /* between items, and after the last before the drop */
 } config_audio_t;
 
 typedef struct {

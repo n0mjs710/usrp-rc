@@ -41,8 +41,8 @@ void config_defaults(config_t *cfg)
     cfg->audio.voice_gap_ms         = 150;
     cfg->audio.ste_delay_ms         = 0;
     cfg->audio.lead_trim_ms         = 0;
-    cfg->audio.pre_message_ms       = 0;
-    cfg->audio.post_message_ms      = 0;
+    cfg->audio.keyup_delay_ms       = 0;
+    cfg->audio.message_gap_ms       = 0;
 
     cfg->timers.hang        = 2.5;
     cfg->timers.ct_delay    = 0.5;
@@ -173,8 +173,8 @@ static const field_t FIELDS[] = {
     INT("audio",  "voice_gap_ms",         audio.voice_gap_ms, 0, 10000),
     INT("audio",  "ste_delay_ms",         audio.ste_delay_ms, 0, 2000),
     INT("audio",  "lead_trim_ms",         audio.lead_trim_ms, 0, 2000),
-    INT("audio",  "pre_message_ms",       audio.pre_message_ms, 0, 10000),
-    INT("audio",  "post_message_ms",      audio.post_message_ms, 0, 10000),
+    INT("audio",  "keyup_delay_ms",       audio.keyup_delay_ms, 0, 10000),
+    INT("audio",  "message_gap_ms",       audio.message_gap_ms, 0, 10000),
 
     DBL("timers", "hang",        timers.hang, 0, 600),
     DBL("timers", "ct_delay",    timers.ct_delay, 0, 60),
@@ -342,6 +342,14 @@ static void err_unknown_setting(const char *section, const char *key)
     }
     if (strcmp(section, "events") == 0 && strcmp(key, "tail_message") == 0) {
         cfg_err("%s: renamed to events.tail_messages, a comma-separated list\n", have);
+        return;
+    }
+    if (strcmp(section, "audio") == 0 && strcmp(key, "pre_message_ms") == 0) {
+        cfg_err("%s: renamed to audio.keyup_delay_ms (see UPGRADE.md)\n", have);
+        return;
+    }
+    if (strcmp(section, "audio") == 0 && strcmp(key, "post_message_ms") == 0) {
+        cfg_err("%s: renamed to audio.message_gap_ms, which is also the gap between messages (see UPGRADE.md)\n", have);
         return;
     }
     if (strcmp(section, "dtmf") == 0 && strncmp(key, "beep_", 5) == 0) {

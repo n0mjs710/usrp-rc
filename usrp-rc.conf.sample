@@ -132,8 +132,8 @@ default_cw    = cw: {call}/R
 #voice_gap_ms         = 150    # length of a bare "_" pause
 #ste_delay_ms         = 0      # squelch tail elimination delay (0 = off)
 #lead_trim_ms         = 0      # mute this much leading RX audio per transmission (0 = off)
-#pre_message_ms       = 0      # dead air when the controller keys up for its own audio
-#post_message_ms      = 0      # dead air after its audio, before it drops PTT
+#keyup_delay_ms       = 0      # dead air when the controller keys up for its own audio
+#message_gap_ms       = 0      # dead air between messages, and after the last before it drops PTT
 
 #[timers]
 # All in seconds.
