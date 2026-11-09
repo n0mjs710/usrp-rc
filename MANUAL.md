@@ -327,6 +327,7 @@ Most timers and events start at one point in this cycle:
  Carrier starts
    |  The repeater repeats the audio.
    |  Shorter than timers.kerchunk: kerchunk. No courtesy tone, no tail.
+   |  Over an ID, it is a full transmission, and the ID finishes.
    |  Longer than timers.timeout (local) or timers.link_timeout (link):
    |  time-out (see 6.3).
  Carrier stops

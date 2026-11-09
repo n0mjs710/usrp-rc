@@ -1405,6 +1405,83 @@ static bool scenario_no_courtesy_tone(config_t *base, vocab_cache_t *vocab)
     return ok;
 }
 
+/* True if an ID is still waiting in the mix: it only moves on frames sent. Looks over
+ * 300 ms, longer than a gap between CW letters, so it uses up that much of it. */
+static bool mix_pending(port_t *p)
+{
+    for (int k = 0; k < 15; k++) {
+        int16_t f[160] = {0};
+        port_mix_apply(p, f, g_now);
+        for (int i = 0; i < 160; i++)
+            if (f[i])
+                return true;
+    }
+    return false;
+}
+
+static bool scenario_kerchunk_over_id(config_t *base, vocab_cache_t *vocab)
+{
+    printf("\n[22] a kerchunk over the CW ID: the ID finishes in a tail, and none of it is left for later\n");
+    bool ok = true;
+    config_t cfg = *base;
+    port_t *p = fresh_port(&cfg, vocab);
+    prime(p);
+    activity_pulse(p);
+
+    cap_start();
+    wait_for_log(p, "id: mandatory", 3000);
+    wait_ms(p, 60);
+    key_local(p, true);
+    wait_ms(p, 40);   /* under the kerchunk time */
+    key_local(p, false);
+    bool settled = wait_until_idle(p, 5000);
+    char *log = cap_stop();
+    CHECK(settled, "settled to idle");
+    CHECK(count_occurrences(log, "cor: kerchunk") == 0, "not a kerchunk, as the ID was under it");
+    CHECK(count_occurrences(log, "hang: armed") == 1, "the ID finished, then the courtesy tone and hang");
+    CHECK(!mix_pending(p), "nothing of the ID is left to play under the next transmission");
+    free(log);
+    port_destroy(p);
+    printf(ok ? "[22] PASS\n" : "[22] FAIL\n");
+    return ok;
+}
+
+static bool scenario_timeout_over_impolite_id(config_t *base, vocab_cache_t *vocab)
+{
+    printf("\n[23] a time-out during the impolite ID: the ID finishes before PTT drops\n");
+    bool ok = true;
+    config_t cfg = *base;
+    cfg.timers.id_interval = 3.0;
+    cfg.timers.timeout = 30.0;
+
+    /* Find when the impolite ID starts, then time out just after it. */
+    port_t *p = fresh_port(&cfg, vocab);
+    prime(p);
+    uint64_t keyed = g_now;
+    cap_start();
+    key_local(p, true);
+    wait_for_log(p, "id: impolite", 5000);
+    char *log = cap_stop();
+    free(log);
+    double at = (double)(g_now - keyed) / 1000.0;
+    port_destroy(p);
+
+    cfg.timers.timeout = at + 0.2;
+    p = fresh_port(&cfg, vocab);
+    prime(p);
+    key_local(p, true);
+    wait_ms(p, (int)(at * 1000) + 400);
+    CHECK(port_ptt(p) && !ptt_has_reason("timeout-announced"), "timed out, and PTT held for the ID still playing");
+    bool dropped = wait_until_idle(p, 5000);
+    CHECK(dropped && ptt_has_reason("impolite-id-done"), "PTT dropped when the ID ended");
+    CHECK(!mix_pending(p), "nothing of the ID is left for the recovery");
+    key_local(p, false);
+    CHECK(wait_until_idle(p, 5000), "recovered to idle");
+    port_destroy(p);
+    printf(ok ? "[23] PASS\n" : "[23] FAIL\n");
+    return ok;
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -1445,6 +1522,8 @@ int main(void)
         scenario_id_in_tail,
         scenario_message_pads,
         scenario_echo,
+        scenario_kerchunk_over_id,
+        scenario_timeout_over_impolite_id,
     };
     int n = (int)(sizeof(scenarios) / sizeof(scenarios[0]));
 

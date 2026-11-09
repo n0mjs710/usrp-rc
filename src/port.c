@@ -64,7 +64,6 @@ struct port {
     int  id_rot_initial;
     int  id_rot_mandatory;
     bool tx_activity;           /* an ID is owed */
-    bool impolite_id_playing;
 
     /* timers — absolute monotonic ms deadlines; 0 = not armed */
     uint64_t hang_deadline;
@@ -77,12 +76,11 @@ struct port {
 
     ctrl_buf_t ctrl;
 
-    /* impolite-ID mix buffer (additive overlay on repeat/link-forward/
-     * controller-pull frames) */
+    /* An ID under the repeated audio: the impolite ID, or a CW ID keyed over. It is
+     * mixed into every frame sent, and impolite_id_after_mix() runs when it ends. */
     int16_t     *mix_buf;
     size_t       mix_len;
     size_t       mix_pos;
-    port_cont_fn mix_on_drain;
 
     bool         link_up;
 
@@ -116,6 +114,14 @@ static bool ctrl_buf_playing(const port_t *p)
 {
     return p->ctrl.pos < p->ctrl.buf.len;
 }
+
+static bool mix_playing(const port_t *p)
+{
+    return p->mix_pos < p->mix_len;
+}
+
+/* PTT stays up for an ID still under way in the mix: it only moves on frames sent. */
+static void drop_ptt(port_t *p, const char *reason);
 
 static void ctrl_buf_clear(port_t *p)
 {
@@ -193,6 +199,12 @@ static void set_ptt(port_t *p, bool active, const char *reason)
         p->set_ptt_cb(p->set_ptt_arg, active, reason);
 }
 
+static void drop_ptt(port_t *p, const char *reason)
+{
+    if (!mix_playing(p))
+        set_ptt(p, false, reason);
+}
+
 static void pad(port_t *p, int ms)
 {
     sbuf_append_silence(&p->ctrl.buf, (size_t)ms * 8u);
@@ -264,6 +276,7 @@ static void queue_id(port_t *p, const char *name, uint64_t now)
 static void do_impolite_id(port_t *p, uint64_t now);
 static void impolite_id_after_mix(port_t *p, uint64_t now);
 static void ct_after_drain(port_t *p, uint64_t now);
+static void message_then_ct(port_t *p, uint64_t now);
 
 /* A keyup over any ID: voice gives way to the impolite ID, and CW carries on under the
  * repeated audio. Either way it finishes as the impolite ID does. */
@@ -273,7 +286,7 @@ static void id_keyed_over(port_t *p, uint64_t now)
         do_impolite_id(p, now);
         return;
     }
-    if (p->impolite_id_playing)
+    if (mix_playing(p))
         return;   /* already identifying under the audio */
     size_t n = p->ctrl.buf.len - p->ctrl.pos;
     int16_t *rest = malloc(n * sizeof(int16_t));
@@ -285,8 +298,6 @@ static void id_keyed_over(port_t *p, uint64_t now)
     p->mix_buf = rest;
     p->mix_len = n;
     p->mix_pos = 0;
-    p->impolite_id_playing = true;
-    p->mix_on_drain = impolite_id_after_mix;
 }
 
 static void port_transition(port_t *p, port_state_t new_state, uint64_t now)
@@ -312,7 +323,7 @@ static void timeout_announce_after_drain(port_t *p, uint64_t now)
 {
     (void)now;
     if (p->state == PORT_TIMEOUT)
-        set_ptt(p, false, "timeout-announced");
+        drop_ptt(p, "timeout-announced");
 }
 
 static void do_timeout_announce(port_t *p, uint64_t now)
@@ -360,10 +371,22 @@ static void play_courtesy_tone(port_t *p, uint64_t now)
 
 /* ── impolite ID (mix buffer, not ctrl buffer — see port.h) ──────────────── */
 
+/* Controller audio still playing finishes first, as in on_ct_delay(). Timed out, the
+ * PTT that drop_ptt() held for the mix drops now. */
 static void impolite_id_after_mix(port_t *p, uint64_t now)
 {
-    p->impolite_id_playing = false;
-    if (p->state == PORT_TAIL && !cor_active(p)) {
+    if (cor_active(p))
+        return;
+    if (ctrl_buf_playing(p)) {
+        if (p->state == PORT_TAIL && !p->ctrl.on_drain)
+            p->ctrl.on_drain = message_then_ct;
+        return;
+    }
+    if (p->state == PORT_TIMEOUT) {
+        set_ptt(p, false, "impolite-id-done");
+        return;
+    }
+    if (p->state == PORT_TAIL) {
         if (p->reply) {
             schedule_ct_delay(p, now);   /* the reply goes first, as on any other tail */
             return;
@@ -376,7 +399,6 @@ static void do_impolite_id(port_t *p, uint64_t now)
 {
     const char *name = p->ev->impolite_id;   /* required, so never empty */
     LOGI("id: impolite  '%s'\n", name);
-    p->impolite_id_playing = true;
     p->tx_activity = false;   /* sent once it starts, like any ID */
     schedule_id(p, now);
     rendered_audio_t r = message_render(p->cfg, p->vocab, name,
@@ -385,12 +407,8 @@ static void do_impolite_id(port_t *p, uint64_t now)
     p->mix_buf = r.samples;
     p->mix_len = r.n;
     p->mix_pos = 0;
-
-    if (!r.samples) {
+    if (!r.samples)
         impolite_id_after_mix(p, now);
-        return;
-    }
-    p->mix_on_drain = impolite_id_after_mix;
 }
 
 /* ── IDs in the ctrl buffer ─────────────────────────────────────────────── */
@@ -698,8 +716,10 @@ static void cor_idle_edge(port_t *p, port_source_t source, uint64_t now)
     LOGI("cor: IDLE  source=%s  held=%.1fs\n", src, duration_s);
 
     if (p->state == PORT_ACTIVE || p->state == PORT_TAIL) {
-        /* A valid command is never a kerchunk, however quickly it was entered. */
-        if (p->state == PORT_ACTIVE && duration_s < p->cfg->timers.kerchunk && !p->reply) {
+        /* A valid command is never a kerchunk, however quickly it was entered, and an ID
+         * under the keyup finishes in a tail like any other. */
+        if (p->state == PORT_ACTIVE && duration_s < p->cfg->timers.kerchunk && !p->reply
+            && !mix_playing(p)) {
             LOGD("cor: kerchunk (%.1fs < %.1fs)  — ignored\n",
                     duration_s, p->cfg->timers.kerchunk);
             p->local_tot_used_s    = 0.0;
@@ -711,8 +731,8 @@ static void cor_idle_edge(port_t *p, port_source_t source, uint64_t now)
             if (p->activity_cb)
                 p->activity_cb(p->activity_arg, duration_s);
             port_transition(p, PORT_TAIL, now);
-            if (p->impolite_id_playing)
-                ;   /* the CT follows the impolite ID */
+            if (mix_playing(p))
+                ;   /* the CT follows the ID */
             else if (p->id_deadline == 0)
                 do_initial_id(p, now);
             else
@@ -813,7 +833,7 @@ static void timeout_reply_after_drain(port_t *p, uint64_t now)
 {
     (void)now;
     if (p->state == PORT_TIMEOUT)
-        set_ptt(p, false, "timeout-reply-done");
+        drop_ptt(p, "timeout-reply-done");
 }
 
 bool port_arm_echo(port_t *p)
@@ -880,9 +900,7 @@ static void quiesce(port_t *p, uint64_t now)
     p->local_timed_out = p->link_timed_out = false;
     p->local_tot_used_s = 0.0;
     p->id_deadline = 0;
-    p->impolite_id_playing = false;
     p->mix_len = p->mix_pos = 0;
-    p->mix_on_drain = NULL;
     p->echo_armed = false;
     reply_discard(p);
     ctrl_buf_clear(p);
@@ -1040,12 +1058,9 @@ void port_mix_apply(port_t *p, int16_t *payload, uint64_t now)
     }
     p->mix_pos += n;
     if (p->mix_pos >= p->mix_len) {
-        port_cont_fn cb = p->mix_on_drain;
-        p->mix_on_drain = NULL;
         p->mix_len = 0;
         p->mix_pos = 0;
-        if (cb)
-            cb(p, now);
+        impolite_id_after_mix(p, now);
     }
 }
 

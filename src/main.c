@@ -841,9 +841,9 @@ static void handle_link(app_t *a)
             port_on_link_keyup(a->port, true, now);
         }
 
-        /* While a local station has priority, link audio isn't played: keep none,
-         * or it would play late when the local station unkeys. */
-        bool keep = !port_mmdvm_gate_open(a->port);
+        /* Link audio that isn't being repeated, as a local station has priority, the link
+         * timed out or the repeater is down, is not kept: it would play late. */
+        bool keep = port_link_gate_open(a->port);
         if (!keep)
             jitter_buffer_flush(a->jb);
 
