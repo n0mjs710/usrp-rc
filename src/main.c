@@ -85,7 +85,8 @@ typedef struct {
     /* No mmdvm-side sequence counter: MMDVM-Host's FM protocol has no
      * sequence field. Only the link (still USRP) needs one. */
     uint32_t link_tx_seq;
-    bool     link_tx_ended;   /* nothing more goes to the link this transmission */
+    bool     local_to_link;   /* this local transmission goes to the link, as decided at its keyup */
+    bool     link_keyed;      /* we have the link keyed: see update_link_tx() */
     bool     link_up;         /* off by DTMF command: no audio to or from the link */
 
     int16_t *regen;           /* DTMF regen on its way to the link; NULL = none */
@@ -269,33 +270,28 @@ static void pace_tick(app_t *a, uint64_t now)
 
 /* ── mmdvm RX handling ─────────────────────────────────────────────────── */
 
-static void mmdvm_key_edge(app_t *a, uint64_t now)
+/* Is the local station being sent to the link right now? */
+static bool local_to_link_now(const app_t *a)
 {
-    bool to_link = a->link_up && !port_repeater_down(a->port);
-    if (to_link && a->regen) {
-        LOGI("link: still sending DTMF, this transmission stays local\n");
-        to_link = false;
-    }
-    if (port_take_echo(a->port)) {
-        /* Not to the link: listeners there can't hear the prompt or the playback. */
-        LOGI("echo: recording, this transmission stays local\n");
-        if (!a->echo)
-            a->echo = xrealloc(NULL, ECHO_SAMPLES * sizeof(int16_t));
-        a->echo_len = 0;
-        a->echo_recording = true;
-        to_link = false;
-    }
-    a->link_tx_ended = !to_link;
-    if (to_link) {
-        send_link_key(a, true);
-        LOGI("link: KEY -> peer\n");
-    }
-    port_on_mmdvm_keyup(a->port, true, now);
+    return a->prev_mmdvm_keyup && a->local_to_link && port_mmdvm_gate_open(a->port);
 }
 
-/* Pad out any partial Opus frame and unkey. */
-static void link_uplink_close(app_t *a)
+/* The one place the link is keyed and unkeyed, worked out after each event like PTT.
+ * It is keyed while regen plays or the local station is sent to it; off, down, an echo
+ * recording or a time-out all leave nothing to send. Unkeying pads out any partial Opus
+ * frame first. */
+static void update_link_tx(app_t *a)
 {
+    bool want = a->link_sock >= 0 && a->link_up && !port_repeater_down(a->port)
+             && (a->regen || local_to_link_now(a));
+    if (want == a->link_keyed)
+        return;
+    a->link_keyed = want;
+    if (want) {
+        send_link_key(a, true);
+        LOGI("link: KEY -> peer%s\n", a->regen ? " (DTMF)" : "");
+        return;
+    }
     if (a->cfg.link.codec == LINK_CODEC_OPUS && a->opus_accum_n > 0) {
         int frame_samples = opus_codec_frame_samples(a->opus);
         memset(a->opus_accum + a->opus_accum_n, 0,
@@ -307,14 +303,24 @@ static void link_uplink_close(app_t *a)
     LOGI("link: UNKEY -> peer\n");
 }
 
-/* End this transmission's uplink. */
-static void link_tx_end(app_t *a)
+static void mmdvm_key_edge(app_t *a, uint64_t now)
 {
-    if (a->link_tx_ended)
-        return;
-    a->link_tx_ended = true;
-    if (a->link_sock >= 0)
-        link_uplink_close(a);
+    a->local_to_link = true;
+    if (a->regen) {
+        LOGI("link: still sending DTMF, this transmission stays local\n");
+        a->local_to_link = false;
+    }
+    if (port_take_echo(a->port)) {
+        /* Not to the link: listeners there can't hear the prompt or the playback. */
+        LOGI("echo: recording, this transmission stays local\n");
+        if (!a->echo)
+            a->echo = xrealloc(NULL, ECHO_SAMPLES * sizeof(int16_t));
+        a->echo_len = 0;
+        a->echo_recording = true;
+        a->local_to_link = false;
+    }
+    port_on_mmdvm_keyup(a->port, true, now);
+    update_link_tx(a);
 }
 
 /* Regen goes to the link on its own 20 ms clock, as the receiver has unkeyed and the
@@ -327,7 +333,7 @@ static void regen_stop(app_t *a, const char *why)
     free(a->regen);
     a->regen = NULL;
     a->regen_deadline = 0;
-    link_uplink_close(a);
+    update_link_tx(a);
 }
 
 static void regen_start(app_t *a, int16_t *samples, size_t n, uint64_t now)
@@ -339,8 +345,7 @@ static void regen_start(app_t *a, int16_t *samples, size_t n, uint64_t now)
     a->regen_len = n;
     a->regen_pos = 0;
     a->regen_deadline = now;
-    send_link_key(a, true);
-    LOGI("link: KEY -> peer (DTMF)\n");
+    update_link_tx(a);
 }
 
 static void regen_tick(app_t *a, uint64_t now)
@@ -386,8 +391,8 @@ static void set_link(app_t *a, bool up)
     if (!up) {
         regen_stop(a, "cut short");
         link_rx_end(a, monotonic_ms(), NULL);
-        link_tx_end(a);
     }
+    update_link_tx(a);
 }
 
 static void reply_with_message(app_t *a, const char *name)
@@ -499,9 +504,9 @@ static void run_command(app_t *a, const command_t *c)
         port_set_repeater_down(a->port, down, r.samples, r.n, monotonic_ms());
         if (down) {
             regen_stop(a, "cut short");
-            link_tx_end(a);
             link_rx_end(a, monotonic_ms(), NULL);
         }
+        update_link_tx(a);
         save_repeater_state(a, down);
         break;
     }
@@ -533,7 +538,7 @@ static void run_or_drop_command(app_t *a, const command_t *c)
 static void mmdvm_unkey_edge(app_t *a, uint64_t now)
 {
     ste_reset(a->ste);
-    link_tx_end(a);
+    update_link_tx(a);
 
     /* Before the port sees the unkey, so a reply is in place when the tail starts.
      * Timed out, a command has to end in D: an unkey doesn't enter it. */
@@ -543,7 +548,6 @@ static void mmdvm_unkey_edge(app_t *a, uint64_t now)
         command_session_end_of_tx_discard(a->cmd, "timed out, a command must end with D");
     else if (a->cmd)
         have = command_session_end_of_tx(a->cmd, &c) && command_allowed(a, &c);
-    a->link_tx_ended = false;
 
     int16_t *echo = NULL;
     size_t echo_len = a->echo_len;
@@ -579,18 +583,6 @@ static void mmdvm_unkey_edge(app_t *a, uint64_t now)
  * single FMD datagram can now yield zero, one, or more of these. */
 static void mmdvm_rx_frame(app_t *a, const int16_t frame_in[160], uint64_t now)
 {
-    /* Timed out, the receiver is still heard for commands ending in D, but its
-     * audio goes nowhere. */
-    if (!port_mmdvm_gate_open(a->port)) {
-        if (port_local_timed_out(a->port) || port_repeater_down(a->port)) {
-            link_tx_end(a);
-            command_t c;
-            if (a->cmd && command_session_frame(a->cmd, frame_in, &c))
-                run_or_drop_command(a, &c);
-        }
-        return;
-    }
-
     /* Ahead of the delay line, so with STE on the mute beats the tone out. */
     bool muted = false;
     if (a->cmd) {
@@ -599,6 +591,11 @@ static void mmdvm_rx_frame(app_t *a, const int16_t frame_in[160], uint64_t now)
             run_or_drop_command(a, &c);
         muted = command_session_muted(a->cmd);
     }
+
+    /* Timed out or down, the receiver is still heard for commands, but its audio goes
+     * nowhere. */
+    if (!port_mmdvm_gate_open(a->port))
+        return;
 
     /* STE delay line, shared by both destinations: real audio once the
      * buffer has filled, silence (not silence-by-omission) until then,
@@ -631,7 +628,7 @@ static void mmdvm_rx_frame(app_t *a, const int16_t frame_in[160], uint64_t now)
     send_mmdvm_voice(a, frame);
 
     /* Flow 2: mmdvm RX -> link TX. */
-    if (a->link_sock >= 0 && !a->link_tx_ended)
+    if (a->link_keyed && a->local_to_link)
         send_link_voice(a, link);
 }
 
@@ -822,9 +819,11 @@ static void stats_tick(app_t *a, uint64_t now)
     a->stats_deadline = now + STATS_SAVE_INTERVAL_MS;
 }
 
+/* A time-out can close the local station's path to the link. */
 static void port_tick(app_t *a, uint64_t now)
 {
     port_check_timers(a->port, now);
+    update_link_tx(a);
 }
 
 /* Backstops: MMDVM-Host ends a transmission with FME, and the link with an unkey. */
@@ -1070,8 +1069,8 @@ int main(int argc, char *argv[])
 
     printf("usrp-rc: stopping\n");
     regen_stop(a, "cut short");
-    if (a->prev_mmdvm_keyup)
-        link_tx_end(a);   /* don't leave the peer keyed */
+    a->link_up = false;   /* don't leave the peer keyed */
+    update_link_tx(a);
     close(a->epfd);
     close(a->mmdvm_sock);
     if (a->link_sock >= 0) close(a->link_sock);

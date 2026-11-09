@@ -19,6 +19,10 @@ or has a continuation waiting, an ID plays in the mix, or the tail runs. A timed
 or downed source isn't repeated, so those rules need nothing of their own. New
 controller audio queues through the buffer and gets PTT from the same rule.
 
+The link uplink follows the same pattern in `main.c`: `update_link_tx()` keys the link
+while regen plays or the local station is sent to it. Link off, repeater down, an
+echo recording and a time-out just leave nothing to send.
+
 ## Protocols
 
 Two different protocols, one on each port — see [README.md](README.md) for
