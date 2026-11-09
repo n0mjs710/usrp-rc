@@ -425,12 +425,12 @@ static bool scenario_timeout_recovery(config_t *base, vocab_cache_t *vocab)
 
     key_local(p, true);
     wait_ms(p, 5500);       /* past the 5.0s timeout */
-    CHECK(ptt_has_reason("timeout-announced"), "PTT dropped with reason timeout-announced");
+    CHECK(ptt_has_reason("timed-out"), "PTT dropped, timed out");
 
     key_local(p, false);    /* release, well past the TOT */
     bool settled = wait_until_idle(p, 5000);
     CHECK(settled, "recovered back to idle without getting stuck");
-    CHECK(ptt_has_reason("timeout-recovery"), "PTT re-asserted with reason timeout-recovery on release");
+    CHECK(g_ptt_n >= 3 && g_ptt[g_ptt_n - 2].active, "PTT came back up for the recovery on release");
 
     /* one more ordinary cycle afterward should behave normally */
     g_ptt_n = 0;
@@ -1471,9 +1471,9 @@ static bool scenario_timeout_over_impolite_id(config_t *base, vocab_cache_t *voc
     prime(p);
     key_local(p, true);
     wait_ms(p, (int)(at * 1000) + 400);
-    CHECK(port_ptt(p) && !ptt_has_reason("timeout-announced"), "timed out, and PTT held for the ID still playing");
+    CHECK(port_ptt(p) && !ptt_has_reason("timed-out"), "timed out, and PTT held for the ID still playing");
     bool dropped = wait_until_idle(p, 5000);
-    CHECK(dropped && ptt_has_reason("impolite-id-done"), "PTT dropped when the ID ended");
+    CHECK(dropped && ptt_has_reason("timed-out"), "PTT dropped when the ID ended");
     CHECK(!mix_pending(p), "nothing of the ID is left for the recovery");
     key_local(p, false);
     CHECK(wait_until_idle(p, 5000), "recovered to idle");

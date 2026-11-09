@@ -13,6 +13,12 @@ machine decides to play it, then drained as 20 ms / 160-sample frames. Rendering
 happens in the main loop and takes a few milliseconds at most; there are no
 threads.
 
+Nothing in `port.c` keys or drops PTT directly. `update_ptt()` works it out after
+each event: the transmitter is up while a source is repeated, controller audio plays
+or has a continuation waiting, an ID plays in the mix, or the tail runs. A timed-out
+or downed source isn't repeated, so those rules need nothing of their own. New
+controller audio queues through the buffer and gets PTT from the same rule.
+
 ## Protocols
 
 Two different protocols, one on each port — see [README.md](README.md) for
