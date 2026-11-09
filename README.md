@@ -1,8 +1,29 @@
-# usrp-rc: Repeater Controller for MMDVM-Host
+# usrp-rc
 
-`usrp-rc` is a repeater controller and network bridge for an MMDVM-Host FM repeater. It
-operates on the same computer as MMDVM-Host. It replaces FMGateway and the controller
-functions of MMDVM-Host.
+**A repeater controller for analog FM repeaters, entirely in software.**
+
+usrp-rc does what a classic hardware controller does: IDs, courtesy tones, hang time,
+time-out timers, tail messages, voice and CW announcements, and DTMF commands. It behaves
+the way hams, new and old, expect a repeater to behave.
+
+It connects to repeater hardware through MMDVM, with USRP radio interfaces on the way,
+and to upstream networks over USRP. It runs on any Linux host: on the same board as
+MMDVM-Host, or on a separate machine. With MMDVM-Host, it replaces FMGateway and the
+controller functions of MMDVM-Host.
+
+## Why usrp-rc
+
+AllStarLink, SvxLink and similar projects are networks, and they do networking well.
+usrp-rc is about the local repeater: local control, and only what a fast, great-sounding
+repeater needs.
+
+It is a single-threaded C program with one library dependency (Opus). Each received audio
+frame is repeated the moment it arrives, with no buffering of its own beyond an optional
+squelch-tail delay. So it adds very little latency, and it leaves the host free for
+MMDVM-Host and anything else running there. When you want a network, link usrp-rc to one.
+
+*The name: USRP is the protocol it speaks, and RC means repeater controller.* By Cort
+Buffington, N0MJS.
 
 For operation and the settings reference, see [MANUAL.md](MANUAL.md).
 
@@ -18,6 +39,7 @@ Version: 1.0b (beta). To update from an earlier `main`, see [UPGRADE.md](UPGRADE
 
 ## Contents
 
+- [Why usrp-rc](#why-usrp-rc)
 - [Description](#description)
 - [Functional overview](#functional-overview)
 - [Requirements](#requirements)
@@ -35,7 +57,7 @@ Version: 1.0b (beta). To update from an earlier `main`, see [UPGRADE.md](UPGRADE
 
 | Port | Protocol | Connects to |
 | --- | --- | --- |
-| mmdvm | MMDVM-Host FM Network protocol, on the loopback interface | MMDVM-Host on the same computer |
+| mmdvm | MMDVM-Host FM Network protocol | MMDVM-Host, usually on the same computer |
 | link | USRP, with PCM or Opus audio | A USRP reflector or hub, or an AllStarLink (ASL) node in USRP mode |
 
 > **Note:** At this time, Opus audio operates only with other tools from the same author.
