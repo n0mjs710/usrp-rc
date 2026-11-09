@@ -67,7 +67,7 @@ struct port {
 
     int  id_rot_initial;
     int  id_rot_mandatory;
-    bool tx_activity;           /* an ID is owed */
+    bool id_owed;
 
     /* timers — absolute monotonic ms deadlines; 0 = not armed */
     uint64_t hang_deadline;
@@ -234,6 +234,10 @@ static void update_ptt(port_t *p)
     p->ptt = want;
     if (!want)
         p->last_audio = LAST_NONE;
+    /* Keying the transmitter owes an ID, unless it keys for the ID itself. Each repeated
+     * keyup owes one too: port_transition(). */
+    else if (p->ctrl.id == ID_NONE)
+        p->id_owed = true;
     if (p->set_ptt_cb)
         p->set_ptt_cb(p->set_ptt_arg, want, why);
 }
@@ -281,7 +285,7 @@ static void schedule_id(port_t *p, uint64_t now)
  * stays an ID in the buffer until it drains, should anyone key over it. */
 static void queue_id(port_t *p, const char *name, uint64_t now)
 {
-    p->tx_activity = false;
+    p->id_owed = false;
     schedule_id(p, now);
     p->ctrl.id = message_has_voice(p->cfg, name) ? ID_VOICE : ID_CW;
     queue_message(p, name, -1.0);
@@ -324,7 +328,7 @@ static void port_transition(port_t *p, port_state_t new_state, uint64_t now)
         p->local_tot_used_s = 0.0;
 
     if (new_state == PORT_ACTIVE) {
-        p->tx_activity = true;
+        p->id_owed = true;
         p->last_audio = LAST_REPEAT;
         if (ctrl_buf_playing(p)) {
             if (p->ctrl.id != ID_NONE)
@@ -343,7 +347,6 @@ static void do_timeout_announce(port_t *p)
 
 static void do_timeout_recovery(port_t *p)
 {
-    p->tx_activity = true;
     queue_message(p, p->ev->timeout_cancel_message, -1.0);
     p->ctrl.on_drain = ct_after_drain;
 }
@@ -395,7 +398,7 @@ static void do_impolite_id(port_t *p, uint64_t now)
 {
     const char *name = p->ev->impolite_id;   /* required, so never empty */
     LOGI("id: impolite  '%s'\n", name);
-    p->tx_activity = false;   /* sent once it starts, like any ID */
+    p->id_owed = false;   /* sent once it starts, like any ID */
     schedule_id(p, now);
     rendered_audio_t r = message_render(p->cfg, p->vocab, name,
                                         p->cfg->audio.impolite_morse_level);
@@ -469,7 +472,7 @@ static void do_initial_id(port_t *p, uint64_t now)
 static bool anxious_id_due(const port_t *p, uint64_t now)
 {
     double lead = p->cfg->timers.id_anxious;
-    return p->ev->anxious_id[0] && p->tx_activity && p->id_deadline && lead > 0.0
+    return p->ev->anxious_id[0] && p->id_owed && p->id_deadline && lead > 0.0
         && now + (uint64_t)(lead * 1000.0) >= p->id_deadline;
 }
 
@@ -487,12 +490,10 @@ static void do_anxious_id(port_t *p, uint64_t now)
 static void startup_id(port_t *p, uint64_t now)
 {
     const char *name = initial_id_next(p);
-    if (name) {
+    if (name)
         queue_id(p, name, now);
-    } else {
+    else
         schedule_id(p, now);
-        p->tx_activity = true;
-    }
 }
 
 void port_start(port_t *p, uint64_t now)
@@ -646,8 +647,8 @@ static void on_id(port_t *p, uint64_t now)
     p->id_deadline = 0;
 
     if (p->state == PORT_ACTIVE)
-        p->tx_activity = true;
-    if (!p->tx_activity)
+        p->id_owed = true;
+    if (!p->id_owed)
         return;
 
     if (p->state == PORT_ACTIVE)
@@ -848,7 +849,7 @@ void port_set_repeater_down(port_t *p, bool down, int16_t *reply, size_t n, uint
 
         /* The reply is a transmission, so the station identifies on its way down,
          * and then nothing more is owed. */
-        if ((reply && n) || p->tx_activity) {
+        if ((reply && n) || p->id_owed) {
             if (reply && n)
                 ctrl_buf_queue(p, reply, n);
             const char *id = mandatory_id_next(p);
@@ -885,7 +886,6 @@ void port_set_repeater_down(port_t *p, bool down, int16_t *reply, size_t n, uint
         cor_active_edge(p, p->mmdvm_active ? SRC_LOCAL : SRC_LINK, now);
         port_queue_reply(p, reply, n);
     } else if (reply && n) {
-        p->tx_activity = true;
         if (p->id_deadline == 0)
             schedule_id(p, now);
         ctrl_buf_queue(p, reply, n);

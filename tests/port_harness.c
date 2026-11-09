@@ -256,7 +256,7 @@ static bool scenario_normal_flow_and_cw_survives(config_t *base, vocab_cache_t *
     CHECK(count_occurrences(log1, "id: anxious") == 0, "no anxious ID fired during priming (disabled by default)");
     free(log1);
 
-    activity_pulse(p);   /* re-arm tx_activity so the mandatory ID has something to report */
+    activity_pulse(p);   /* re-arm id_owed so the mandatory ID has something to report */
 
     cap_start();
     bool started = wait_for_log(p, "id: mandatory", 3000);
@@ -449,9 +449,9 @@ static bool scenario_timeout_recovery(config_t *base, vocab_cache_t *vocab)
     return ok;
 }
 
-static bool scenario_impolite_resets_tx_activity(config_t *base, vocab_cache_t *vocab)
+static bool scenario_impolite_resets_id_owed(config_t *base, vocab_cache_t *vocab)
 {
-    printf("\n[7] impolite-ID substitution resets tx_activity, so a later silent period truly goes idle\n");
+    printf("\n[7] impolite-ID substitution resets id_owed, so a later silent period truly goes idle\n");
     bool ok = true;
     config_t cfg = *base;
     cfg.timers.id_interval = 3.00;   /* long enough that priming settles well before it first expires */
@@ -475,7 +475,7 @@ static bool scenario_impolite_resets_tx_activity(config_t *base, vocab_cache_t *
     CHECK(settled, "settled back to idle after the impolite substitution's own CT/hang tail");
 
     /* The id_deadline rearmed by impolite_id_after_mix() is what's under
-     * test here: with no further activity, tx_activity must have been
+     * test here: with no further activity, id_owed must have been
      * reset to false so on_id() declines to fire again when it expires --
      * otherwise this wrongly re-IDs during genuine silence and never
      * reaches "go back to idle." */
@@ -483,7 +483,7 @@ static bool scenario_impolite_resets_tx_activity(config_t *base, vocab_cache_t *
     wait_ms(p, 3200);   /* span the full rearmed id_interval with nothing happening */
     char *log2 = cap_stop();
     CHECK(count_occurrences(log2, "id: mandatory") == 0 && count_occurrences(log2, "id: impolite") == 0,
-          "no further ID fired during a genuinely silent period (tx_activity correctly reset)");
+          "no further ID fired during a genuinely silent period (id_owed correctly reset)");
     free(log2);
 
     port_destroy(p);
@@ -1515,7 +1515,7 @@ int main(void)
         scenario_anxious_between_ct_delay_and_ct,
         scenario_kerchunk_ignored,
         scenario_timeout_recovery,
-        scenario_impolite_resets_tx_activity,
+        scenario_impolite_resets_id_owed,
         scenario_command_reply,
         scenario_link_state_courtesy_tone,
         scenario_tail_message_count,
