@@ -400,7 +400,7 @@ static void reply_with_message(app_t *a, const char *name)
     if (!name[0])
         return;
     rendered_audio_t r = message_render(&a->cfg, a->vocab, name, -1.0);
-    port_queue_reply(a->port, r.samples, r.n);
+    port_queue_reply(a->port, r.samples, r.n, monotonic_ms());
 }
 
 /* Repeater down survives a restart, so a power cut doesn't quietly put a repeater back
@@ -448,7 +448,7 @@ static void run_command(app_t *a, const command_t *c)
         for (const char *d = c->digits; *d; d++)
             clips[n++] = command_digit_clip(*d);
         rendered_audio_t r = message_render_clips(&a->cfg, a->vocab, clips, n);
-        port_queue_reply(a->port, r.samples, r.n);
+        port_queue_reply(a->port, r.samples, r.n, monotonic_ms());
         break;
     }
     case COMMAND_TIME:
@@ -492,7 +492,7 @@ static void run_command(app_t *a, const command_t *c)
             sbuf_t b = {.data = t, .len = n, .cap = n};
             sbuf_scale(&b, a->cfg.audio.master_gain);
         }
-        port_queue_reply(a->port, t, n);
+        port_queue_reply(a->port, t, n, monotonic_ms());
         break;
     }
     case COMMAND_REPEATER: {
@@ -540,8 +540,9 @@ static void mmdvm_unkey_edge(app_t *a, uint64_t now)
     ste_reset(a->ste);
     update_link_tx(a);
 
-    /* Before the port sees the unkey, so a reply is in place when the tail starts.
-     * Timed out, a command has to end in D: an unkey doesn't enter it. */
+    /* What was entered and recorded is settled while the port still knows whether this
+     * transmission timed out; it runs once the port has seen the unkey. Timed out, a
+     * command has to end in D: an unkey doesn't enter it. */
     command_t c;
     bool have = false;
     if (a->cmd && port_local_timed_out(a->port))
@@ -557,25 +558,18 @@ static void mmdvm_unkey_edge(app_t *a, uint64_t now)
         if (port_local_timed_out(a->port)) {
             LOGI("echo: timed out, nothing to play back\n");
         } else if (echo_len) {
-            echo = xrealloc(NULL, echo_len * sizeof(int16_t));
-            memcpy(echo, a->echo, echo_len * sizeof(int16_t));
+            echo = a->echo;   /* the port takes it; the next test allocates again */
+            a->echo = NULL;
         }
     }
 
-    /* Repeater up/down acts on the repeater as a whole, so it follows the unkey; a reply
-     * goes first so it's in place when the tail starts. */
-    if (have && c.type == COMMAND_REPEATER) {
-        port_on_mmdvm_keyup(a->port, false, now);
-        run_command(a, &c);
-        return;
-    }
+    port_on_mmdvm_keyup(a->port, false, now);
     if (have)
         run_command(a, &c);
     if (echo) {
         LOGI("echo: playing back %.1f s\n", (double)echo_len / 8000.0);
-        port_queue_reply(a->port, echo, echo_len);
+        port_queue_reply(a->port, echo, echo_len, now);
     }
-    port_on_mmdvm_keyup(a->port, false, now);
 }
 
 /* One reframed 160-sample frame of received RF audio, fanned out to the

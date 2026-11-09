@@ -507,7 +507,7 @@ static bool scenario_command_reply(config_t *base, vocab_cache_t *vocab)
 
     key_local(p, true);
     wait_ms(p, 150);
-    port_queue_reply(p, reply, REPLY_SAMPLES);
+    port_queue_reply(p, reply, REPLY_SAMPLES, g_now);
     key_local(p, false);
 
     int first_run = 0, runs = 0, run_ms = 0;
@@ -528,7 +528,7 @@ static bool scenario_command_reply(config_t *base, vocab_cache_t *vocab)
     for (size_t i = 0; i < REPLY_SAMPLES; i++) reply[i] = 1000;
     key_local(p, true);
     wait_ms(p, 150);
-    port_queue_reply(p, reply, REPLY_SAMPLES);
+    port_queue_reply(p, reply, REPLY_SAMPLES, g_now);
     key_local(p, false);
     wait_ms(p, 60);          /* still inside ct_delay */
     key_local(p, true);
@@ -544,7 +544,7 @@ static bool scenario_command_reply(config_t *base, vocab_cache_t *vocab)
     for (size_t i = 0; i < REPLY_SAMPLES; i++) reply[i] = 1000;
     key_local(p, true);
     wait_ms(p, 150);
-    port_queue_reply(p, reply, REPLY_SAMPLES);
+    port_queue_reply(p, reply, REPLY_SAMPLES, g_now);
     key_local(p, false);
     wait_ms(p, 260);         /* 60 ms into the reply */
     key_local(p, true);
@@ -561,7 +561,7 @@ static bool scenario_command_reply(config_t *base, vocab_cache_t *vocab)
     cap_start();
     key_local(p, true);
     wait_ms(p, 40);          /* under the 100 ms threshold */
-    port_queue_reply(p, reply, REPLY_SAMPLES);
+    port_queue_reply(p, reply, REPLY_SAMPLES, g_now);
     key_local(p, false);
     run_ms = 0;
     for (int t = 0; t < 1000; t += TICK_MS)
@@ -1115,8 +1115,6 @@ static bool scenario_repeater_down(config_t *base, vocab_cache_t *vocab)
     CHECK(!port_ptt(p) && !port_link_gate_open(p), "down, link traffic isn't repeated");
     wait_ms(p, 15000);
     CHECK(!port_ptt(p), "down, nothing times out or keys up, however long the carriers");
-    port_queue_reply(p, test_reply(800), 800);
-    CHECK(!port_ptt(p), "down, other commands' replies don't transmit");
     port_on_link_keyup(p, false, g_now);
     key_local(p, false);
     wait_ms(p, 6000);

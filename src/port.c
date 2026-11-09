@@ -811,15 +811,24 @@ bool port_take_echo(port_t *p)
     return armed;
 }
 
-void port_queue_reply(port_t *p, int16_t *samples, size_t n)
+void port_queue_reply(port_t *p, int16_t *samples, size_t n, uint64_t now)
 {
     reply_discard(p);
     if (!samples || n == 0) {
         free(samples);
         return;
     }
-    p->reply     = samples;
-    p->reply_len = n;
+    if (p->state != PORT_IDLE) {
+        p->reply     = samples;
+        p->reply_len = n;
+        return;
+    }
+    /* No tail to wait for: it is a transmission of its own. */
+    if (p->id_deadline == 0)
+        schedule_id(p, now);
+    ctrl_buf_queue(p, samples, n);
+    free(samples);
+    update_ptt(p);
 }
 
 /* ── repeater down / up ────────────────────────────────────────────────── */
@@ -863,13 +872,8 @@ void port_set_repeater_down(port_t *p, bool down, int16_t *reply, size_t n, uint
 
     if (!p->down) {
         LOGI("port: repeater UP (already up)\n");
-        /* An ordinary reply, unless the repeater is idle (a kerchunk-short entry),
-         * when it keys up for it below. */
-        if (p->state != PORT_IDLE) {
-            port_queue_reply(p, reply, n);
-            update_ptt(p);
-            return;
-        }
+        port_queue_reply(p, reply, n, now);
+        return;
     } else {
         p->down = false;
         LOGW("port: repeater UP\n");
@@ -884,15 +888,8 @@ void port_set_repeater_down(port_t *p, bool down, int16_t *reply, size_t n, uint
         if (p->link_active && p->cfg->timers.link_timeout > 0.0)
             p->link_timeout_deadline = now + (uint64_t)(p->cfg->timers.link_timeout * 1000.0);
         cor_active_edge(p, p->mmdvm_active ? SRC_LOCAL : SRC_LINK, now);
-        port_queue_reply(p, reply, n);
-    } else if (reply && n) {
-        if (p->id_deadline == 0)
-            schedule_id(p, now);
-        ctrl_buf_queue(p, reply, n);
-        free(reply);
-    } else {
-        free(reply);
     }
+    port_queue_reply(p, reply, n, now);
     update_ptt(p);
 }
 

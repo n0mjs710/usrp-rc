@@ -42,8 +42,9 @@ void port_on_mmdvm_keyup(port_t *p, bool active, uint64_t now);
 void port_on_link_keyup(port_t *p, bool active, uint64_t now);
 
 /* Queue a spoken command reply. It plays in the tail after the transmission, ahead
- * of the courtesy tone, and a new keyup interrupts it. Takes ownership of samples. */
-void port_queue_reply(port_t *p, int16_t *samples, size_t n);
+ * of the courtesy tone, and a new keyup interrupts it. Idle, it is a transmission of
+ * its own. Takes ownership of samples. */
+void port_queue_reply(port_t *p, int16_t *samples, size_t n, uint64_t now);
 
 /* Echo test. Arming waits for the next local keyup, which port_take_echo() claims for
  * recording. If the tail ends first, echo_cancel_message plays. Going down clears it. */
