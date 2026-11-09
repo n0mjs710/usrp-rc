@@ -45,30 +45,11 @@ bool jitter_buffer_pull(jitter_buffer_t *jb, int16_t *samples_out);
 /* Drain all pending frames and re-arm the prefill ramp (call on UNKEY). */
 void jitter_buffer_flush(jitter_buffer_t *jb);
 
-/* Estimated current jitter in milliseconds, based on inter-arrival timing
- * deviation from the nominal 20ms cadence. Diagnostic only -- nothing is
- * gated on this value. */
-float jitter_buffer_estimate_ms(const jitter_buffer_t *jb);
-
-/* Number of frames dropped since last call because the buffer was at
- * capacity when a push arrived (resets counter). Expected to be rare: only a
- * sustained burst fills the buffer. */
+/* Frames dropped because the buffer was full, since the last call (resets). Expected
+ * to be rare: only a sustained burst fills the buffer. */
 uint64_t jitter_buffer_overflow_count(jitter_buffer_t *jb);
 
-/* Reset the live silence counter when the link keys up, so idle pulls before the
- * transmission don't inflate its count. */
-void jitter_buffer_reset_silence_count(jitter_buffer_t *jb);
-
-/* Latch the current silence count for the end-of-transmission log line, and add it
- * to the heartbeat count. Call when the link unkeys. */
-void jitter_buffer_latch_silence(jitter_buffer_t *jb);
-
-/* Return (and reset) the latched per-transmission silence count.
- * Use for output-end log lines — reflects only mid-transmission misses. */
-uint64_t jitter_buffer_latched_silence_count(jitter_buffer_t *jb);
-
-/* Return (and reset) the accumulated mid-transmission silence since the last
- * heartbeat read.  Use for heartbeat log lines. */
-uint64_t jitter_buffer_hb_silence_count(jitter_buffer_t *jb);
+/* Pulls that found it dry after priming, since the last call (resets). */
+uint64_t jitter_buffer_silence_count(jitter_buffer_t *jb);
 
 void jitter_buffer_destroy(jitter_buffer_t *jb);

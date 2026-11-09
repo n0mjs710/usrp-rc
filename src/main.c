@@ -44,10 +44,6 @@
  * every 5 s whether or not anyone is talking. */
 #define WATCHDOG_MS 500
 
-/* Periodic link-peer jitter/silence telemetry log (jitter_buffer.c tracks
- * these continuously; this is just the missing consumer). */
-#define HEARTBEAT_INTERVAL_MS 60000u
-
 /* How often usage is written out, if it changed. Easy on the SD card; a power failure
  * loses at most this much of it. */
 #define STATS_SAVE_INTERVAL_MS (15u * 60u * 1000u)
@@ -104,8 +100,6 @@ typedef struct {
     uint64_t link_watchdog_deadline;
 
     uint64_t pace_deadline;   /* 20 ms mmdvm-TX pacing timer; armed while port PTT is on */
-    uint64_t heartbeat_deadline;   /* periodic link jitter/silence telemetry; 0 = no link */
-    uint64_t fm_ping_deadline;     /* FMP keepalive to MMDVM-Host */
     uint64_t ptt_start_ms;    /* set on each PTT-on edge; used to log PTT-off duration */
 
     /* MMDVM-Host sends variable-length FMD payloads; everything downstream
@@ -118,11 +112,6 @@ typedef struct {
 
     uint64_t mmdvm_recv_err_logged_ms;
     uint64_t link_recv_err_logged_ms;
-
-    uint64_t mmdvm_voice_last_ms;    /* pacing monitor: see note_mmdvm_voice_pacing() */
-    uint64_t mmdvm_voice_last_cpu_ms; /* CPU-time twin of the above, for stall attribution */
-    int      mmdvm_voice_burst_run;
-    uint64_t mmdvm_rx_last_ms;       /* receive-side pacing monitor: see handle_mmdvm() */
 } app_t;
 
 /* Repeated recv() errors (most commonly ECONNREFUSED: the peer's ICMP port-
@@ -179,69 +168,11 @@ static int make_udp_socket(const char *bind_addr, uint16_t bind_port,
 
 /* ── outbound frame builders ───────────────────────────────────────────── */
 
-/* MMDVM-Host's FM network path (LinkMode=1) does no jitter-smoothing of its
- * own -- it forwards whatever it has, whenever asked, and the modem
- * firmware's ext-audio buffer only restarts once >75ms has re-accumulated
- * after running dry, with zero debounce on the drop itself. A gap on our
- * outbound side anywhere near that -- or a burst of frames sent
- * back-to-back after one, evidence of a stall having let packets queue up
- * before draining all at once -- is a plausible trigger for an on-air
- * carrier drop. This logs only the rare anomaly, not every frame.
- *
- * Speaking FM natively removed the fmgateway relay hop from this path but
- * did NOT change the underlying fragility: MMDVM-Host accepts no key/unkey
- * marker from a gateway, so "we stopped sending" and "we stalled" are the
- * same event to the modem. This instrumentation stays until the latency
- * work is done. */
-#define MMDVM_VOICE_GAP_NOTE_MS   35U   /* nominal cadence is 20ms; a missed tick, logged at debug */
-#define MMDVM_VOICE_GAP_WARN_MS   60U   /* firmware's FM_LINK_EXT_GAP_MS underrun tolerance */
-#define MMDVM_VOICE_GAP_DANGER_MS 75U   /* modem's link-mode ext-audio restart threshold */
-
-static void note_mmdvm_voice_pacing(app_t *a, uint64_t now)
-{
-    uint64_t now_cpu = cpu_time_ms();
-    if (a->mmdvm_voice_last_ms != 0) {
-        uint64_t gap = now - a->mmdvm_voice_last_ms;
-        if (gap >= MMDVM_VOICE_GAP_NOTE_MS) {
-            uint64_t cpu_gap = now_cpu - a->mmdvm_voice_last_cpu_ms;
-            if (gap < MMDVM_VOICE_GAP_WARN_MS) {
-                LOGD("audio: %llums gap between mmdvm-TX frames, %llums of it our own CPU time (normal; the modem tolerates 60ms)\n",
-                        (unsigned long long)gap, (unsigned long long)cpu_gap);
-            } else {
-                if (a->mmdvm_voice_burst_run > 1)
-                    LOGW("audio: burst of %d mmdvm-TX frames sent back-to-back just before this gap\n",
-                            a->mmdvm_voice_burst_run);
-                LOGW("audio: %llums gap between mmdvm-TX frames (nominal 20ms), %llums of that was our own CPU time%s\n",
-                        (unsigned long long)gap, (unsigned long long)cpu_gap,
-                        gap >= MMDVM_VOICE_GAP_DANGER_MS ? "  -- at/past the modem's link-mode drop threshold" : "");
-            }
-            a->mmdvm_voice_burst_run = 0;
-        } else if (gap <= 2) {
-            a->mmdvm_voice_burst_run++;
-        } else {
-            if (a->mmdvm_voice_burst_run > 1)
-                LOGW("audio: burst of %d mmdvm-TX frames sent back-to-back\n",
-                        a->mmdvm_voice_burst_run);
-            a->mmdvm_voice_burst_run = 0;
-        }
-    }
-    a->mmdvm_voice_last_ms     = now;
-    a->mmdvm_voice_last_cpu_ms = now_cpu;
-}
-
 /* MMDVM-Host's FM protocol has no PTT bit: the flow of frames is the PTT. */
 static void send_mmdvm_voice(app_t *a, const int16_t frame[160])
 {
     uint8_t buf[FM_MAX_PKT_LEN];
     size_t len = fm_build_data(buf, frame, 160u);
-    send(a->mmdvm_sock, buf, len, 0);
-    note_mmdvm_voice_pacing(a, monotonic_ms());
-}
-
-static void send_mmdvm_ping(app_t *a)
-{
-    uint8_t buf[FM_TAG_LEN];
-    size_t len = fm_build_ping(buf);
     send(a->mmdvm_sock, buf, len, 0);
 }
 
@@ -305,10 +236,6 @@ static void on_port_ptt(void *arg, bool active, const char *reason)
     } else {
         double duration_s = (double)(now - a->ptt_start_ms) / 1000.0;
         LOGI("ptt: OFF  reason=%s  duration=%.1fs\n", reason, duration_s);
-        /* Clean slate for the pacing monitor -- the idle gap between
-         * transmissions is expected and not a delivery problem. */
-        a->mmdvm_voice_last_ms   = 0;
-        a->mmdvm_voice_burst_run = 0;
     }
 }
 
@@ -435,16 +362,14 @@ static void link_rx_end(app_t *a, uint64_t now, const char *why)
         return;
     a->prev_link_keyup = false;
     a->link_watchdog_deadline = 0;
-    jitter_buffer_latch_silence(a->jb);
     uint64_t overflow = jitter_buffer_overflow_count(a->jb);
-    uint64_t silence  = jitter_buffer_latched_silence_count(a->jb);
-    float    jitter   = jitter_buffer_estimate_ms(a->jb);
+    uint64_t silence  = jitter_buffer_silence_count(a->jb);
     if (why)
-        LOGW("link: RX ended, %s  overflow=%llu silence=%llu jitter=%.1fms\n", why,
-             (unsigned long long)overflow, (unsigned long long)silence, jitter);
+        LOGW("link: RX ended, %s  overflow=%llu silence=%llu\n", why,
+             (unsigned long long)overflow, (unsigned long long)silence);
     else
-        LOGI("link: RX ended  overflow=%llu silence=%llu jitter=%.1fms\n",
-             (unsigned long long)overflow, (unsigned long long)silence, jitter);
+        LOGI("link: RX ended  overflow=%llu silence=%llu\n",
+             (unsigned long long)overflow, (unsigned long long)silence);
     jitter_buffer_flush(a->jb);
     port_on_link_keyup(a->port, false, now);
 }
@@ -646,19 +571,6 @@ static void mmdvm_unkey_edge(app_t *a, uint64_t now)
     port_on_mmdvm_keyup(a->port, false, now);
 }
 
-/* Companion to note_mmdvm_voice_pacing() on the receive side: is MMDVM-Host
- * actually delivering mmdvm-RX packets to us on the expected ~20ms
- * cadence in the first place? If gaps show up here, the irregularity
- * predates us and no amount of tuning our own send timing will fix it.
- *
- * `audio_this_call` counts FMD datagrams found waiting together. FMS and FME are
- * left out, as MMDVM-Host sends them right next to audio on every transmission.
- * Three together means audio was held up about as long as the gap warning's limit;
- * two is ordinary scheduling, which the jitter buffer absorbs. It can't say whether
- * the delay was ours or MMDVM-Host's. */
-#define MMDVM_RX_GAP_WARN_MS 35U
-#define MMDVM_RX_BURST_WARN  3
-
 /* One reframed 160-sample frame of received RF audio, fanned out to the
  * local repeat path and the link. Split out of handle_mmdvm() because a
  * single FMD datagram can now yield zero, one, or more of these. */
@@ -724,7 +636,6 @@ static void handle_mmdvm(app_t *a)
 {
     uint8_t buf[FM_MAX_PKT_LEN + 64];
     fm_packet_t pkt;
-    int audio_this_call = 0;
 
     for (;;) {
         ssize_t n = recv(a->mmdvm_sock, buf, sizeof(buf), 0);
@@ -739,13 +650,10 @@ static void handle_mmdvm(app_t *a)
         uint64_t now = monotonic_ms();
 
         /* Keepalives are not traffic: they arrive every 5 s regardless of
-         * whether anyone is talking, so they must not feed the watchdog,
-         * the pacing monitor, or the audio count. */
+         * whether anyone is talking, so they must not feed the watchdog. */
         if (pkt.type == FM_PKT_PING || pkt.type == FM_PKT_NONE)
             continue;
 
-        if (pkt.type == FM_PKT_DATA)
-            audio_this_call++;
         a->mmdvm_watchdog_deadline = now + WATCHDOG_MS;
 
         switch (pkt.type) {
@@ -760,7 +668,6 @@ static void handle_mmdvm(app_t *a)
                 LOGI("mmdvm: RX started\n");
             }
             fm_reframe_reset(&a->mmdvm_rx_reframe);
-            a->mmdvm_rx_last_ms = now;
             if (!a->prev_mmdvm_keyup) {
                 a->prev_mmdvm_keyup = true;
                 mmdvm_key_edge(a, now);
@@ -773,14 +680,7 @@ static void handle_mmdvm(app_t *a)
             if (!a->prev_mmdvm_keyup) {
                 a->prev_mmdvm_keyup = true;
                 mmdvm_key_edge(a, now);
-                a->mmdvm_rx_last_ms = now;
-            } else if (a->mmdvm_rx_last_ms != 0) {
-                uint64_t gap = now - a->mmdvm_rx_last_ms;
-                if (gap >= MMDVM_RX_GAP_WARN_MS)
-                    LOGW("audio: %llums gap between received mmdvm-RX packets (nominal 20ms) -- upstream of us\n",
-                            (unsigned long long)gap);
             }
-            a->mmdvm_rx_last_ms = now;
 
             fm_reframe_push(&a->mmdvm_rx_reframe, pkt.audio, pkt.nsamples);
 
@@ -797,7 +697,6 @@ static void handle_mmdvm(app_t *a)
             if (fm_reframe_flush(&a->mmdvm_rx_reframe, frame))
                 mmdvm_rx_frame(a, frame, now);
 
-            a->mmdvm_rx_last_ms = 0;
             if (a->prev_mmdvm_keyup) {
                 a->prev_mmdvm_keyup = false;
                 a->mmdvm_watchdog_deadline = 0;
@@ -811,12 +710,6 @@ static void handle_mmdvm(app_t *a)
             break;
         }
     }
-
-    if (audio_this_call >= MMDVM_RX_BURST_WARN)
-        LOGW("audio: %d mmdvm-RX audio packets arrived together -- a brief stall, here or in MMDVM-Host\n",
-                audio_this_call);
-    else if (audio_this_call > 1)
-        LOGD("audio: %d mmdvm-RX audio packets arrived together (normal)\n", audio_this_call);
 }
 
 /* ── link RX handling ──────────────────────────────────────────────────── */
@@ -848,7 +741,6 @@ static void handle_link(app_t *a)
         }
         if (!a->prev_link_keyup) {
             a->prev_link_keyup = true;
-            jitter_buffer_reset_silence_count(a->jb);
             port_on_link_keyup(a->port, true, now);
         }
 
@@ -921,8 +813,6 @@ static int next_timeout_ms(app_t *a, uint64_t now)
     if (a->pace_deadline) cand[nc++] = a->pace_deadline;
     if (a->prev_mmdvm_keyup && a->mmdvm_watchdog_deadline) cand[nc++] = a->mmdvm_watchdog_deadline;
     if (a->prev_link_keyup && a->link_watchdog_deadline)   cand[nc++] = a->link_watchdog_deadline;
-    if (a->heartbeat_deadline) cand[nc++] = a->heartbeat_deadline;
-    if (a->fm_ping_deadline) cand[nc++] = a->fm_ping_deadline;
     if (a->schedule_deadline) cand[nc++] = a->schedule_deadline;
     if (a->stats_deadline) cand[nc++] = a->stats_deadline;
     if (a->regen_deadline) cand[nc++] = a->regen_deadline;
@@ -962,25 +852,12 @@ static void check_all_timers(app_t *a, uint64_t now)
         LOGW("mmdvm: watchdog timeout — treating as unkey (no FME received)\n");
         a->prev_mmdvm_keyup = false;
         a->mmdvm_watchdog_deadline = 0;
-        a->mmdvm_rx_last_ms = 0;
         fm_reframe_reset(&a->mmdvm_rx_reframe);
         mmdvm_unkey_edge(a, now);
     }
 
-    if (a->fm_ping_deadline && now >= a->fm_ping_deadline) {
-        send_mmdvm_ping(a);
-        a->fm_ping_deadline = now + FM_PING_INTERVAL_MS;
-    }
     if (a->prev_link_keyup && a->link_watchdog_deadline && now >= a->link_watchdog_deadline)
         link_rx_end(a, now, "watchdog timeout, no unkey received");
-
-    if (a->heartbeat_deadline && now >= a->heartbeat_deadline) {
-        float    jitter  = jitter_buffer_estimate_ms(a->jb);
-        uint64_t silence = jitter_buffer_hb_silence_count(a->jb);
-        LOGD("link: heartbeat  jitter=%.1fms  silence(%us)=%llu\n",
-                jitter, HEARTBEAT_INTERVAL_MS / 1000u, (unsigned long long)silence);
-        a->heartbeat_deadline = now + HEARTBEAT_INTERVAL_MS;
-    }
 }
 
 /* ── main ──────────────────────────────────────────────────────────────── */
@@ -1090,7 +967,6 @@ int main(int argc, char *argv[])
             LOGE("usrp-rc: failed to init jitter buffer\n");
             return 1;
         }
-        a->heartbeat_deadline = monotonic_ms() + HEARTBEAT_INTERVAL_MS;
         if (a->cfg.link.codec == LINK_CODEC_OPUS) {
             if (opus_codec_create(&a->opus, a->cfg.link.opus_bitrate, a->cfg.link.opus_frame_ms) != 0) {
                 LOGE("usrp-rc: failed to init opus codec\n");
@@ -1140,11 +1016,6 @@ int main(int argc, char *argv[])
         schedule_update(a, monotonic_ms());
 
     port_start(a->port, monotonic_ms());
-
-    /* Symmetric with MMDVM-Host's own 5 s FMP. Host ignores inbound pings,
-     * so this is purely so a packet capture / Debug=1 log shows both ends
-     * alive rather than one-way traffic. */
-    a->fm_ping_deadline = monotonic_ms() + FM_PING_INTERVAL_MS;
 
     printf("usrp-rc %s: ready\n", USRP_RC_VERSION);
 

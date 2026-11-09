@@ -81,9 +81,3 @@ size_t fm_build_data(uint8_t *buf, const int16_t *audio, unsigned nsamples)
     return FM_TAG_LEN + (size_t)nsamples * sizeof(int16_t);
 }
 
-size_t fm_build_ping(uint8_t *buf)
-{
-    memcpy(buf, "FMP", FM_TAG_LEN);
-    return FM_TAG_LEN;
-}
-

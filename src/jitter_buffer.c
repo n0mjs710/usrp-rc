@@ -1,6 +1,5 @@
 #include "jitter_buffer.h"
 #include "usrp_protocol.h"
-#include "util.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -20,12 +19,7 @@ struct jitter_buffer {
     unsigned int     prefill_frames; /* target depth before playout starts */
     bool             priming;        /* true until count reaches prefill_frames */
     uint64_t         silence_count;
-    uint64_t         latched_silence_count;
-    uint64_t         hb_silence_count;
     uint64_t         overflow_count;
-    /* jitter estimation (diagnostic only, nothing is gated on it) */
-    uint64_t         last_push_ts;
-    float            jitter_ms;
 };
 
 int jitter_buffer_create(jitter_buffer_t **jb, unsigned int prefill_ms)
@@ -45,17 +39,6 @@ int jitter_buffer_create(jitter_buffer_t **jb, unsigned int prefill_ms)
 
 void jitter_buffer_push(jitter_buffer_t *jb, const int16_t *samples)
 {
-    uint64_t now = monotonic_ms();
-
-
-    if (jb->last_push_ts > 0) {
-        float gap = (float)(now - jb->last_push_ts);
-        float dev = gap - 20.0f;
-        if (dev < 0.0f) dev = -dev;
-        jb->jitter_ms = jb->jitter_ms * 0.9f + dev * 0.1f;
-    }
-    jb->last_push_ts = now;
-
     if (jb->count >= MAX_SLOTS) {
         /* At capacity: drop the oldest frame to make room for this one --
          * prefer fresh audio over stale backlog. */
@@ -101,12 +84,6 @@ void jitter_buffer_flush(jitter_buffer_t *jb)
     jb->read_idx = 0;
     jb->count    = 0;
     jb->priming  = true;
-    jb->last_push_ts = 0;   /* the gap to the next transmission isn't jitter */
-}
-
-float jitter_buffer_estimate_ms(const jitter_buffer_t *jb)
-{
-    return jb->jitter_ms;
 }
 
 static uint64_t take(uint64_t *v)
@@ -121,25 +98,9 @@ uint64_t jitter_buffer_overflow_count(jitter_buffer_t *jb)
     return take(&jb->overflow_count);
 }
 
-void jitter_buffer_reset_silence_count(jitter_buffer_t *jb)
+uint64_t jitter_buffer_silence_count(jitter_buffer_t *jb)
 {
-    jb->silence_count = 0;
-}
-
-void jitter_buffer_latch_silence(jitter_buffer_t *jb)
-{
-    jb->latched_silence_count = take(&jb->silence_count);
-    jb->hb_silence_count += jb->latched_silence_count;
-}
-
-uint64_t jitter_buffer_latched_silence_count(jitter_buffer_t *jb)
-{
-    return take(&jb->latched_silence_count);
-}
-
-uint64_t jitter_buffer_hb_silence_count(jitter_buffer_t *jb)
-{
-    return take(&jb->hb_silence_count);
+    return take(&jb->silence_count);
 }
 
 void jitter_buffer_destroy(jitter_buffer_t *jb)

@@ -109,15 +109,13 @@ static void test_genuine_underrun(void)
     bool real = jitter_buffer_pull(jb, out);
     CHECK(real, "prefill satisfied, first pull is real");
 
-    jitter_buffer_reset_silence_count(jb);
     real = jitter_buffer_pull(jb, out);
     CHECK(!real, "pull with nothing buffered (post-priming) returns silence");
     int16_t all_zero = 0;
     for (unsigned i = 0; i < USRP_AUDIO_FRAMES; i++) all_zero |= out[i];
     CHECK(all_zero == 0, "underrun silence is actually zeroed, not stale data");
 
-    jitter_buffer_latch_silence(jb);
-    uint64_t silence = jitter_buffer_latched_silence_count(jb);
+    uint64_t silence = jitter_buffer_silence_count(jb);
     CHECK(silence == 1, "genuine underrun is counted as silence (unlike priming silence)");
 
     jitter_buffer_destroy(jb);

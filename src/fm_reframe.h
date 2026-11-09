@@ -14,8 +14,7 @@
  * Note this reframer is NOT a jitter buffer and deliberately does no
  * timing: it holds at most one partial frame (<160 samples) and emits as
  * soon as a full frame exists, so it adds no latency of its own beyond the
- * unavoidable fill time. Delivery-timing analysis stays where it already
- * is, in main.c's pacing monitors. */
+ * unavoidable fill time. */
 
 #include <stdint.h>
 #include <string.h>

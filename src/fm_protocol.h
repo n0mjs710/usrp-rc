@@ -20,22 +20,19 @@
  *   "FMS" + callsign + NUL   start of an RF transmission (Host -> gateway)
  *   "FMD" + <S16LE samples>  audio, either direction
  *   "FME"                    end of an RF transmission (Host -> gateway)
- *   "FMP"                    keepalive ping, either direction
+ *   "FMP"                    keepalive ping (Host -> gateway; we send none)
  *
  * ASYMMETRY THAT MATTERS: MMDVM-Host only ever *accepts* FMD from the
  * gateway -- its clock() discards FMS and FME outright (FMNetwork.cpp).
  * There is no way to tell the modem "key up" or "unkey"; PTT is implicit in
  * whether audio is arriving. Stopping the FMD flow is the only unkey there
  * is, which is also why an outbound delivery stall is indistinguishable
- * from a deliberate unkey at the modem -- see note_mmdvm_voice_pacing() in
- * main.c. */
+ * from a deliberate unkey at the modem. */
 
 #define FM_TAG_LEN        3u
 #define FM_MAX_SAMPLES    160u  /* Host never sends more (FMControl.cpp caps at 160) */
 #define FM_MAX_PKT_LEN    (FM_TAG_LEN + FM_MAX_SAMPLES * sizeof(int16_t))
 
-/* Host sends a ping every 5 s; ours are symmetric and equally ignorable. */
-#define FM_PING_INTERVAL_MS 5000u
 
 /* Longest callsign we keep from an FMS packet. MMDVM-Host sends whatever is
  * in [FM] Callsign, NUL-terminated. */
@@ -70,6 +67,5 @@ int fm_parse(const uint8_t *buf, size_t len, fm_packet_t *out);
  * Returns the total packet length. nsamples must be <= FM_MAX_SAMPLES. */
 size_t fm_build_data(uint8_t *buf, const int16_t *audio, unsigned nsamples);
 
-/* Build the 3-byte "FMP" keepalive. Returns FM_TAG_LEN. MMDVM-Host takes only FMD
- * and FMP from a gateway, so there are no FMS/FME builders. */
-size_t fm_build_ping(uint8_t *buf);
+/* MMDVM-Host takes only FMD from a gateway (it discards FMP unread), so there are no
+ * other builders. */
