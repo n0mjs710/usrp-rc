@@ -70,9 +70,14 @@ The detector taps received audio ahead of the STE delay in `mmdvm_rx_frame()`.
 Replies go through `port_queue_reply()` and play from the courtesy tone delay,
 the same slot the anxious ID uses.
 
-The pad test and regen codes switch `command.c` into capturing: every key after
+Every code is a row in `CONFIG_DTMF_CODES` in `src/config.c`: its setting, its kind
+(whole code, code + 0/1, or capture) and its command. `--check` validates from that
+list and `command.c` matches against it, so a new command is a new row. Whether a
+command may run right now is one rule, `command_allowed()` in `main.c`.
+
+The capture codes (pad test, regen) switch `command.c` into capturing: every key after
 them, `#` and `D` included, goes into the entry until the unkey, which is why
-`check_consistency()` won't let another code start with either. Otherwise an entry
+`check_consistency()` won't let another code start with one. Otherwise an entry
 that no code starts with is dropped at the digit that kills it. The mute doesn't
 care: any valid tone mutes both paths, so no DTMF leaks. Regen's link copy
 is the only controller audio that goes to the link. `main.c` keys the link and paces
@@ -110,6 +115,35 @@ there, as 1477 Hz leaks into the 2 x 770 Hz bin.
 The reference controllers are the ACC RC-96 (command structure and behavior) and
 the Arcom RC-210 (mute timer, tail message triggers). Their macro sets, patches,
 and multi-port routing are deliberately not the model here.
+
+## State and timers
+
+Every timer is an absolute deadline (0 = off). `main.c` fires its own from the
+`TIMERS` table in a fixed order; the port's five (`ct_delay`, hang, the two time-outs,
+ID) are one row of it. A new timer is a new row.
+
+The stateful pieces, and where their state lives:
+
+| What | State | Driven by |
+| --- | --- | --- |
+| Port | `state`: IDLE, ACTIVE, TAIL, TIMEOUT | Keyup edges, port timers, drain continuations |
+| Controller audio | `ctrl` buffer, its one continuation `on_drain`, the ID in it, `last_audio` for the gaps | The pacing tick |
+| ID under repeat audio | `mix_*` | Each frame sent |
+| PTT | Derived: `update_ptt()` | Every port event |
+| ID owed | `id_owed`, `id_deadline`, the two rotations | PTT rising, repeated keyups, IDs starting |
+| Time-outs | Per source: the flag, the deadline; local `tot_used`/`start` | Keyups, the courtesy tone |
+| Tail messages | `tails_since_message`, `tail_last_ms`, `tail_rot` | Each hang's end |
+| Reply | `reply`, one deep | Commands; played at `ct_delay` |
+| Echo test | Port `echo_armed`, then `main.c` `echo_recording` | Command, next local keyup, unkey or hang's end |
+| Repeater down | `down`, and the state file | Repeater command |
+| Link on/off | `link_up` (the port's copy picks the courtesy tone) | Link commands |
+| Link uplink | Derived: `update_link_tx()`; `local_to_link` per transmission | Keyups, regen, link and down commands |
+| Receive, both sides | `prev_*_keyup`, the watchdogs; the reframer, the jitter buffer | Packets, watchdog timers |
+| Regen | `regen` buffer, position, deadline | Its own 20 ms row in `TIMERS` |
+| DTMF | Decoder debounce; entry digits, capture, mute | Received frames |
+| STE | Delay line, lead trim | Received frames |
+| Schedule | `schedule_active[]`; `cfg` rebuilt from `base` | Minute timer |
+| Usage | Hour buckets | Usage callback, save timer |
 
 ## Schedule
 

@@ -95,7 +95,6 @@ struct port {
     int          tails_since_message;
     uint64_t     tail_last_ms;
     int          tail_rot;
-    char         tail_name[CFG_NAME_STR];
 
     /* command reply waiting for the tail; malloc'd, NULL = none */
     int16_t     *reply;
@@ -569,12 +568,11 @@ static void tail_finish(port_t *p, uint64_t now)
 static bool tail_play(port_t *p, uint64_t now)
 {
     int idx = p->tail_rot % p->ev->n_tail_messages;
-    /* A copy, as the schedule can change the list while this plays. */
-    snprintf(p->tail_name, sizeof(p->tail_name), "%s", p->ev->tail_messages[idx]);
-    if (!queue_message(p, p->tail_name, -1.0))
+    const char *name = p->ev->tail_messages[idx];
+    if (!queue_message(p, name, -1.0))
         return false;
     p->tail_rot = (idx + 1) % p->ev->n_tail_messages;
-    LOGI("tail: '%s'\n", p->tail_name);
+    LOGI("tail: '%s'\n", name);
     p->ctrl.on_drain = tail_finish;
     p->tails_since_message = 0;
     p->tail_last_ms = now;
