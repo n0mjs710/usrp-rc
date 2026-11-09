@@ -149,9 +149,9 @@ If the repeater has no link, `70`, `72` and `73` reply "No link service".
 
 An entry that does not agree with a command has no effect. No error sound plays.
 
-When the repeater has timed out a local transmission, it accepts a command only if the
-command ends with `D`. An unkey does not enter the command. See [6.3](#63-time-out).
-Thus, the pad test and DTMF regen are not available then.
+When the repeater has timed out a local transmission, or is down, it accepts only the
+repeater command. Timed out, the command must end with `D`: an unkey does not enter it.
+See [6.3](#63-time-out) and [9.7](#97-repeater-down-and-up).
 
 ### 2.5 Pad test
 
@@ -202,7 +202,6 @@ Use this command to hear how your signal sounds through the repeater.
 - A key-up stops the playback.
 - The repeater ignores DTMF commands in the recorded transmission, including repeater
   up and down. The tones are still muted.
-- The echo test is not available when the repeater has timed out a local transmission.
 
 ### 2.8 Repeater sounds
 
@@ -211,7 +210,7 @@ Use this command to hear how your signal sounds through the repeater.
 | Courtesy tone | The transmission has ended. The next station can transmit. Different tones can show local traffic, link traffic and link off. |
 | Cover tone: a beep, one time each second | A station enters a DTMF command. |
 | Short falling tones | The time-out timer stopped a long transmission. Unkey to reset the timer. |
-| "Repeater" replies with no repeated audio | The repeater is timed out. A command that ends with `D` gets a reply. |
+| "Repeater down" or "Repeater up" with no repeated audio | The repeater is timed out or down, and a station entered the repeater command. |
 
 ---
 
@@ -1033,8 +1032,8 @@ When the repeater is down:
 
 - No audio goes through the repeater: no local repeat, no local audio to the link, and
   no link audio to the transmitter.
-- The repeater continues to decode DTMF from the receiver. Commands operate as usual,
-  but only the repeater command transmits a reply.
+- The repeater continues to decode DTMF from the receiver, but accepts only the repeater
+  command.
 - No courtesy tones, tail messages, IDs or time-outs occur.
 - The down state stays after a restart. It is kept in `[state] file`. The startup message
   does not play.

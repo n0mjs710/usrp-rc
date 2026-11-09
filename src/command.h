@@ -17,19 +17,6 @@
 
 #define COMMAND_MAX_DIGITS 32
 
-typedef enum {
-    COMMAND_PAD_TEST,   /* read `digits` back to the user */
-    COMMAND_TIME,
-    COMMAND_STATS,
-    COMMAND_LINK_ON,
-    COMMAND_LINK_OFF,
-    COMMAND_LINK_STATUS,
-    COMMAND_REPEATER,   /* digits: "0" = down, "1" = up */
-    COMMAND_NO_LINK,    /* a link command on a repeater with no link */
-    COMMAND_REGEN,      /* send `digits` as fresh DTMF, here and over the link */
-    COMMAND_ECHO,       /* record the next local transmission and play it back */
-} command_type_t;
-
 typedef struct {
     command_type_t type;
     char           digits[COMMAND_MAX_DIGITS + 1];

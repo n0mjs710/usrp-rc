@@ -1583,6 +1583,19 @@ static void check_schedule_lists(const config_t *cfg)
  * schedule window, whose settings are checked as they'd be while it's open. */
 static const char *s_where;
 
+const config_dtmf_code_t CONFIG_DTMF_CODES[] = {
+    {"time_code",        offsetof(config_dtmf_t, time_code),        CODE_WHOLE,   COMMAND_TIME,        "time"},
+    {"stats_code",       offsetof(config_dtmf_t, stats_code),       CODE_WHOLE,   COMMAND_STATS,       "usage"},
+    {"echo_code",        offsetof(config_dtmf_t, echo_code),        CODE_WHOLE,   COMMAND_ECHO,        "echo test"},
+    {"link_on_code",     offsetof(config_dtmf_t, link_on_code),     CODE_WHOLE,   COMMAND_LINK_ON,     "link on"},
+    {"link_off_code",    offsetof(config_dtmf_t, link_off_code),    CODE_WHOLE,   COMMAND_LINK_OFF,    "link off"},
+    {"link_status_code", offsetof(config_dtmf_t, link_status_code), CODE_WHOLE,   COMMAND_LINK_STATUS, "link status"},
+    {"repeater_code",    offsetof(config_dtmf_t, repeater_code),    CODE_UP_DOWN, COMMAND_REPEATER,    "repeater"},
+    {"regen_code",       offsetof(config_dtmf_t, regen_code),       CODE_CAPTURE, COMMAND_REGEN,       "regen"},
+    {"pad_test_prefix",  offsetof(config_dtmf_t, pad_test_prefix),  CODE_CAPTURE, COMMAND_PAD_TEST,    "DTMF test +"},
+};
+const size_t CONFIG_NDTMF_CODES = sizeof(CONFIG_DTMF_CODES) / sizeof(CONFIG_DTMF_CODES[0]);
+
 #define WHERE_FMT "%s%s"
 #define WHERE_ARGS s_where ? s_where : "", s_where ? ": " : ""
 
@@ -1591,56 +1604,46 @@ static void check_consistency(const config_t *cfg)
 {
     const config_events_t *ev = &cfg->events;
 
-    /* # and D are the cancel and enter keys, so a code could never be typed. The
-     * repeater code goes last: the check after this loop relies on it. */
-    static const struct { const char *key; size_t offset; } CODES[] = {
-        {"pad_test_prefix", offsetof(config_dtmf_t, pad_test_prefix)},
-        {"regen_code",      offsetof(config_dtmf_t, regen_code)},
-        {"time_code",       offsetof(config_dtmf_t, time_code)},
-        {"stats_code",      offsetof(config_dtmf_t, stats_code)},
-        {"echo_code",       offsetof(config_dtmf_t, echo_code)},
-        {"link_on_code",    offsetof(config_dtmf_t, link_on_code)},
-        {"link_off_code",   offsetof(config_dtmf_t, link_off_code)},
-        {"link_status_code", offsetof(config_dtmf_t, link_status_code)},
-        {"repeater_code",   offsetof(config_dtmf_t, repeater_code)},
-    };
-    enum { NCODES = sizeof(CODES) / sizeof(CODES[0]), NCAPTURE = 2 };
+    const config_dtmf_code_t *CODES = CONFIG_DTMF_CODES;
+    const size_t NCODES = CONFIG_NDTMF_CODES;
+#define CODE(i) ((const char *)&cfg->dtmf + CODES[i].offset)
     for (size_t i = 0; i < NCODES; i++) {
-        const char *code = (const char *)&cfg->dtmf + CODES[i].offset;
+        const char *code = CODE(i);
+        /* # and D are the cancel and enter keys, so a code could never be typed. */
         if (code[strspn(code, "0123456789*ABC")])
             cfg_err(WHERE_FMT "dtmf.%s: '%s' can only use 0-9, *, A, B and C\n", WHERE_ARGS, CODES[i].key, code);
         /* Only the pad test may be one key, as 5 is on nearly every controller. */
-        if (i > 0 && strlen(code) == 1)
+        if (CODES[i].type != COMMAND_PAD_TEST && strlen(code) == 1)
             cfg_err(WHERE_FMT "dtmf.%s: '%s' must be at least 2 keys\n", WHERE_ARGS, CODES[i].key, code);
         for (size_t j = 0; j < i; j++)
-            if (code[0] && strcmp(code, (const char *)&cfg->dtmf + CODES[j].offset) == 0)
+            if (code[0] && strcmp(code, CODE(j)) == 0)
                 cfg_err(WHERE_FMT "dtmf.%s: '%s' is already used by dtmf.%s\n", WHERE_ARGS,
                         CODES[i].key, code, CODES[j].key);
     }
-    /* The pad test and regen take every key after their code, so no other code can
-     * start with one. */
-    for (size_t i = 0; i < NCAPTURE; i++) {
-        const char *cap = (const char *)&cfg->dtmf + CODES[i].offset;
-        if (!cap[0])
+    for (size_t i = 0; i < NCODES; i++) {
+        const char *own = CODE(i);
+        if (!own[0])
             continue;
-        for (size_t j = 0; j < NCODES; j++) {
-            const char *code = (const char *)&cfg->dtmf + CODES[j].offset;
-            if (j != i && strcmp(code, cap) != 0 && strncmp(code, cap, strlen(cap)) == 0)
-                cfg_err(WHERE_FMT "dtmf.%s: '%s' starts with dtmf.%s '%s', which takes every key after it\n",
-                        WHERE_ARGS, CODES[j].key, code, CODES[i].key, cap);
+        /* A capture code takes every key after it, so no other code can start with one. */
+        if (CODES[i].kind == CODE_CAPTURE) {
+            for (size_t j = 0; j < NCODES; j++)
+                if (j != i && strcmp(CODE(j), own) != 0 && strncmp(CODE(j), own, strlen(own)) == 0)
+                    cfg_err(WHERE_FMT "dtmf.%s: '%s' starts with dtmf.%s '%s', which takes every key after it\n",
+                            WHERE_ARGS, CODES[j].key, CODE(j), CODES[i].key, own);
+        }
+        /* An up/down command is its code plus 0 or 1, so those can't be other codes. */
+        if (CODES[i].kind == CODE_UP_DOWN) {
+            for (int arg = 0; arg < 2; arg++) {
+                char full[CFG_DTMF_PREFIX_STR + 2];
+                snprintf(full, sizeof(full), "%s%d", own, arg);
+                for (size_t j = 0; j < NCODES; j++)
+                    if (j != i && strcmp(full, CODE(j)) == 0)
+                        cfg_err(WHERE_FMT "dtmf.%s: '%s' is already used by dtmf.%s\n", WHERE_ARGS,
+                                CODES[i].key, full, CODES[j].key);
+            }
         }
     }
-    /* The repeater command is its code plus 0 or 1, so those can't be other codes. */
-    if (cfg->dtmf.repeater_code[0]) {
-        for (int arg = 0; arg < 2; arg++) {
-            char full[CFG_DTMF_PREFIX_STR + 2];
-            snprintf(full, sizeof(full), "%s%d", cfg->dtmf.repeater_code, arg);
-            for (size_t j = 0; j + 1 < NCODES; j++)
-                if (strcmp(full, (const char *)&cfg->dtmf + CODES[j].offset) == 0)
-                    cfg_err(WHERE_FMT "dtmf.repeater_code: '%s' is already used by dtmf.%s\n", WHERE_ARGS,
-                            full, CODES[j].key);
-        }
-    }
+#undef CODE
     if (cfg->dtmf.mute_hang_ms >= cfg->dtmf.interdigit_ms)
         cfg_err(WHERE_FMT "dtmf.mute_hang_ms (%d) must be less than dtmf.interdigit_ms (%d)\n", WHERE_ARGS,
                 cfg->dtmf.mute_hang_ms, cfg->dtmf.interdigit_ms);

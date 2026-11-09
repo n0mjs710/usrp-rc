@@ -797,17 +797,14 @@ void port_on_link_keyup(port_t *p, bool active, uint64_t now)
     update_ptt(p);
 }
 
-bool port_arm_echo(port_t *p)
+void port_arm_echo(port_t *p)
 {
-    if (p->down || p->state == PORT_TIMEOUT)
-        return false;
     p->echo_armed = true;
-    return true;
 }
 
 bool port_take_echo(port_t *p)
 {
-    bool armed = p->echo_armed && !p->down;
+    bool armed = p->echo_armed;
     p->echo_armed = false;
     return armed;
 }
@@ -815,22 +812,8 @@ bool port_take_echo(port_t *p)
 void port_queue_reply(port_t *p, int16_t *samples, size_t n)
 {
     reply_discard(p);
-    /* Down, only the up/down command itself transmits. */
-    if (!samples || n == 0 || p->down) {
-        if (p->down && samples)
-            LOGI("port: repeater down, no reply\n");
+    if (!samples || n == 0) {
         free(samples);
-        return;
-    }
-    /* Timed out, nothing is being repeated, so there's no tail to wait for: key up,
-     * reply and drop back. Receiver audio stays off. */
-    if (p->state == PORT_TIMEOUT) {
-        p->tx_activity = true;
-        lead_in(p);
-        ctrl_buf_queue(p, samples, n);
-        free(samples);
-        pad_before_drop(p);
-        update_ptt(p);
         return;
     }
     p->reply     = samples;

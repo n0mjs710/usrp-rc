@@ -42,14 +42,12 @@ void port_on_mmdvm_keyup(port_t *p, bool active, uint64_t now);
 void port_on_link_keyup(port_t *p, bool active, uint64_t now);
 
 /* Queue a spoken command reply. It plays in the tail after the transmission, ahead
- * of the courtesy tone, and a new keyup interrupts it. Takes ownership of samples.
- * In TIMEOUT it plays at once on its own transmission, without receiver audio. */
+ * of the courtesy tone, and a new keyup interrupts it. Takes ownership of samples. */
 void port_queue_reply(port_t *p, int16_t *samples, size_t n);
 
 /* Echo test. Arming waits for the next local keyup, which port_take_echo() claims for
- * recording. If the tail ends first, echo_cancel_message plays. Arming fails when the
- * repeater is down or timed out. */
-bool port_arm_echo(port_t *p);
+ * recording. If the tail ends first, echo_cancel_message plays. Going down clears it. */
+void port_arm_echo(port_t *p);
 bool port_take_echo(port_t *p);
 
 /* Tell the port whether the link is on, which selects the local courtesy tone.

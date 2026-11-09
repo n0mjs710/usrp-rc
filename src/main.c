@@ -536,8 +536,8 @@ static void run_command(app_t *a, const command_t *c)
         reply_with_message(a, a->link_up ? a->cfg.events.link_on_message : a->cfg.events.link_off_message);
         break;
     case COMMAND_ECHO:
-        if (port_arm_echo(a->port))
-            reply_with_message(a, a->cfg.events.echo_message);
+        port_arm_echo(a->port);
+        reply_with_message(a, a->cfg.events.echo_message);
         break;
     case COMMAND_NO_LINK:
         reply_with_message(a, a->cfg.events.link_none_message);
@@ -580,12 +580,25 @@ static void run_command(app_t *a, const command_t *c)
     }
 }
 
-/* Nothing said during an echo test recording is a command, repeater up/down included. */
+/* The one rule for when a command may run. Nothing does during an echo test recording.
+ * Timed out or down, only repeater up/down does: the control operator's way back. */
+static bool command_allowed(const app_t *a, const command_t *c)
+{
+    const char *why = NULL;
+    if (a->echo_recording)
+        why = "echo test recording";
+    else if (c->type != COMMAND_REPEATER && port_repeater_down(a->port))
+        why = "repeater down";
+    else if (c->type != COMMAND_REPEATER && port_local_timed_out(a->port))
+        why = "timed out";
+    if (why)
+        LOGI("dtmf: command dropped, %s\n", why);
+    return !why;
+}
+
 static void run_or_drop_command(app_t *a, const command_t *c)
 {
-    if (a->echo_recording)
-        LOGI("dtmf: command dropped, echo test recording\n");
-    else
+    if (command_allowed(a, c))
         run_command(a, c);
 }
 
@@ -598,12 +611,10 @@ static void mmdvm_unkey_edge(app_t *a, uint64_t now)
      * Timed out, a command has to end in D: an unkey doesn't enter it. */
     command_t c;
     bool have = false;
-    if (a->cmd && a->echo_recording)
-        command_session_end_of_tx_discard(a->cmd, "echo test recording");
-    else if (a->cmd && port_local_timed_out(a->port))
+    if (a->cmd && port_local_timed_out(a->port))
         command_session_end_of_tx_discard(a->cmd, "timed out, a command must end with D");
     else if (a->cmd)
-        have = command_session_end_of_tx(a->cmd, &c);
+        have = command_session_end_of_tx(a->cmd, &c) && command_allowed(a, &c);
     a->link_tx_ended = false;
 
     int16_t *echo = NULL;

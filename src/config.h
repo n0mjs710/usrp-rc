@@ -152,6 +152,39 @@ typedef struct {
     double regen_level;
 } config_dtmf_t;
 
+/* What each DTMF code does when matched; the commands are carried out in main.c. */
+typedef enum {
+    COMMAND_PAD_TEST,   /* read `digits` back to the user */
+    COMMAND_TIME,
+    COMMAND_STATS,
+    COMMAND_LINK_ON,
+    COMMAND_LINK_OFF,
+    COMMAND_LINK_STATUS,
+    COMMAND_REPEATER,   /* digits: "0" = down, "1" = up */
+    COMMAND_NO_LINK,    /* a link command on a repeater with no link */
+    COMMAND_REGEN,      /* send `digits` as fresh DTMF, here and over the link */
+    COMMAND_ECHO,       /* record the next local transmission and play it back */
+} command_type_t;
+
+typedef enum {
+    CODE_WHOLE,     /* the code alone */
+    CODE_UP_DOWN,   /* the code + 0 or 1 */
+    CODE_CAPTURE,   /* the code + every key after it, # and D included, to the unkey */
+} code_kind_t;
+
+/* Every DTMF code, in matching order: whole codes win over the code + argument forms.
+ * --check validates them and command.c matches against them, both from this list. */
+typedef struct {
+    const char    *key;      /* in [dtmf] */
+    size_t         offset;   /* in config_dtmf_t */
+    code_kind_t    kind;
+    command_type_t type;
+    const char    *name;     /* for the log */
+} config_dtmf_code_t;
+
+extern const config_dtmf_code_t CONFIG_DTMF_CODES[];
+extern const size_t CONFIG_NDTMF_CODES;
+
 typedef struct {
     char startup_message[CFG_NAME_STR];
     char initial_ids[CFG_MAX_ID_ROTATION][CFG_NAME_STR];

@@ -42,15 +42,48 @@ static void clear_digits(command_session_t *s)
     s->capturing = false;
 }
 
-/* Match what was entered against the commands, highest tier first:
+/* Every command, in matching order: whole codes win over the code + argument forms.
  *
  *   Programming: a stub for now. The config file is the programming interface;
  *                a DTMF unlock would go here if a use for one turns up.
  *   Control op:  no commands yet. They'll sit behind a definable prefix.
- *   User:        the pad test, time, usage figures, echo test, link on, link off, link status,
- *                DTMF regen, and repeater down/up (its code plus 0 or 1; no code by
- *                default, as anyone could use it until the control operator tier exists).
+ *   User:        all of these. The repeater code is empty by default, as anyone could
+ *                use it until the control operator tier exists.
  */
+#define CODES  CONFIG_DTMF_CODES
+#define NCODES CONFIG_NDTMF_CODES
+
+static const char *code_of(const command_session_t *s, size_t i)
+{
+    return (const char *)&s->cfg->dtmf + CODES[i].offset;
+}
+
+static bool is_link_command(command_type_t t)
+{
+    return t == COMMAND_LINK_ON || t == COMMAND_LINK_OFF || t == COMMAND_LINK_STATUS;
+}
+
+/* Does what was entered match CODES[i]? `whole` asks for a complete command; without
+ * it, whether more keys could still complete one. */
+static bool matches(const command_session_t *s, size_t i, bool whole)
+{
+    const char *code = code_of(s, i);
+    size_t len = strlen(code), n = (size_t)s->ndigits;
+    if (!len || strncmp(s->digits, code, n < len ? n : len) != 0)
+        return false;
+    if (n < len)
+        return !whole;
+    switch (CODES[i].kind) {
+    case CODE_WHOLE:   return n == len;
+    case CODE_UP_DOWN:
+        if (n == len)
+            return !whole;
+        return n == len + 1 && (s->digits[len] == '0' || s->digits[len] == '1');
+    case CODE_CAPTURE: return n > len || !whole;
+    }
+    return false;
+}
+
 static bool evaluate(command_session_t *s, command_t *out)
 {
     if (s->ndigits == 0)
@@ -61,64 +94,22 @@ static bool evaluate(command_session_t *s, command_t *out)
         return false;
     }
 
-    const config_dtmf_t *d = &s->cfg->dtmf;
-
-    /* Whole codes win over the pad test's prefix, which matches anything after it. */
-    static const struct { command_type_t type; size_t offset; const char *name; } CODES[] = {
-        {COMMAND_TIME,     offsetof(config_dtmf_t, time_code),     "time"},
-        {COMMAND_STATS,    offsetof(config_dtmf_t, stats_code),    "usage"},
-        {COMMAND_ECHO,     offsetof(config_dtmf_t, echo_code),     "echo test"},
-        {COMMAND_LINK_ON,  offsetof(config_dtmf_t, link_on_code),  "link on"},
-        {COMMAND_LINK_OFF, offsetof(config_dtmf_t, link_off_code), "link off"},
-        {COMMAND_LINK_STATUS, offsetof(config_dtmf_t, link_status_code), "link status"},
-    };
-    for (size_t i = 0; i < sizeof(CODES) / sizeof(CODES[0]); i++) {
-        const char *code = (const char *)d + CODES[i].offset;
-        if (!code[0] || strcmp(s->digits, code) != 0)
+    for (size_t i = 0; i < NCODES; i++) {
+        if (!matches(s, i, true))
             continue;
-        bool needs_link = CODES[i].type == COMMAND_LINK_ON || CODES[i].type == COMMAND_LINK_OFF
-                       || CODES[i].type == COMMAND_LINK_STATUS;
-        if (needs_link && !s->cfg->link.enabled) {
+        const char *arg = s->digits + strlen(code_of(s, i));
+        out->type = CODES[i].type;
+        snprintf(out->digits, sizeof(out->digits), "%s", arg);
+        if (is_link_command(out->type) && !s->cfg->link.enabled) {
             LOGI("dtmf: '%s': ERROR command = %s, no link service\n", s->digits, CODES[i].name);
             out->type = COMMAND_NO_LINK;
-            out->digits[0] = '\0';
-            clear_digits(s);
-            return true;
+        } else if (CODES[i].kind == CODE_UP_DOWN) {
+            LOGI("dtmf: '%s': ACCEPTED command = %s %s\n", s->digits, CODES[i].name, *arg == '1' ? "up" : "down");
+        } else if (CODES[i].kind == CODE_CAPTURE) {
+            LOGI("dtmf: '%s': ACCEPTED command = %s %s\n", s->digits, CODES[i].name, arg);
+        } else {
+            LOGI("dtmf: '%s': ACCEPTED command = %s\n", s->digits, CODES[i].name);
         }
-        LOGI("dtmf: '%s': ACCEPTED command = %s\n", s->digits, CODES[i].name);
-        out->type = CODES[i].type;
-        out->digits[0] = '\0';
-        clear_digits(s);
-        return true;
-    }
-
-    size_t rlen = strlen(d->repeater_code);
-    if (rlen && (size_t)s->ndigits == rlen + 1 && strncmp(s->digits, d->repeater_code, rlen) == 0
-        && (s->digits[rlen] == '0' || s->digits[rlen] == '1')) {
-        out->type = COMMAND_REPEATER;
-        out->digits[0] = s->digits[rlen];
-        out->digits[1] = '\0';
-        LOGI("dtmf: '%s': ACCEPTED command = repeater %s\n", s->digits, out->digits[0] == '1' ? "up" : "down");
-        clear_digits(s);
-        return true;
-    }
-
-    size_t glen = strlen(d->regen_code);
-    if (glen && strncmp(s->digits, d->regen_code, glen) == 0 && s->digits[glen]) {
-        out->type = COMMAND_REGEN;
-        snprintf(out->digits, sizeof(out->digits), "%s", s->digits + glen);
-        LOGI("dtmf: '%s': ACCEPTED command = regen %s\n", s->digits, out->digits);
-        clear_digits(s);
-        return true;
-    }
-
-    const char *prefix = d->pad_test_prefix;
-    size_t plen = strlen(prefix);
-
-    if (plen && strncmp(s->digits, prefix, plen) == 0 && s->digits[plen]) {
-        out->type = COMMAND_PAD_TEST;
-        snprintf(out->digits, sizeof(out->digits), "%s", s->digits + plen);
-        LOGI("dtmf: '%s': ACCEPTED command = DTMF test + %s\n", s->digits, out->digits);
         clear_digits(s);
         return true;
     }
@@ -128,29 +119,21 @@ static bool evaluate(command_session_t *s, command_t *out)
     return false;
 }
 
-/* Could more digits still make a command? The pad test and regen take anything after
- * their codes. */
+/* Could more digits still make a command? */
 static bool live(const command_session_t *s)
 {
-    const config_dtmf_t *d = &s->cfg->dtmf;
-    const char *codes[] = {d->time_code, d->stats_code, d->echo_code, d->link_on_code,
-                           d->link_off_code, d->link_status_code, d->repeater_code,
-                           d->regen_code, d->pad_test_prefix};
-    size_t n = (size_t)s->ndigits;
-    for (size_t i = 0; i < sizeof(codes) / sizeof(codes[0]); i++) {
-        size_t len = strlen(codes[i]);
-        if (!len)
-            continue;
-        if (strncmp(s->digits, codes[i], n < len ? n : len) != 0)
-            continue;
-        if (n <= len)
+    for (size_t i = 0; i < NCODES; i++)
+        if (matches(s, i, false))
             return true;
-        if (codes[i] == d->repeater_code && n == len + 1
-            && (s->digits[len] == '0' || s->digits[len] == '1'))
+    return false;
+}
+
+/* Past a capture code, every key counts to the unkey. */
+static bool at_capture_code(const command_session_t *s)
+{
+    for (size_t i = 0; i < NCODES; i++)
+        if (CODES[i].kind == CODE_CAPTURE && code_of(s, i)[0] && strcmp(s->digits, code_of(s, i)) == 0)
             return true;
-        if (codes[i] == d->regen_code || codes[i] == d->pad_test_prefix)
-            return true;
-    }
     return false;
 }
 
@@ -185,12 +168,7 @@ static void on_digit(command_session_t *s, char digit, bool *terminated)
         s->overflowed = true;
     }
 
-    /* The pad test and regen read every key after their code, # and D included,
-     * so only the unkey ends them. */
-    const config_dtmf_t *d = &s->cfg->dtmf;
-    if (!s->capturing && !s->overflowed
-        && ((d->pad_test_prefix[0] && strcmp(s->digits, d->pad_test_prefix) == 0)
-            || (d->regen_code[0] && strcmp(s->digits, d->regen_code) == 0))) {
+    if (!s->capturing && !s->overflowed && at_capture_code(s)) {
         s->capturing = true;
         LOGD("dtmf: '%s': every key to the unkey counts\n", s->digits);
     }

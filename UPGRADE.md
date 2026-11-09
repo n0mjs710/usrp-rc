@@ -40,6 +40,8 @@ These changes apply when you update from 1.0b.
 
 ### Changes in operation
 
+- When the repeater is timed out or down, it accepts only the repeater command. Other
+  commands are ignored, also with `D`.
 - The ID timer starts when an ID starts, not when it ends. The time between the
   starts of two IDs is now `id_interval`.
 - `pre_message_ms` and `post_message_ms` now apply each time the controller keys the

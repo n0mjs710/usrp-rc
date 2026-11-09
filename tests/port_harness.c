@@ -1063,12 +1063,6 @@ static bool scenario_timeout_per_source(config_t *base, vocab_cache_t *vocab)
         CHECK(port_link_gate_open(p) && port_ptt(p), "... while link traffic is still repeated");
         wait_ms(p, 2000); link_key(p, false); wait_ms(p, 3000);
         CHECK(!port_ptt(p), "... and after the link's tail, the transmitter drops");
-        int16_t *reply = calloc(800, sizeof(int16_t));
-        for (int i = 0; i < 800; i++) reply[i] = 1000;
-        port_queue_reply(p, reply, 800);
-        CHECK(port_ptt(p) && !port_mmdvm_gate_open(p), "a reply while timed out keys up without receiver audio");
-        wait_ms(p, 400);
-        CHECK(!port_ptt(p), "... and drops back once it has played");
         key_local(p, false); wait_until_idle(p, 8000);
     });
     CHECK(strstr(log, "recovered") != NULL, "... and it recovers when the local carrier drops");
@@ -1316,7 +1310,7 @@ static bool scenario_echo(config_t *base, vocab_cache_t *vocab)
         prime(p);
         key_local(p, true);
         wait_ms(p, 150);
-        CHECK(port_arm_echo(p), "armed by the command");
+        port_arm_echo(p);
         key_local(p, false);
         CHECK(wait_for_log(p, "echo: cancelled", 8000), "no keyup: cancelled as the tail ends");
         CHECK(port_ptt(p), "... with the transmitter still on");
@@ -1343,9 +1337,11 @@ static bool scenario_echo(config_t *base, vocab_cache_t *vocab)
     CHECK(!strstr(log, "echo: cancelled"), "... and the tail ends without a cancel");
     free(log); port_destroy(p);
 
+    /* Going down clears the arming. */
     p = fresh_port(&cfg, vocab);
+    port_arm_echo(p);
     port_set_repeater_down(p, true, NULL, 0, g_now);
-    CHECK(!port_arm_echo(p), "not available with the repeater down");
+    CHECK(!port_take_echo(p), "going down clears the arming");
     port_destroy(p);
 
     printf(ok ? "[21] PASS\n" : "[21] FAIL\n");
