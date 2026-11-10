@@ -1,6 +1,6 @@
 # usrp-rc Operation and Reference Manual
 
-This manual applies to `usrp-rc` version 1.0b. To see the installed version, enter
+This manual applies to `usrp-rc` version 1.0. To see the installed version, enter
 `usrp-rc --version`. For installation and MMDVM-Host integration, see
 [README.md](README.md).
 

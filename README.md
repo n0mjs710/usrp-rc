@@ -27,7 +27,7 @@ Buffington, N0MJS.
 
 For operation and the settings reference, see [MANUAL.md](MANUAL.md).
 
-Version: 1.0b (beta). To update from an earlier `main`, see [UPGRADE.md](UPGRADE.md).
+Version: 1.0. To update from 1.0b or an earlier `main`, see [UPGRADE.md](UPGRADE.md).
 
 > [!WARNING]
 > **MMDVM-Host FM audio quality.** At the date of this document (November 2026),
@@ -35,7 +35,9 @@ Version: 1.0b (beta). To update from an earlier `main`, see [UPGRADE.md](UPGRADE
 > crackles, distortion and an incorrect frequency response (EQ). The defects are worst
 > on the network and with `[FM] LinkMode=1`, because these two functions use the same
 > code path. For the best performance, use the patched versions of MMDVM and MMDVM-Host
-> at [github.com/n0mjs710](https://github.com/n0mjs710).
+> at [github.com/n0mjs710](https://github.com/n0mjs710). The fixes are submitted
+> upstream as [g4klx/MMDVM#365](https://github.com/g4klx/MMDVM/pull/365) and
+> [g4klx/MMDVM-Host#902](https://github.com/g4klx/MMDVM-Host/pull/902).
 
 ## Contents
 
