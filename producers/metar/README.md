@@ -28,6 +28,9 @@ The producer writes one file for each field to `<dir>/<name>/`. The default is
 - Each file is written to a temp file, then renamed.
 - If the fetch fails, the producer writes nothing and exits with status 1. The files
   then become stale.
+- usrp-rc does not speak a variable that has a word with no clip. Thus, the producer
+  looks in the installed `user_8k/` and `vocab_8k/`, and writes a field with a missing word as an
+  empty file. It records each such field in the log as DROPPED, with the missing words.
 
 ## Options
 
@@ -38,9 +41,9 @@ The producer writes one file for each field to `<dir>/<name>/`. The default is
 | `--source-words` | Words for `source`, for example the name of the airport. The default is the station letters, without the K of a US station. |
 | `--pressure-word` | Label for `pressure`. The default is `PRESSURE`; `ALTIMETER` is also possible. |
 | `--print` | Print the fields. Write no files. |
-| `--check` | List the words that are not voice clips. Exit status 2 if there are any. |
 | `--wav FILE` | Also join the clips of all fields into one WAV file, to listen to |
 | `--json FILE` | Read a report from a file, not the network |
+| `--vocab DIR` | Clip directory, user clips first. Repeatable. The default is the installed usrp-rc directories, `/usr/local/share/usrp-rc/user_8k` and `vocab_8k`. |
 
 ## Installation (sample)
 

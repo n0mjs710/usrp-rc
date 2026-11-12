@@ -23,6 +23,8 @@ import wave
 
 API = "https://aviationweather.gov/api/data/metar?ids={station}&format=json"
 USER_AGENT = "usrp-rc-metar/0.1"
+# Where an installed usrp-rc keeps its clips, site clips first.
+VOCAB_DIRS = ["/usr/local/share/usrp-rc/user_8k", "/usr/local/share/usrp-rc/vocab_8k"]
 FIELDS = ("source", "time", "wind", "visibility", "sky", "weather",
           "temp", "dewpoint", "humidity", "pressure")
 
@@ -265,6 +267,18 @@ def vocab_index(dirs):
     return index
 
 
+def drop_unspeakable(fields, index):
+    """usrp-rc drops a variable whole if any clip is missing, so a field with a word
+    that is not a clip is written empty. Returns {field: [missing words]}."""
+    dropped = {}
+    for name, words in fields.items():
+        missing = [w for w in words if w not in index]
+        if missing:
+            dropped[name] = missing
+            fields[name] = []
+    return dropped
+
+
 def write_wav(fields, index, path, gap_ms):
     silence = b"\0\0" * (8 * gap_ms)
     with wave.open(path, "wb") as out:
@@ -275,9 +289,8 @@ def write_wav(fields, index, path, gap_ms):
             if not words:
                 continue
             for w in words:
-                if w in index:
-                    with wave.open(index[w], "rb") as clip:
-                        out.writeframes(clip.readframes(clip.getnframes()))
+                with wave.open(index[w], "rb") as clip:
+                    out.writeframes(clip.readframes(clip.getnframes()))
             out.writeframes(silence)
 
 
@@ -291,8 +304,6 @@ def fetch(station, timeout):
 
 
 def main():
-    here = os.path.dirname(os.path.abspath(__file__))
-    repo = os.path.normpath(os.path.join(here, "..", ".."))
     p = argparse.ArgumentParser(description="METAR producer for usrp-rc.")
     p.add_argument("--station", required=True, help="ICAO station, e.g. KLWC")
     p.add_argument("--dir", default="/run/usrp-rc/ext", help="producer directory (default %(default)s)")
@@ -302,11 +313,10 @@ def main():
     p.add_argument("--timeout", type=float, default=20, help="fetch timeout, seconds")
     p.add_argument("--json", help="read the report from this file, not the network (testing)")
     p.add_argument("--print", action="store_true", help="print the fields; write no files")
-    p.add_argument("--check", action="store_true", help="list words that are not voice clips")
     p.add_argument("--wav", help="also render the fields, in order, to this WAV file")
     p.add_argument("--vocab", action="append",
-                   help="clip directory for --check and --wav, user clips first; repeatable "
-                        "(default: user_8k and vocab_8k of this repository)")
+                   help="clip directory, user clips first; repeatable "
+                        "(default: the installed usrp-rc clip directories)")
     args = p.parse_args()
     args.station = args.station.upper()
 
@@ -318,9 +328,16 @@ def main():
         else:
             r = fetch(args.station, args.timeout)
         fields = decode(r, args)
+        dirs = args.vocab or VOCAB_DIRS
+        index = vocab_index(dirs)
+        if not index:
+            raise ValueError("no voice clips found in " + " ".join(dirs))
     except Exception as e:
         print(f"metar: {args.station} FAILED: {e}", file=sys.stderr)
         return 1
+
+    for name, missing in drop_unspeakable(fields, index).items():
+        print(f"metar: {args.name}.{name} DROPPED, no clip for: {' '.join(missing)}", file=sys.stderr)
 
     if args.print:
         for name in FIELDS:
@@ -328,21 +345,13 @@ def main():
     else:
         write_fields(fields, os.path.join(args.dir, args.name), r["obsTime"])
 
-    status = 0
-    if args.check or args.wav:
-        dirs = args.vocab or [os.path.join(repo, "user_8k"), os.path.join(repo, "vocab_8k")]
-        index = vocab_index(dirs)
-        missing = sorted({w for words in fields.values() for w in words if w not in index})
-        if args.check and missing:
-            print(f"metar: MISSING clips: {' '.join(missing)}", file=sys.stderr)
-            status = 2
-        if args.wav:
-            write_wav(fields, index, args.wav, 300)
+    if args.wav:
+        write_wav(fields, index, args.wav, 300)
 
     age = int(time.time() - r["obsTime"]) // 60
     print(f"metar: {args.station} {'DECODED' if args.print else 'WRITTEN'}, "
           f"observed {age} min ago", file=sys.stderr)
-    return status
+    return 0
 
 
 if __name__ == "__main__":

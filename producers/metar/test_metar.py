@@ -151,6 +151,15 @@ class TempPressure(unittest.TestCase):
         self.assertEqual(say(metar.f_pressure(r, "ALTIMETER")), "ALTIMETER TWENTY NINE POINT NINE TWO")
 
 
+class Drop(unittest.TestCase):
+    def test_field_with_missing_clip_is_emptied(self):
+        fields = {"temp": ["TEMPERATURE", "FORTY"], "humidity": ["RELATIVE", "HUMIDITY", "FORTY"]}
+        index = {"TEMPERATURE": "", "FORTY": "", "PERCENT": ""}
+        dropped = metar.drop_unspeakable(fields, index)
+        self.assertEqual(dropped, {"humidity": ["RELATIVE", "HUMIDITY"]})
+        self.assertEqual(fields, {"temp": ["TEMPERATURE", "FORTY"], "humidity": []})
+
+
 class Files(unittest.TestCase):
     def test_write_contract(self):
         r = report("METAR KLWC 121352Z AUTO 32007KT 8SM CLR 06/04 A3012 RMK AO1")
