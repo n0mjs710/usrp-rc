@@ -1,0 +1,349 @@
+#!/usr/bin/env python3
+"""METAR producer for usrp-rc.
+
+Fetches the latest METAR for one station from the NOAA Aviation Weather Center,
+turns each field into voice-clip words, and writes one file per field to
+<dir>/<name>/. Each file's mtime is the observation time, so usrp-rc judges the
+age of the data, not the age of the fetch. A failed fetch writes nothing; the
+files then go stale on their own.
+
+Only the Python standard library is used.
+"""
+
+import argparse
+import json
+import math
+import os
+import re
+import sys
+import tempfile
+import time
+import urllib.request
+import wave
+
+API = "https://aviationweather.gov/api/data/metar?ids={station}&format=json"
+USER_AGENT = "usrp-rc-metar/0.1"
+FIELDS = ("source", "time", "wind", "visibility", "sky", "weather",
+          "temp", "dewpoint", "humidity", "pressure")
+
+# ---------------------------------------------------------------- numbers
+
+ONES = ["ZERO", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE",
+        "TEN", "ELEVEN", "TWELVE", "THIRTEEN", "FOURTEEN", "FIFTEEN", "SIXTEEN",
+        "SEVENTEEN", "EIGHTEEN", "NINETEEN"]
+TENS = ["", "", "TWENTY", "THIRTY", "FORTY", "FIFTY", "SIXTY", "SEVENTY", "EIGHTY", "NINETY"]
+
+
+def number(v):
+    """A whole number as spoken words: 72 -> SEVENTY TWO, -5 -> MINUS FIVE."""
+    v = int(v)
+    if v < 0:
+        return ["MINUS"] + number(-v)
+    if v < 20:
+        return [ONES[v]]
+    if v < 100:
+        return [TENS[v // 10]] + ([ONES[v % 10]] if v % 10 else [])
+    if v < 1000:
+        return [ONES[v // 100], "HUNDRED"] + (number(v % 100) if v % 100 else [])
+    return number(v // 1000) + ["THOUSAND"] + (number(v % 1000) if v % 1000 else [])
+
+
+def feet(v):
+    """Cloud heights as spoken: 3500 -> THREE THOUSAND FIVE HUNDRED."""
+    return number(v)
+
+
+# ---------------------------------------------------------------- fields
+
+def f_source(station, words):
+    if words:
+        return words.split()
+    if len(station) == 4 and station.startswith("K"):
+        station = station[1:]               # US stations: KLWC is said as L W C
+    return [ONES[int(c)] if c.isdigit() else c for c in station]
+
+
+def f_time(obs_time):
+    t = time.localtime(obs_time)
+    hour = t.tm_hour % 12 or 12
+    words = ["TIME"] + number(hour)
+    if t.tm_min == 0:
+        pass
+    elif t.tm_min < 10:
+        words += ["ZERO"] + number(t.tm_min)    # OH is not in the male vocab
+    else:
+        words += number(t.tm_min)
+    return words + ["A_M" if t.tm_hour < 12 else "P_M"]
+
+
+def mph(knots):
+    """Knots to miles per hour. No unit word is spoken."""
+    return round(knots * 1.15078)
+
+
+def f_wind(r):
+    wdir, wspd = r.get("wdir"), r.get("wspd")
+    if wspd is None:
+        return ["WIND", "NOT", "AVAILABLE"]
+    if wspd == 0:
+        return ["WIND", "CALM"]
+    if wdir == "VRB" or wdir is None:
+        words = ["WIND", "VARIABLE"]
+    else:
+        words = ["WIND"] + [ONES[int(c)] for c in f"{int(wdir):03d}"]     # 330: THREE THREE ZERO
+    words += ["AT"] + number(mph(wspd))
+    if r.get("wgst"):
+        words += ["GUSTING_TO"] + number(mph(r["wgst"]))
+    return words
+
+
+VIS_RE = re.compile(r"\s(M|P)?(?:(\d+)\s)?(\d+)(?:/(\d+))?SM\b")
+
+
+def f_visibility(raw):
+    m = VIS_RE.search(raw)
+    if not m:
+        return ["VISIBILITY", "NOT", "AVAILABLE"]
+    bound, whole, num, den = m.groups()
+    if den:
+        whole = int(whole or 0)
+        frac = {(1, 4): ["ONE", "QUARTER"], (1, 2): ["ONE", "HALF"],
+                (3, 4): ["THREE", "QUARTERS"], (1, 8): ["ONE", "EIGHTH"],
+                (3, 8): ["THREE", "EIGHTHS"], (5, 8): ["FIVE", "EIGHTHS"],
+                (7, 8): ["SEVEN", "EIGHTHS"], (1, 16): ["ONE", "SIXTEENTH"]
+                }.get((int(num), int(den)), number(int(num)) + ["OVER"] + number(int(den)))
+        value = (number(whole) + ["AND_A"] + frac) if whole else frac
+    else:
+        value = number(int(num))
+    prefix = {"M": ["LESS", "THAN"], "P": ["MORE", "THAN"]}.get(bound, [])
+    return ["VISIBILITY"] + prefix + value      # statute miles, no unit word
+
+
+COVER_RANK = {"FEW": 1, "SCT": 2, "BKN": 3, "OVC": 4, "OVX": 4}
+COVER_WORDS = {1: ["FEW", "CLOUDS"], 2: ["PARTLY", "CLOUDY"],
+               3: ["MOSTLY", "CLOUDY"], 4: ["OVERCAST"]}
+
+
+def f_sky(r):
+    clouds = r.get("clouds") or []
+    if not clouds:
+        if r.get("cover") in ("CLR", "SKC", "CAVOK", "NSC", "NCD"):
+            return ["SKY", "CLEAR"]
+        return ["SKY", "CONDITION", "NOT", "AVAILABLE"]
+    if any(c.get("cover") == "VV" for c in clouds):
+        vv = next(c for c in clouds if c.get("cover") == "VV")
+        words = ["SKY", "OBSCURED"]
+        if vv.get("base") is not None:
+            words += ["CEILING"] + feet(vv["base"])
+        return words
+    worst = max(COVER_RANK.get(c.get("cover"), 0) for c in clouds)
+    words = list(COVER_WORDS.get(worst, ["SKY", "CONDITION", "NOT", "AVAILABLE"]))
+    ceilings = [c["base"] for c in clouds
+                if COVER_RANK.get(c.get("cover"), 0) >= 3 and c.get("base") is not None]
+    if ceilings:
+        words += ["CEILING"] + feet(min(ceilings))
+    return words
+
+
+DESCRIPTORS = {"MI": ["SHALLOW"], "PR": ["PARTIAL"], "BC": ["PATCHES", "OF"],
+               "DR": ["DRIFTING"], "BL": ["BLOWING"], "FZ": ["FREEZING"]}
+PHENOMENA = {"DZ": ["DRIZZLE"], "RA": ["RAIN"], "SN": ["SNOW"], "SG": ["SNOW", "GRAINS"],
+             "IC": ["ICE", "CRYSTALS"], "PL": ["ICE", "PELLETS"], "GR": ["HAIL"],
+             "GS": ["SMALL", "HAIL"], "UP": ["UNKNOWN", "PRECIPITATION"],
+             "BR": ["MIST"], "FG": ["FOG"], "FU": ["SMOKE"], "VA": ["VOLCANIC", "ASH"],
+             "DU": ["DUST"], "SA": ["SAND"], "HZ": ["HAZE"], "PY": ["SPRAY"],
+             "PO": ["DUST", "WHIRLS"], "SQ": ["SQUALLS"], "FC": ["FUNNEL", "CLOUD"],
+             "SS": ["SANDSTORM"], "DS": ["DUSTSTORM"]}
+WX_RE = re.compile(r"^([+-]|VC)?((?:MI|PR|BC|DR|BL|FZ|SH|TS)*)((?:DZ|RA|SN|SG|IC|PL|GR|GS|UP|BR|FG|FU|VA|DU|SA|HZ|PY|PO|SQ|FC|SS|DS)*)$")
+
+
+def wx_group(g):
+    m = WX_RE.match(g)
+    if not m:
+        return None
+    lead, descr, phen = m.groups()
+    descr = [descr[i:i + 2] for i in range(0, len(descr), 2)]
+    phen = [phen[i:i + 2] for i in range(0, len(phen), 2)]
+    if lead == "+" and phen == ["FC"]:
+        return ["TORNADO"]
+    words = {"-": ["LIGHT"], "+": ["HEAVY"]}.get(lead, [])
+    if "TS" in descr:
+        words = ["THUNDERSTORM"] + (["WITH"] + words if phen else words)
+    for d in descr:
+        words += DESCRIPTORS.get(d, [])
+    for p in phen:
+        words += PHENOMENA[p]
+    if "SH" in descr:
+        words += ["SHOWERS"]
+    if lead == "VC":
+        words += ["NEAR"]
+    return words
+
+
+def f_weather(r):
+    words = []
+    for g in (r.get("wxString") or "").split():
+        w = wx_group(g)
+        if w:
+            words += (["AND_A"] if words else []) + w
+    return words        # empty: nothing to report
+
+
+def f_temp(c, label):
+    """Fahrenheit, no unit word: no FAHRENHEIT clip yet."""
+    if c is None:
+        return label + ["NOT", "AVAILABLE"]
+    return label + number(round(c * 9 / 5 + 32))
+
+
+def f_humidity(t, d):
+    if t is None or d is None:
+        return []
+    def es(x):      # Magnus formula, saturation vapour pressure
+        return math.exp(17.625 * x / (243.04 + x))
+    rh = max(0, min(100, round(100 * es(d) / es(t))))
+    return ["RELATIVE", "HUMIDITY"] + number(rh) + ["PERCENT"]
+
+
+ALT_RE = re.compile(r"\sA(\d{4})\b")
+
+
+def f_pressure(r, label):
+    m = ALT_RE.search(r.get("rawOb", ""))
+    if m:
+        inhg = int(m.group(1))
+    elif r.get("altim") is not None:
+        inhg = round(r["altim"] / 33.8639 * 100)
+    else:
+        return [label, "NOT", "AVAILABLE"]
+    whole, hundredths = divmod(inhg, 100)
+    return [label] + number(whole) + ["POINT", ONES[hundredths // 10], ONES[hundredths % 10]]
+
+
+def decode(r, args):
+    t, d = r.get("temp"), r.get("dewp")
+    return {
+        "source": f_source(args.station, args.source_words),
+        "time": f_time(r["obsTime"]),
+        "wind": f_wind(r),
+        "visibility": f_visibility(r.get("rawOb", "")),
+        "sky": f_sky(r),
+        "weather": f_weather(r),
+        "temp": f_temp(t, ["TEMPERATURE"]),
+        "dewpoint": f_temp(d, ["D", "P"]),      # no DEWPOINT clip yet
+        "humidity": f_humidity(t, d),
+        "pressure": f_pressure(r, args.pressure_word),
+    }
+
+
+# ---------------------------------------------------------------- output
+
+def write_fields(fields, outdir, obs_time):
+    """Each file through a temp file and rename, mtime set to the observation time."""
+    os.makedirs(outdir, exist_ok=True)
+    for name, words in fields.items():
+        fd, tmp = tempfile.mkstemp(dir=outdir, prefix="." + name + ".")
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(" ".join(words) + ("\n" if words else ""))
+            os.chmod(tmp, 0o644)
+            os.utime(tmp, (obs_time, obs_time))
+            os.replace(tmp, os.path.join(outdir, name))
+        except BaseException:
+            os.unlink(tmp)
+            raise
+
+
+def vocab_index(dirs):
+    """Clip name -> path. Earlier directories win, as in usrp-rc (user_8k first)."""
+    index = {}
+    for d in reversed(dirs):
+        if os.path.isdir(d):
+            for fn in os.listdir(d):
+                if fn.lower().endswith(".wav"):
+                    index[fn[:-4].upper()] = os.path.join(d, fn)
+    return index
+
+
+def write_wav(fields, index, path, gap_ms):
+    silence = b"\0\0" * (8 * gap_ms)
+    with wave.open(path, "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(8000)
+        for words in fields.values():
+            if not words:
+                continue
+            for w in words:
+                if w in index:
+                    with wave.open(index[w], "rb") as clip:
+                        out.writeframes(clip.readframes(clip.getnframes()))
+            out.writeframes(silence)
+
+
+def fetch(station, timeout):
+    req = urllib.request.Request(API.format(station=station), headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        data = json.load(resp)
+    if not data:
+        raise ValueError("no report for " + station)
+    return data[0]
+
+
+def main():
+    here = os.path.dirname(os.path.abspath(__file__))
+    repo = os.path.normpath(os.path.join(here, "..", ".."))
+    p = argparse.ArgumentParser(description="METAR producer for usrp-rc.")
+    p.add_argument("--station", required=True, help="ICAO station, e.g. KLWC")
+    p.add_argument("--dir", default="/run/usrp-rc/ext", help="producer directory (default %(default)s)")
+    p.add_argument("--name", default="wx", help="producer name, the subdirectory (default %(default)s)")
+    p.add_argument("--source-words", default="", help="words for wx.source; default: the station letters")
+    p.add_argument("--pressure-word", default="PRESSURE", help="label for wx.pressure, e.g. ALTIMETER")
+    p.add_argument("--timeout", type=float, default=20, help="fetch timeout, seconds")
+    p.add_argument("--json", help="read the report from this file, not the network (testing)")
+    p.add_argument("--print", action="store_true", help="print the fields; write no files")
+    p.add_argument("--check", action="store_true", help="list words that are not voice clips")
+    p.add_argument("--wav", help="also render the fields, in order, to this WAV file")
+    p.add_argument("--vocab", action="append",
+                   help="clip directory for --check and --wav, user clips first; repeatable "
+                        "(default: user_8k and vocab_8k of this repository)")
+    args = p.parse_args()
+    args.station = args.station.upper()
+
+    try:
+        if args.json:
+            with open(args.json) as f:
+                data = json.load(f)
+            r = data[0] if isinstance(data, list) else data
+        else:
+            r = fetch(args.station, args.timeout)
+        fields = decode(r, args)
+    except Exception as e:
+        print(f"metar: {args.station} FAILED: {e}", file=sys.stderr)
+        return 1
+
+    if args.print:
+        for name in FIELDS:
+            print(f"{args.name}.{name:<11} {' '.join(fields[name])}")
+    else:
+        write_fields(fields, os.path.join(args.dir, args.name), r["obsTime"])
+
+    status = 0
+    if args.check or args.wav:
+        dirs = args.vocab or [os.path.join(repo, "user_8k"), os.path.join(repo, "vocab_8k")]
+        index = vocab_index(dirs)
+        missing = sorted({w for words in fields.values() for w in words if w not in index})
+        if args.check and missing:
+            print(f"metar: MISSING clips: {' '.join(missing)}", file=sys.stderr)
+            status = 2
+        if args.wav:
+            write_wav(fields, index, args.wav, 300)
+
+    age = int(time.time() - r["obsTime"]) // 60
+    print(f"metar: {args.station} {'DECODED' if args.print else 'WRITTEN'}, "
+          f"observed {age} min ago", file=sys.stderr)
+    return status
+
+
+if __name__ == "__main__":
+    sys.exit(main())

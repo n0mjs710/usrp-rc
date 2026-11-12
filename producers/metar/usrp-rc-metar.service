@@ -1,0 +1,19 @@
+[Unit]
+Description=usrp-rc METAR producer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/usrp-rc-metar --station KLWC --dir /run/usrp-rc/ext
+TimeoutStartSec=60
+
+# Security hardening. The producer only needs the network and its own output directory.
+DynamicUser=yes
+RuntimeDirectory=usrp-rc/ext
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
