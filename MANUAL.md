@@ -702,6 +702,9 @@ ends as usual. Tail messages are off by default: to use them, set `tail_messages
 
 - A tail message does not wait in a queue. It plays a maximum of one time in each tail.
 - If a key-up interrupts a tail message, the message counts as played.
+- A message with nothing to say also counts as played. The tail ends as usual, and the
+  next tail message is the next name in the list. The log shows
+  `tail: 'name' SILENT, nothing to say`.
 
 Example: set `tail_every = 1` and `tail_min_interval = 300`. A tail message then plays
 at the end of a hang if 5 minutes have passed since the last tail message started.

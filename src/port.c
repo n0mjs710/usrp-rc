@@ -564,18 +564,22 @@ static void tail_finish(port_t *p, uint64_t now)
     }
 }
 
-/* Returns false if there was nothing to play. */
+/* A message uses its slot when it comes due, also if it has nothing to say: the
+ * rotation, the count and the interval go on as if it played. Returns false if
+ * there was nothing to play. */
 static bool tail_play(port_t *p, uint64_t now)
 {
     int idx = p->tail_rot % p->ev->n_tail_messages;
     const char *name = p->ev->tail_messages[idx];
-    if (!queue_message(p, name, -1.0))
-        return false;
     p->tail_rot = (idx + 1) % p->ev->n_tail_messages;
-    LOGI("tail: '%s'\n", name);
-    p->ctrl.on_drain = tail_finish;
     p->tails_since_message = 0;
     p->tail_last_ms = now;
+    if (!queue_message(p, name, -1.0)) {
+        LOGI("tail: '%s' SILENT, nothing to say\n", name);
+        return false;
+    }
+    LOGI("tail: '%s'\n", name);
+    p->ctrl.on_drain = tail_finish;
     return true;
 }
 
