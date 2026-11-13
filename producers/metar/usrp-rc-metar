@@ -72,7 +72,7 @@ def f_time(obs_time):
     if t.tm_min == 0:
         pass
     elif t.tm_min < 10:
-        words += ["ZERO"] + number(t.tm_min)    # OH is not in the male vocab
+        words += ["O"] + number(t.tm_min)       # the letter O: the male voice has no OH
     else:
         words += number(t.tm_min)
     return words + ["A_M" if t.tm_hour < 12 else "P_M"]
@@ -110,7 +110,7 @@ def f_visibility(raw):
     if den:
         whole = int(whole or 0)
         frac = {(1, 4): ["ONE", "QUARTER"], (1, 2): ["ONE", "HALF"],
-                (3, 4): ["THREE", "QUARTERS"], (1, 8): ["ONE", "EIGHTH"],
+                (3, 4): ["THREE", "QUARTER"], (1, 8): ["ONE", "EIGHTH"],
                 (3, 8): ["THREE", "EIGHTHS"], (5, 8): ["FIVE", "EIGHTHS"],
                 (7, 8): ["SEVEN", "EIGHTHS"], (1, 16): ["ONE", "SIXTEENTH"]
                 }.get((int(num), int(den)), number(int(num)) + ["OVER"] + number(int(den)))
@@ -122,24 +122,24 @@ def f_visibility(raw):
 
 
 COVER_RANK = {"FEW": 1, "SCT": 2, "BKN": 3, "OVC": 4, "OVX": 4}
-COVER_WORDS = {1: ["FEW", "CLOUDS"], 2: ["PARTLY", "CLOUDY"],
-               3: ["MOSTLY", "CLOUDY"], 4: ["OVERCAST"]}
+COVER_WORDS = {1: ["CLEAR"], 2: ["SCATTERED"],        # no clip for FEW: it has no ceiling
+               3: ["BROKEN"], 4: ["OVERCAST"]}
 
 
 def f_sky(r):
     clouds = r.get("clouds") or []
     if not clouds:
         if r.get("cover") in ("CLR", "SKC", "CAVOK", "NSC", "NCD"):
-            return ["SKY", "CLEAR"]
-        return ["SKY", "CONDITION", "NOT", "AVAILABLE"]
+            return ["CLEAR"]
+        return ["CEILING", "NOT", "AVAILABLE"]
     if any(c.get("cover") == "VV" for c in clouds):
         vv = next(c for c in clouds if c.get("cover") == "VV")
-        words = ["SKY", "OBSCURED"]
+        words = ["OBSCURED"]
         if vv.get("base") is not None:
             words += ["CEILING"] + feet(vv["base"])
         return words
     worst = max(COVER_RANK.get(c.get("cover"), 0) for c in clouds)
-    words = list(COVER_WORDS.get(worst, ["SKY", "CONDITION", "NOT", "AVAILABLE"]))
+    words = list(COVER_WORDS.get(worst, ["CEILING", "NOT", "AVAILABLE"]))
     ceilings = [c["base"] for c in clouds
                 if COVER_RANK.get(c.get("cover"), 0) >= 3 and c.get("base") is not None]
     if ceilings:
@@ -147,15 +147,15 @@ def f_sky(r):
     return words
 
 
-DESCRIPTORS = {"MI": ["SHALLOW"], "PR": ["PARTIAL"], "BC": ["PATCHES", "OF"],
-               "DR": ["DRIFTING"], "BL": ["BLOWING"], "FZ": ["FREEZING"]}
+DESCRIPTORS = {"MI": ["GROUND"], "PR": ["PARTIAL"], "BC": ["PATCH", "OF"],
+               "DR": ["MOVING"], "BL": ["BLOWING"], "FZ": ["FREEZING"]}
 PHENOMENA = {"DZ": ["DRIZZLE"], "RA": ["RAIN"], "SN": ["SNOW"], "SG": ["SNOW", "GRAINS"],
              "IC": ["ICE", "CRYSTALS"], "PL": ["ICE", "PELLETS"], "GR": ["HAIL"],
              "GS": ["SMALL", "HAIL"], "UP": ["UNKNOWN", "PRECIPITATION"],
              "BR": ["MIST"], "FG": ["FOG"], "FU": ["SMOKE"], "VA": ["VOLCANIC", "ASH"],
              "DU": ["DUST"], "SA": ["SAND"], "HZ": ["HAZE"], "PY": ["SPRAY"],
              "PO": ["DUST", "WHIRLS"], "SQ": ["SQUALLS"], "FC": ["FUNNEL", "CLOUD"],
-             "SS": ["SANDSTORM"], "DS": ["DUSTSTORM"]}
+             "SS": ["SAND", "STORM"], "DS": ["DUST", "STORM"]}
 WX_RE = re.compile(r"^([+-]|VC)?((?:MI|PR|BC|DR|BL|FZ|SH|TS)*)((?:DZ|RA|SN|SG|IC|PL|GR|GS|UP|BR|FG|FU|VA|DU|SA|HZ|PY|PO|SQ|FC|SS|DS)*)$")
 
 
@@ -204,7 +204,7 @@ def f_humidity(t, d):
     def es(x):      # Magnus formula, saturation vapour pressure
         return math.exp(17.625 * x / (243.04 + x))
     rh = max(0, min(100, round(100 * es(d) / es(t))))
-    return ["RELATIVE", "HUMIDITY"] + number(rh) + ["PERCENT"]
+    return ["WATER"] + number(rh) + ["PERCENT"]     # relative humidity
 
 
 ALT_RE = re.compile(r"\sA(\d{4})\b")

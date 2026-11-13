@@ -57,6 +57,26 @@ class Wind(unittest.TestCase):
         self.assertEqual(say(metar.f_wind({})), "WIND NOT AVAILABLE")
 
 
+class Time(unittest.TestCase):
+    def setUp(self):
+        self.tz = os.environ.get("TZ")
+        os.environ["TZ"] = "UTC"
+        metar.time.tzset()
+
+    def tearDown(self):
+        if self.tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = self.tz
+        metar.time.tzset()
+
+    def test_minutes(self):
+        day = 1794441600                        # a midnight, UTC
+        self.assertEqual(say(metar.f_time(day + 7 * 3600 + 52 * 60)), "TIME SEVEN FIFTY TWO A_M")
+        self.assertEqual(say(metar.f_time(day + 19 * 3600 + 5 * 60)), "TIME SEVEN O FIVE P_M")
+        self.assertEqual(say(metar.f_time(day + 12 * 3600)), "TIME TWELVE P_M")
+
+
 class Source(unittest.TestCase):
     def test_us_drops_k(self):
         self.assertEqual(say(metar.f_source("KLWC", "")), "L W C")
@@ -82,6 +102,7 @@ class Visibility(unittest.TestCase):
         self.assertEqual(self.v("1 1/2SM"), "VISIBILITY ONE AND_A ONE HALF")
         self.assertEqual(self.v("M1/4SM"), "VISIBILITY LESS THAN ONE QUARTER")
         self.assertEqual(self.v("P6SM"), "VISIBILITY MORE THAN SIX")
+        self.assertEqual(self.v("3/4SM"), "VISIBILITY THREE QUARTER")
 
     def test_not_confused_by_wind_or_time(self):
         self.assertEqual(self.v("3SM"), "VISIBILITY THREE")
@@ -93,12 +114,22 @@ class Visibility(unittest.TestCase):
 
 class Sky(unittest.TestCase):
     def test_clear(self):
-        self.assertEqual(say(metar.f_sky({"cover": "CLR", "clouds": []})), "SKY CLEAR")
+        self.assertEqual(say(metar.f_sky({"cover": "CLR", "clouds": []})), "CLEAR")
 
     def test_scattered_no_ceiling(self):
         self.assertEqual(say(metar.f_sky({"clouds": [{"cover": "FEW", "base": 2000},
                                                      {"cover": "SCT", "base": 5000}]})),
-                         "PARTLY CLOUDY")
+                         "SCATTERED")
+
+    def test_few_is_clear(self):
+        self.assertEqual(say(metar.f_sky({"clouds": [{"cover": "FEW", "base": 2000}]})), "CLEAR")
+
+    def test_broken_ceiling(self):
+        self.assertEqual(say(metar.f_sky({"clouds": [{"cover": "BKN", "base": 2600}]})),
+                         "BROKEN CEILING TWO THOUSAND SIX HUNDRED")
+
+    def test_missing(self):
+        self.assertEqual(say(metar.f_sky({"clouds": []})), "CEILING NOT AVAILABLE")
 
     def test_ceiling_is_lowest_broken_or_overcast(self):
         clouds = [{"cover": "SCT", "base": 2200}, {"cover": "OVC", "base": 9000},
@@ -108,7 +139,7 @@ class Sky(unittest.TestCase):
 
     def test_vertical_visibility(self):
         self.assertEqual(say(metar.f_sky({"clouds": [{"cover": "VV", "base": 200}]})),
-                         "SKY OBSCURED CEILING TWO HUNDRED")
+                         "OBSCURED CEILING TWO HUNDRED")
 
 
 class Weather(unittest.TestCase):
@@ -127,6 +158,10 @@ class Weather(unittest.TestCase):
         self.assertEqual(self.w("FZRA BR"), "FREEZING RAIN AND_A MIST")
         self.assertEqual(self.w("VCSH"), "SHOWERS NEAR")
         self.assertEqual(self.w("+FC"), "TORNADO")
+        self.assertEqual(self.w("MIFG"), "GROUND FOG")
+        self.assertEqual(self.w("BCFG"), "PATCH OF FOG")
+        self.assertEqual(self.w("DRSN"), "MOVING SNOW")
+        self.assertEqual(self.w("SS"), "SAND STORM")
 
     def test_unknown_group_skipped(self):
         self.assertEqual(self.w("XX -SN"), "LIGHT SNOW")
@@ -139,7 +174,7 @@ class TempPressure(unittest.TestCase):
         self.assertEqual(say(metar.f_temp(None, ["D", "P"])), "D P NOT AVAILABLE")
 
     def test_humidity(self):
-        self.assertEqual(say(metar.f_humidity(20, 20)), "RELATIVE HUMIDITY ONE HUNDRED PERCENT")
+        self.assertEqual(say(metar.f_humidity(20, 20)), "WATER ONE HUNDRED PERCENT")
         self.assertEqual(metar.f_humidity(None, 3), [])
 
     def test_pressure_from_raw(self):

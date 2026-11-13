@@ -2,7 +2,7 @@
 
 `usrp-rc-metar` gets the latest METAR for one station from the NOAA Aviation Weather
 Center, and writes each field as voice-clip words for usrp-rc. It is a test case for
-the external producer interface. usrp-rc does not yet read these files.
+the external producer interface.
 
 ## Output
 
@@ -12,14 +12,14 @@ The producer writes one file for each field to `<dir>/<name>/`. The default is
 | Field | Example |
 | --- | --- |
 | `source` | L W C. A US station is said without the K. |
-| `time` | TIME SEVEN FIFTY TWO A_M |
+| `time` | TIME SEVEN FIFTY TWO A_M. Minutes under ten use the letter O: SEVEN O FIVE. |
 | `wind` | WIND THREE THREE ZERO AT TWENTY GUSTING_TO TWENTY NINE |
 | `visibility` | VISIBILITY EIGHT (statute miles, no unit word) |
-| `sky` | MOSTLY CLOUDY CEILING TWO THOUSAND SIX HUNDRED (feet, no unit word) |
+| `sky` | BROKEN CEILING TWO THOUSAND SIX HUNDRED (feet, no unit word). CLEAR, SCATTERED, BROKEN or OVERCAST; FEW is said as CLEAR. |
 | `weather` | LIGHT RAIN SHOWERS. Empty when there is nothing to report. |
 | `temp` | TEMPERATURE FORTY TWO (Fahrenheit, no unit word) |
 | `dewpoint` | D P THIRTY NINE |
-| `humidity` | RELATIVE HUMIDITY EIGHTY NINE PERCENT (calculated) |
+| `humidity` | WATER EIGHTY NINE PERCENT (relative humidity, calculated) |
 | `pressure` | PRESSURE THIRTY POINT ONE TWO (inches of mercury, no unit word) |
 
 - Wind direction is three digits, in degrees. Wind speeds are in miles per hour,
