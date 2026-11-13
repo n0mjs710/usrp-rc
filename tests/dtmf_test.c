@@ -535,8 +535,8 @@ static void test_clips(void)
     printf("\nspeech\n");
     check("digits", strcmp(command_digit_clip('0'), "ZERO") == 0 && strcmp(command_digit_clip('9'), "NINE") == 0);
     check("letters", strcmp(command_digit_clip('A'), "A") == 0);
-    check("star is Sierra", strcmp(command_digit_clip('*'), "SIERRA") == 0);
-    check("pound is P", strcmp(command_digit_clip('#'), "P") == 0);
+    check("star is STAR", strcmp(command_digit_clip('*'), "STAR") == 0);
+    check("pound is POUND", strcmp(command_digit_clip('#'), "POUND") == 0);
 }
 
 int main(void)

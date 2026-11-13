@@ -286,8 +286,8 @@ const char *command_digit_clip(char digit)
     case 'B': return "B";
     case 'C': return "C";
     case 'D': return "D";
-    case '*': return "SIERRA";
-    case '#': return "P";
+    case '*': return "STAR";
+    case '#': return "POUND";
     default:  return NULL;
     }
 }

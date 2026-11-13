@@ -45,6 +45,6 @@ bool command_session_muted(const command_session_t *s);
 /* Replace a frame with what plays during the mute: silence and the cover tone cadence. */
 void command_session_fill_mute(command_session_t *s, int16_t frame[160]);
 
-/* The voice clip name that speaks a digit: ZERO..NINE, A, B, C, D, SIERRA for
- * star (ACC's convention), P for pound. NULL if it isn't a sequence digit. */
+/* The voice clip name that speaks a digit: ZERO..NINE, A, B, C, D, STAR, POUND.
+ * NULL if it isn't a sequence digit. */
 const char *command_digit_clip(char digit);
