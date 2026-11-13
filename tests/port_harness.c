@@ -773,6 +773,40 @@ static bool scenario_tail_message_rotation(config_t *base, vocab_cache_t *vocab)
     return ok;
 }
 
+static bool scenario_silent_tail_uses_its_slot(config_t *base, vocab_cache_t *vocab)
+{
+    printf("\n[13b] a tail message with nothing to say uses its slot in the rotation\n");
+    bool ok = true;
+    config_t cfg = *base;
+    cfg.timers.id_interval = 600.0;
+    snprintf(cfg.events.tail_messages[0], CFG_NAME_STR, "silent");
+    snprintf(cfg.events.tail_messages[1], CFG_NAME_STR, "id_voice");
+    cfg.events.n_tail_messages = 2;
+    cfg.timers.tail_every = 1;
+    port_t *p = fresh_port(&cfg, vocab);
+
+    cap_start();
+    for (int i = 0; i < 3; i++) {
+        key_local(p, true);
+        wait_ms(p, 150);
+        key_local(p, false);
+        wait_for_log(p, "tail: ", 5000);
+        wait_until_idle(p, 15000);
+    }
+    char *log = cap_stop();
+    const char *first  = strstr(log, "tail: 'silent' SILENT");
+    const char *second = first ? strstr(first, "tail: 'id_voice'") : NULL;
+    const char *third  = second ? strstr(second, "tail: 'silent' SILENT") : NULL;
+    CHECK(third != NULL, "silent, then the next message, then silent again");
+    CHECK(count_occurrences(log, "tail: 'id_voice'") == 1, "the next message plays once, in its own slot");
+    CHECK(!port_ptt(p), "a silent slot leaves the transmitter off");
+    free(log);
+
+    port_destroy(p);
+    printf(ok ? "[13b] PASS\n" : "[13b] FAIL\n");
+    return ok;
+}
+
 static bool scenario_empty_mandatory_uses_impolite(config_t *base, vocab_cache_t *vocab)
 {
     printf("\n[14] with no mandatory ID, the timer keys up with impolite_id\n");
@@ -1520,6 +1554,7 @@ int main(void)
         scenario_tail_message_min_interval,
         scenario_usage_counting,
         scenario_tail_message_rotation,
+        scenario_silent_tail_uses_its_slot,
         scenario_empty_mandatory_uses_impolite,
         scenario_ct_follows_last_active,
         scenario_timeout_per_source,
