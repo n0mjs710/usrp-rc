@@ -8,12 +8,19 @@ Type=oneshot
 ExecStart=/usr/local/bin/usrp-rc-metar --station KLWC --dir /run/usrp-rc/ext
 TimeoutStartSec=60
 
-# Security hardening. The producer only needs the network and its own output directory.
-DynamicUser=yes
+# The output directory must be readable by every user, so no DynamicUser: it would
+# put the directory under /run/private, mode 0700. The service runs as root with no
+# capabilities, so it can write only what it owns: its own runtime directory.
 RuntimeDirectory=usrp-rc/ext
 RuntimeDirectoryMode=0755
 RuntimeDirectoryPreserve=yes
+CapabilityBoundingSet=
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX

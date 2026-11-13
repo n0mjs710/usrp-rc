@@ -175,10 +175,17 @@ int message_has_voice(const config_t *cfg, const char *name)
     return 0;
 }
 
+/* AUTO is any automatic message, READBACK a DTMF read, CHECK the length check at load,
+ * which leaves producer variables out: their files are data, not configuration. */
+typedef enum { RENDER_AUTO, RENDER_READBACK, RENDER_CHECK } render_mode_t;
+
+static rendered_audio_t render(const config_t *cfg, vocab_cache_t *vocab, const char *name,
+                               double morse_level_override, render_mode_t mode);
+
 static int check_length(const config_t *cfg, vocab_cache_t *vocab, const config_message_t *m,
                         const char *where)
 {
-    rendered_audio_t r = message_render(cfg, vocab, m->name, -1.0);
+    rendered_audio_t r = render(cfg, vocab, m->name, -1.0, RENDER_CHECK);
     int bad = r.n > (size_t)MESSAGE_MAX_SECONDS * 8000;
     if (bad)
         LOGE("config: line %d: messages.%s: %zu s long%s%s, the limit is %d s\n",
@@ -394,7 +401,7 @@ static ext_state_t ext_read(const config_t *cfg, vocab_cache_t *vocab, const cha
 }
 
 static void render_into(const config_t *cfg, vocab_cache_t *vocab, const config_message_t *m,
-                        double morse_level, bool readback, sbuf_t *buf);
+                        double morse_level, render_mode_t mode, sbuf_t *buf);
 
 /* The bit for a producer, to track one per message. */
 static unsigned producer_bit(const config_t *cfg, const config_producer_t *p)
@@ -453,12 +460,13 @@ static void render_external(const config_t *cfg, vocab_cache_t *vocab, const cha
     *fallen_back |= bit;
     const config_message_t *fm = config_find_message(cfg, p->fallback);
     if (fm)
-        render_into(cfg, vocab, fm, cfg->audio.morse_level, false, buf);
+        render_into(cfg, vocab, fm, cfg->audio.morse_level, RENDER_AUTO, buf);
 }
 
 static void render_into(const config_t *cfg, vocab_cache_t *vocab, const config_message_t *m,
-                        double morse_level, bool readback, sbuf_t *buf)
+                        double morse_level, render_mode_t mode, sbuf_t *buf)
 {
+    bool readback = mode == RENDER_READBACK;
     const char *name = m->name;
     unsigned present = 0, fresh = readback ? fresh_producers(cfg, m, &present) : 0, fallen_back = 0;
 
@@ -506,7 +514,8 @@ static void render_into(const config_t *cfg, vocab_cache_t *vocab, const config_
                     continue;
                 }
                 if (word->var == VOICE_VAR_EXTERNAL) {
-                    render_external(cfg, vocab, word->clip, readback, fresh, &fallen_back, buf);
+                    if (mode != RENDER_CHECK)
+                        render_external(cfg, vocab, word->clip, readback, fresh, &fallen_back, buf);
                     continue;
                 }
                 if (word->var != VOICE_VAR_NONE) {
@@ -541,7 +550,7 @@ static void render_into(const config_t *cfg, vocab_cache_t *vocab, const config_
 }
 
 static rendered_audio_t render(const config_t *cfg, vocab_cache_t *vocab, const char *name,
-                               double morse_level_override, bool readback)
+                               double morse_level_override, render_mode_t mode)
 {
     rendered_audio_t result = {0};
     const config_message_t *m = config_find_message(cfg, name);
@@ -557,7 +566,7 @@ static rendered_audio_t render(const config_t *cfg, vocab_cache_t *vocab, const 
     double morse_level = (morse_level_override >= 0.0)
                         ? morse_level_override : cfg->audio.morse_level;
     sbuf_t buf = {0};
-    render_into(cfg, vocab, m, morse_level, readback, &buf);
+    render_into(cfg, vocab, m, morse_level, mode, &buf);
     sbuf_scale(&buf, cfg->audio.master_gain);
 
     result.samples = buf.data;
@@ -568,10 +577,10 @@ static rendered_audio_t render(const config_t *cfg, vocab_cache_t *vocab, const 
 rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
                                 const char *name, double morse_level_override)
 {
-    return render(cfg, vocab, name, morse_level_override, false);
+    return render(cfg, vocab, name, morse_level_override, RENDER_AUTO);
 }
 
 rendered_audio_t message_render_readback(const config_t *cfg, vocab_cache_t *vocab, const char *name)
 {
-    return render(cfg, vocab, name, -1.0, true);
+    return render(cfg, vocab, name, -1.0, RENDER_READBACK);
 }

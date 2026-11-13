@@ -519,8 +519,8 @@ pauses between variables only where they are necessary.
 
 At start, `usrp-rc` makes sure that each producer in a variable is in `[external]`, and that
 each fallback message exists. It cannot examine the words in the files at start, because
-they change. At start, at `--check` and when a message plays, the log shows each change of
-state of a variable, one time:
+they change, so `--check` does not read them. When a message plays, the log shows each
+change of state of a variable, one time:
 
 ```text
 external: {wx.temp} FRESH
