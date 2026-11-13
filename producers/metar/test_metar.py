@@ -169,8 +169,8 @@ class Weather(unittest.TestCase):
 
 class TempPressure(unittest.TestCase):
     def test_temp(self):
-        self.assertEqual(say(metar.f_temp(22.2, ["TEMPERATURE"])), "TEMPERATURE SEVENTY TWO")
-        self.assertEqual(say(metar.f_temp(-20.6, ["TEMPERATURE"])), "TEMPERATURE MINUS FIVE")
+        self.assertEqual(say(metar.f_temp(22.2, ["TEMPERATURE"])), "TEMPERATURE SEVENTY TWO DEGREES")
+        self.assertEqual(say(metar.f_temp(-20.6, ["TEMPERATURE"])), "TEMPERATURE MINUS FIVE DEGREES")
         self.assertEqual(say(metar.f_temp(None, ["D", "P"])), "D P NOT AVAILABLE")
 
     def test_humidity(self):
@@ -208,7 +208,7 @@ class Files(unittest.TestCase):
             with open(os.path.join(d, "weather")) as f:
                 self.assertEqual(f.read(), "")                              # empty: nothing to report
             with open(os.path.join(d, "temp")) as f:
-                self.assertEqual(f.read(), "TEMPERATURE FORTY TWO\n")
+                self.assertEqual(f.read(), "TEMPERATURE FORTY TWO DEGREES\n")
 
 
 if __name__ == "__main__":

@@ -17,11 +17,14 @@ The producer writes one file for each field to `<dir>/<name>/`. The default is
 | `visibility` | VISIBILITY EIGHT (statute miles, no unit word) |
 | `sky` | BROKEN CEILING TWO THOUSAND SIX HUNDRED (feet, no unit word). CLEAR, SCATTERED, BROKEN or OVERCAST; FEW is said as CLEAR. |
 | `weather` | LIGHT RAIN SHOWERS. Empty when there is nothing to report. |
-| `temp` | TEMPERATURE FORTY TWO (Fahrenheit, no unit word) |
-| `dewpoint` | D P THIRTY NINE |
+| `temp` | TEMPERATURE FORTY TWO DEGREES (Fahrenheit) |
+| `dewpoint` | D P THIRTY NINE DEGREES |
 | `humidity` | WATER EIGHTY NINE PERCENT (relative humidity, calculated) |
 | `pressure` | PRESSURE THIRTY POINT ONE TWO (inches of mercury, no unit word) |
 
+- Each field is complete by itself, with its label, so a message can use one field
+  alone, for example `voice: {wx.temp}` as a tail message. When the data is stale, the
+  whole field is silent, and a message of only that field does not play.
 - Wind direction is three digits, in degrees. Wind speeds are in miles per hour,
   converted from knots, with no unit word.
 - Each file's mtime is the observation time, not the fetch time.

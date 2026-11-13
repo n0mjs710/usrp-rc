@@ -192,10 +192,10 @@ def f_weather(r):
 
 
 def f_temp(c, label):
-    """Fahrenheit, no unit word: no FAHRENHEIT clip yet."""
+    """Fahrenheit, said as DEGREES: no FAHRENHEIT clip yet."""
     if c is None:
         return label + ["NOT", "AVAILABLE"]
-    return label + number(round(c * 9 / 5 + 32))
+    return label + number(round(c * 9 / 5 + 32)) + ["DEGREES"]
 
 
 def f_humidity(t, d):

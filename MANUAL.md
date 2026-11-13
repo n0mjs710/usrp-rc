@@ -543,7 +543,9 @@ These rules apply to the producer program:
   a part of a file.
 - Use only clips that are installed in `/usr/local/share/usrp-rc/user_8k/` and
   `vocab_8k/`. A clip from another location can be absent on the repeater.
-- Labels are part of the field, for example `TEMPERATURE FORTY TWO`.
+- Labels and units are part of the field, for example `TEMPERATURE FORTY TWO DEGREES`.
+  Then the field is complete by itself, and it is silent as a whole when the data is
+  stale. A word in the message, outside the variable, still plays.
 - How the producer runs is not part of the interface: a timer, a service or a cron job.
 
 The source tree includes a METAR weather producer in `producers/metar/`. Its README gives
