@@ -45,16 +45,90 @@ The producer writes one file for each field to `<dir>/<name>/`. The default is
 | `--json FILE` | Read a report from a file, not the network |
 | `--vocab DIR` | Clip directory, user clips first. Repeatable. The default is the installed usrp-rc directories, `/usr/local/share/usrp-rc/user_8k` and `vocab_8k`. |
 
-## Installation (sample)
+## Installation
+
+The producer runs from a systemd timer. This uses two files with the same base name:
+
+- `usrp-rc-metar.service` tells how to run the producer: the command, the station and
+  the security settings. `Type=oneshot` means that it runs one time, writes its files and
+  stops. It is not a daemon.
+- `usrp-rc-metar.timer` tells when to run it: 30 s after boot, then each 10 minutes.
+  When the timer fires, systemd starts the service with the same name.
+
+Enable the timer, not the service. The service has no `[Install]` section, because only
+the timer starts it.
+
+How the producer runs is not part of the interface. A timer is one possible method; cron
+or a loop in a script also work.
+
+### 1. Install the producer
+
+From this directory. Set `STATION` to your ICAO station identifier first:
 
 ```sh
+STATION=KXYZ
 sudo install -m 755 usrp-rc-metar /usr/local/bin/
 sudo install -m 644 usrp-rc-metar.service usrp-rc-metar.timer /etc/systemd/system/
+sudo sed -i "s/--station KLWC/--station $STATION/" /etc/systemd/system/usrp-rc-metar.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now usrp-rc-metar.timer
 ```
 
-How the producer runs is not part of the interface. A timer is one possible method.
+### 2. Run it one time, and examine the output
+
+```sh
+sudo systemctl start usrp-rc-metar.service
+journalctl -u usrp-rc-metar -n 5 --no-pager
+namei -l /run/usrp-rc/ext/wx/temp && cat /run/usrp-rc/ext/wx/temp
+```
+
+- The journal shows `metar: KXYZ WRITTEN`. A `DROPPED` line names a field with a word
+  that has no clip. That field stays silent.
+- `namei` shows `drwxr-xr-x` directories down to the file. Each user must be able to read
+  the files, also when `usrp-rc` does not run as root.
+
+### 3. Start the timer
+
+```sh
+sudo systemctl enable --now usrp-rc-metar.timer
+systemctl list-timers usrp-rc-metar.timer
+```
+
+`list-timers` shows the last run and the next run.
+
+### 4. Add the messages to usrp-rc
+
+Add these lines to `/etc/usrp-rc/usrp-rc.conf`. If the file already has a `[dtmf]` or
+`[messages]` section, put the lines in it. DTMF commands also need `[dtmf] enabled = true`.
+
+```ini
+[external]
+wx = 5400 wx_unavailable
+
+[dtmf]
+read_17 = weather
+
+[messages]
+weather        = voice: WEATHER {wx.source} _ {wx.time} _ {wx.wind} _ {wx.visibility} _ {wx.sky} {wx.weather} _ {wx.temp} _ {wx.dewpoint} _ {wx.humidity} _ {wx.pressure}
+wx_unavailable = voice: WEATHER NOT CURRENT
+```
+
+Then examine the configuration and restart:
+
+```sh
+usrp-rc --check /etc/usrp-rc/usrp-rc.conf && sudo systemctl restart usrp-rc
+```
+
+Enter `417` on the air. The log shows `ACCEPTED command = read 17` and a `FRESH` line for
+each field. For more information, see MANUAL.md sections 2.9, 5.6 and 12.10.
+
+### Useful commands
+
+| Command | Function |
+| --- | --- |
+| `systemctl list-timers usrp-rc-metar.timer` | The last run and the next run |
+| `sudo systemctl start usrp-rc-metar.service` | Run the producer now, outside the schedule |
+| `journalctl -u usrp-rc-metar` | The output of each run |
+| `sudo systemctl disable --now usrp-rc-metar.timer` | Stop the scheduled runs |
 
 ## Tests
 
