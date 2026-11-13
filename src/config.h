@@ -40,6 +40,8 @@ typedef enum {
     VOICE_VAR_KEYUPS_WEEK,   /* {keyups_week}: ... in the last 7 days */
     VOICE_VAR_MINUTES_DAY,   /* {minutes_day}: minutes of traffic in the last 24 hours */
     VOICE_VAR_MINUTES_WEEK,  /* {minutes_week}: ... in the last 7 days */
+    VOICE_VAR_EXTERNAL,   /* {producer.field}: a file an external producer writes;
+                           * the word's clip holds "producer.field" */
 } voice_var_t;
 
 typedef struct {
@@ -124,6 +126,8 @@ typedef struct {
 
 /* Enough for ACC's longest command prefix (7 digits). */
 #define CFG_DTMF_PREFIX_STR 8
+/* read_00 to read_99: the read prefix takes exactly two keys. */
+#define CFG_READ_SLOTS 100
 
 typedef struct {
     bool enabled;
@@ -146,6 +150,8 @@ typedef struct {
     char link_status_code[CFG_DTMF_PREFIX_STR];
     char repeater_code[CFG_DTMF_PREFIX_STR];     /* + 0 = down, + 1 = up; empty by default */
     char regen_code[CFG_DTMF_PREFIX_STR];        /* + keys to send */
+    char read_prefix[CFG_DTMF_PREFIX_STR];       /* + two keys: play read_messages[NN] */
+    char read_messages[CFG_READ_SLOTS][CFG_NAME_STR];   /* read_NN; empty = no message */
     int    regen_tone_ms;
     int    regen_gap_ms;
     int    regen_lead_ms;   /* silence after keying the link, before the first tone */
@@ -164,12 +170,14 @@ typedef enum {
     COMMAND_NO_LINK,    /* a link command on a repeater with no link */
     COMMAND_REGEN,      /* send `digits` as fresh DTMF, here and over the link */
     COMMAND_ECHO,       /* record the next local transmission and play it back */
+    COMMAND_READ,       /* play the message dtmf.read_messages[digits] */
 } command_type_t;
 
 typedef enum {
     CODE_WHOLE,     /* the code alone */
     CODE_UP_DOWN,   /* the code + 0 or 1 */
     CODE_CAPTURE,   /* the code + every key after it, # and D included, to the unkey */
+    CODE_INDEX,     /* the code + exactly two keys 0-9 */
 } code_kind_t;
 
 /* Every DTMF code, in matching order: whole codes win over the code + argument forms.
@@ -268,6 +276,22 @@ typedef struct {
 
 #define CFG_CALLSIGN_STR 16
 
+/* [external]: programs outside usrp-rc that write words to files, spoken as
+ * {producer.field}. usrp-rc only reads the files. */
+#define CFG_MAX_PRODUCERS 16
+
+typedef struct {
+    char name[CFG_NAME_STR];
+    int  lifetime_s;               /* a file older than this is stale */
+    char fallback[CFG_NAME_STR];   /* message for a DTMF read when all is stale; empty = none */
+} config_producer_t;
+
+typedef struct {
+    char              dir[256];    /* each producer writes dir/<producer>/<field> */
+    config_producer_t producers[CFG_MAX_PRODUCERS];
+    int               nproducers;
+} config_external_t;
+
 typedef struct {
     char             callsign[CFG_CALLSIGN_STR];  /* letters and digits; {call} in messages */
     config_mmdvm_t   mmdvm;
@@ -279,6 +303,7 @@ typedef struct {
     config_stats_t   stats;
     config_state_t   state;
     config_log_t     log;
+    config_external_t external;
 
     config_message_t *messages;   /* everything defined, until config_prune_messages() */
     int               nmessages;
@@ -309,3 +334,6 @@ void config_apply_override(config_t *cfg, const config_override_t *o);
 
 /* Look up a message by name; returns NULL if not found or name is empty. */
 const config_message_t *config_find_message(const config_t *cfg, const char *name);
+
+/* The producer a {producer.field} word names, by the part before the dot; NULL if none. */
+const config_producer_t *config_find_producer(const config_t *cfg, const char *var);

@@ -54,6 +54,8 @@ timeout_message = timeout_warn
 # {call} works in voice and cw. Voice messages can also use these, each as its own
 # word, spoken as of when the message plays: {time}, {ampm}, {greeting}, {day}, {date},
 # {year}, {keyups_day}, {keyups_week}, {minutes_day}, {minutes_week}.
+# {producer.field}, for example {wx.temp}, speaks words that a producer writes:
+# see [external] at the end.
 #
 #     name = voice: THISIS {call} REPEATER     voice clips from vocab_8k/ or user_8k/
 #                                              "_" pauses audio.voice_gap_ms, "_400" pauses 400 ms
@@ -168,9 +170,9 @@ default_cw    = cw: {call}/R
 #cover_tone_off_ms = 900
 #local_cover_tone  = true  # false = silence on the repeater during the mute
 #link_cover_tone   = true  # false = silence on the link during the mute
-# Codes are 2 to 7 keys; the pad test prefix can be 1. The pad test and regen take
-# every key after their code, # and D included, to the unkey, so no other code can
-# start with theirs.
+# Codes are 2 to 7 keys; the pad test and read prefixes can be 1. The pad test and
+# regen take every key after their code, # and D included, to the unkey, and the read
+# prefix takes the two digits after it, so no other code can start with theirs.
 #pad_test_prefix = 5      # pad test: prefix, then keys to read back. Empty = off.
 #time_code       = 39     # speak the time. Empty = off, likewise the codes below.
 #stats_code      = 38     # speak usage over the last 24 hours (events.stats_message)
@@ -180,7 +182,17 @@ default_cw    = cw: {call}/R
 #link_status_code = 70   # says link on or link off, without a change
 #repeater_code   =        # + 0 = repeater down, + 1 = up. Empty = off: anyone could use it
 #regen_code      = 31     # + keys to send as fresh DTMF, here and over the link if it's on
+#read_prefix     = 4      # + two digits NN: plays the message named by read_NN
+#read_17         = weather   # read_00 to read_99: 417 plays the message 'weather'
 #regen_tone_ms   = 100    # regen settings take effect at startup only
 #regen_gap_ms    = 100
 #regen_lead_ms   = 200    # silence on the link before the first tone
 #regen_level     = 0.5
+
+#[external]
+# Producers: separate programs that write words for messages, for example weather.
+# usrp-rc reads their files when a message plays and never waits for them.
+#dir = /run/usrp-rc/ext   # <dir>/<producer>/<field> is read as {producer.field}
+# One line per producer: name = lifetime_seconds [fallback_message]. Data older than
+# the lifetime is silent; a DTMF read with nothing current plays the fallback.
+#wx = 5400 wx_unavailable

@@ -454,6 +454,13 @@ static void run_command(app_t *a, const command_t *c)
     case COMMAND_TIME:
         reply_with_message(a, a->cfg.events.time_message);
         break;
+    case COMMAND_READ: {
+        /* command.c only accepts an index that names a message. */
+        const char *name = a->cfg.dtmf.read_messages[atoi(c->digits) % CFG_READ_SLOTS];
+        rendered_audio_t r = message_render_readback(&a->cfg, a->vocab, name);
+        port_queue_reply(a->port, r.samples, r.n, monotonic_ms());
+        break;
+    }
     case COMMAND_STATS:
         reply_with_message(a, a->cfg.events.stats_message);
         break;

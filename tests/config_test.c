@@ -14,6 +14,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <time.h>
 
 #define BASE "[link]\nenabled = false\n"
 
@@ -87,6 +90,27 @@ static const test_case_t CASES[] = {
     {"dtmf code uses D",    BASE "[dtmf]\ntime_code = 3D\n", "dtmf.time_code: '3D' can only use"},
     {"dtmf code used twice", BASE "[dtmf]\nlink_on_code = 39\n", "dtmf.link_on_code: '39' is already used by dtmf.time_code"},
     {"repeater code clash",  BASE "[dtmf]\nrepeater_code = 12\nlink_status_code = 120\n", "dtmf.repeater_code: '120' is already used by dtmf.link_status_code"},
+    {"producer declared",   BASE "[external]\nwx = 5400\n[messages]\nm = voice: {wx.temp}\n", NULL},
+    {"producer fallback",   BASE "[external]\nwx = 5400 wxna\n[messages]\nwxna = voice: NEGATIVE\nm = voice: {wx.temp}\n", NULL},
+    {"external dir",        BASE "[external]\ndir = /tmp/ext\n", NULL},
+    {"undeclared producer", BASE "[messages]\nm = voice: {wx.temp}\n", "messages.m: '{wx.temp}' names no producer in [external]"},
+    {"bad producer variable", BASE "[external]\nwx = 60\n[messages]\nm = voice: {wx.te-mp}\n",
+                            "messages.m: '{wx.te-mp}' is not a producer variable"},
+    {"producer variable in cw", "callsign = W1XYZ\n" BASE "[external]\nwx = 60\n[messages]\nm = cw: {wx.temp}\n", "only {call} works in cw"},
+    {"producer without lifetime", BASE "[external]\nwx =\n", "external.wx: needs a lifetime in seconds"},
+    {"producer lifetime zero", BASE "[external]\nwx = 0\n", "external.wx: needs a lifetime in seconds"},
+    {"producer lifetime text", BASE "[external]\nwx = soon\n", "external.wx: needs a lifetime in seconds"},
+    {"fallback isn't a message", BASE "[external]\nwx = 60 nope\n", "external.wx: no message named 'nope'"},
+    {"two fallbacks",       BASE "[external]\nwx = 60 a b\n", "external.wx: after the lifetime, only one message name"},
+    {"bad producer name",   BASE "[external]\nw-x = 60\n", "external.w-x: a producer name is letters, digits and _"},
+    {"relative external dir", BASE "[external]\ndir = ext\n", "external.dir: needs an absolute path"},
+    {"read slot",           BASE "[dtmf]\nread_17 = m\n[messages]\nm = cw: A\n", NULL},
+    {"read slot names a missing message", BASE "[dtmf]\nread_17 = nope\n", "dtmf.read_17: no message named 'nope'"},
+    {"read slot with two names", BASE "[dtmf]\nread_17 = a, b\n", "dtmf.read_17: needs one message name"},
+    {"read slot with one digit", BASE "[dtmf]\nread_7 = m\n[messages]\nm = cw: A\n", "dtmf.read_7: unknown setting"},
+    {"read prefix can be off", BASE "[dtmf]\nread_prefix =\n", NULL},
+    {"code under read prefix", BASE "[dtmf]\ntime_code = 49\n",
+                            "dtmf.time_code: '49' starts with dtmf.read_prefix '4', which takes the two keys after it"},
     {"opus frame too big",   "[link]\nremote_host = 127.0.0.1\ncodec = opus\nopus_bitrate = 64000\nopus_frame_ms = 60\n", "480 bytes a frame, over the 256-byte limit"},
     {"link host is a name",  "[link]\nremote_host = localhost\n", "link.remote_host: 'localhost' must be an IPv4 address"},
     {"mmdvm address bad",    BASE "[mmdvm]\nrpt_address = 127.0.0.300\n", "mmdvm.rpt_address: '127.0.0.300' must be an IPv4 address"},
@@ -767,6 +791,77 @@ int main(void)
             snprintf(path, sizeof(path), "%s/%s.wav", dir, CLIPS[i].name);
             unlink(path);
         }
+        rmdir(dir);
+    }
+
+    printf("[12] producer variables\n");
+    {
+        char dir[] = "/tmp/usrp_rc_ext_test_XXXXXX";
+        if (!mkdtemp(dir))
+            return 1;
+        char sub[128], fa[160], fb[160], conf[1024];
+        snprintf(sub, sizeof(sub), "%s/wx", dir);
+        mkdir(sub, 0755);
+        snprintf(fa, sizeof(fa), "%s/a", sub);
+        snprintf(fb, sizeof(fb), "%s/b", sub);
+
+        vocab_cache_t *vc;
+        const char *clip_dirs[] = { "vocab_8k" };
+        vocab_cache_create(&vc, clip_dirs, 1);
+        size_t temp_n = 0, neg_n = 0;
+        vocab_get(vc, "TEMPERATURE", &temp_n);
+        vocab_get(vc, "NEGATIVE", &neg_n);
+
+        snprintf(conf, sizeof(conf), BASE "[external]\ndir = %s\nwx = 60 wxna\n"
+                 "[dtmf]\nread_17 = both\nread_18 = framed\n"
+                 "[messages]\nwxna = voice: NEGATIVE\nboth = voice: {wx.a} {wx.b}\n"
+                 "framed = voice: TEMPERATURE {wx.a} _100\nunused = cw: A\n", dir);
+        int rc = load_text(conf);
+        check("loads", rc == 0 && message_validate(&s_cfg, vc) == 0);
+        config_prune_messages(&s_cfg);
+        check("a read slot and a fallback keep their messages", config_find_message(&s_cfg, "both")
+              && config_find_message(&s_cfg, "wxna") && !config_find_message(&s_cfg, "unused"));
+
+        #define AUTO()     message_render(&s_cfg, vc, "both", -1.0).n
+        #define READBACK() message_render_readback(&s_cfg, vc, "both").n
+        struct timeval old[2] = {{.tv_sec = time(NULL) - 120}, {.tv_sec = time(NULL) - 120}};
+
+        write_file(fa, "TEMPERATURE\n");
+        write_file(fb, "");
+        check("fresh words play; a fresh empty file is silent", AUTO() == temp_n && READBACK() == temp_n);
+
+        write_file(fa, "TEMPERATURE _100\n");
+        check("_NNN in a file is a gap", AUTO() == temp_n + 800);
+
+        write_file(fa, "TEMPERATURE NOSUCHCLIP\n");
+        check("a word that isn't a clip drops the whole variable", AUTO() == 0);
+        check("... and a fresh producer gets no fallback", READBACK() == 0);
+
+        write_file(fa, "TEMPERATURE\n");
+        check("fresh: a read plays the message's own words too",
+              message_render_readback(&s_cfg, vc, "framed").n == 2 * temp_n + 800);
+        utimes(fb, old);
+        check("one stale variable is silent, the rest still play", AUTO() == temp_n && READBACK() == temp_n);
+
+        utimes(fa, old);
+        check("all stale: silent when automatic", AUTO() == 0);
+        check("all stale: a read plays the fallback, once", READBACK() == neg_n);
+        check("all stale: a read plays the fallback alone, not the message's own words",
+              message_render_readback(&s_cfg, vc, "framed").n == neg_n);
+
+        unlink(fa);
+        unlink(fb);
+        check("missing files count as stale", AUTO() == 0 && READBACK() == neg_n);
+
+        char big[1100];
+        memset(big, 'A', sizeof(big) - 1);
+        big[sizeof(big) - 1] = 0;
+        write_file(fa, big);
+        check("a file over 1024 bytes is dropped", AUTO() == 0);
+        unlink(fa);
+
+        vocab_cache_destroy(vc);
+        rmdir(sub);
         rmdir(dir);
     }
 

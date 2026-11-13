@@ -66,6 +66,7 @@ used. Speech and sound effects are WAV clips and text definitions.
 | Message | A named sequence of voice, CW and tone audio |
 | Event | A setting that names the message for one occasion |
 | Window | A schedule line that changes settings during a time period |
+| Producer | A separate program that writes words for messages, for example a weather report |
 
 ### 1.4 Units
 
@@ -94,6 +95,7 @@ commands operate only if the operator sets `[dtmf] enabled = true`.
 | `72` | Link on | "Link on" |
 | `73` | Link off | "Link off" |
 | `70` | Link status | "Link on" or "Link off". The link state does not change. |
+| `4` + 2 digits | Read | The message for that number, for example a weather report. See [2.9](#29-read-a-message). |
 | `5` + keys | Pad test | The keys. Use this command to test the DTMF tones of a radio. |
 | `31` + keys | DTMF regen | The keys, as new DTMF tones. See [2.6](#26-dtmf-regen). |
 
@@ -211,6 +213,16 @@ Use this command to hear how your signal sounds through the repeater.
 | Cover tone: a beep, one time each second | A station enters a DTMF command. |
 | Short falling tones | The time-out timer stopped a long transmission. Unkey to reset the timer. |
 | "Repeater down" or "Repeater up" with no repeated audio | The repeater is timed out or down, and a station entered the repeater command. |
+
+### 2.9 Read a message
+
+Enter `4` and a number of two digits, then unkey. The repeater plays the message that the
+operator assigns to that number. For example, `417` can play a weather report.
+
+- The number always has two digits. For number 1, enter `401`.
+- If the number has no message, nothing plays.
+- If the information is not current, the repeater can play a notice in its place, for
+  example "Weather not current". The operator selects the notice.
 
 ---
 
@@ -457,10 +469,87 @@ separate word in a `voice:` part.
 - `{time}`, `{ampm}` and `{greeting}` use the female `F_` clips. The other variables use
   the standard voice.
 - `{call}` is the only variable that also operates in `cw:` parts.
+- For words from a producer, for example `{wx.temp}`, see [5.6](#56-producer-variables).
 - The time and date come from the system clock and time zone of the computer. If the
   computer uses UTC, the repeater also uses UTC.
 
-### 5.6 Site voice clips
+### 5.6 Producer variables
+
+A producer is a separate program that supplies words for messages, for example a weather
+report. The producer writes files. `usrp-rc` reads a file when a message plays. It does not
+run the producer and does not wait for it.
+
+Declare each producer in `[external]`, then use its fields in `voice:` parts as
+`{producer.field}`:
+
+```ini
+[external]
+wx = 5400 wx_unavailable
+
+[messages]
+weather        = voice: WEATHER {wx.source} _ {wx.wind} _ {wx.temp}
+wx_unavailable = voice: WEATHER NOT CURRENT
+```
+
+`{wx.temp}` speaks the words in the file `/run/usrp-rc/ext/wx/temp`. The `wx` line gives
+the lifetime of the data in seconds, here 90 minutes, and a fallback message. The fallback
+is optional. See [11.11](#1111-external).
+
+When the message plays, each variable gets one of these results:
+
+| File | Result |
+| --- | --- |
+| Fresh, with words | The words play. A file is fresh if it is younger than the lifetime. |
+| Fresh and empty | Nothing plays. The producer has nothing to report. |
+| Stale or missing | Nothing plays. On a DTMF read, the fallback can play. |
+| A word that is not a clip, or a file over the limits | Nothing plays. `usrp-rc` drops the whole variable, because one missing word can change the meaning. |
+
+The fallback plays only on a DTMF read ([2.9](#29-read-a-message)). IDs, tail messages and
+other automatic messages never play it.
+
+- If no producer in the message has a fresh file, only the fallbacks play. The words of the
+  message itself do not play.
+- If one producer has a fresh file and another has none, the message plays. The
+  fallback of the producer with no fresh file plays at its first variable.
+- Each fallback plays one time in a message.
+- A producer variable in a fallback message gets no fallback of its own.
+
+If a variable plays nothing, the pauses on the two sides of it play one after the other. Put
+pauses between variables only where they are necessary.
+
+At start, `usrp-rc` makes sure that each producer in a variable is in `[external]`, and that
+each fallback message exists. It cannot examine the words in the files at start, because
+they change. At start, at `--check` and when a message plays, the log shows each change of
+state of a variable, one time:
+
+```text
+external: {wx.temp} FRESH
+external: {wx.temp} STALE, 10800 s old, lifetime 5400 s
+external: {wx.sky} DROPPED, no clip 'CLOUDY'
+external: {wx.wind} MISSING, No such file or directory
+```
+
+#### Producer interface
+
+These rules apply to the producer program:
+
+- One file for each field, at `<dir>/<producer>/<field>`. The default `dir` is
+  `/run/usrp-rc/ext`.
+- The file holds one line of clip names and pauses (`_` or `_NNN`), separated by spaces.
+  Variables in a file are not expanded.
+- A file holds a maximum of 1024 bytes and 32 words.
+- The modification time of the file is the time of the data, not the time of the write.
+- Write a temporary file in the same directory, then rename it. Then `usrp-rc` never reads
+  a part of a file.
+- Use only clips that are installed in `/usr/local/share/usrp-rc/user_8k/` and
+  `vocab_8k/`. A clip from another location can be absent on the repeater.
+- Labels are part of the field, for example `TEMPERATURE FORTY TWO`.
+- How the producer runs is not part of the interface: a timer, a service or a cron job.
+
+The source tree includes a METAR weather producer in `producers/metar/`. Its README gives
+the fields and the installation.
+
+### 5.7 Site voice clips
 
 To add a clip, or to replace a stock clip:
 
@@ -479,7 +568,7 @@ case-sensitive.
 > louder than repeat audio. MMDVM-Host pre-emphasis also increases high frequencies to the
 > transmitter. Start with peaks near -10 dBFS. Then adjust by ear or with a deviation meter.
 
-### 5.7 Limits
+### 5.8 Limits
 
 | Item | Limit |
 | --- | --- |
@@ -489,7 +578,7 @@ case-sensitive.
 | Message names and clip names | 31 characters |
 | Number of messages | No limit |
 
-### 5.8 Validation
+### 5.9 Validation
 
 At each start and at each `--check`, `usrp-rc` makes sure that each clip for each message
 exists. This includes the built-in replies.
@@ -505,10 +594,10 @@ exists. This includes the built-in replies.
 
 > **Note:** The validation cannot hear the audio. Listen to each new message on the air.
 
-### 5.9 Unused messages
+### 5.10 Unused messages
 
-After validation, `usrp-rc` keeps only the messages that an `[events]` setting or a
-schedule window names. Unused messages and unused catalog tones use no memory. At start
+After validation, `usrp-rc` keeps only the messages that an `[events]` setting, a
+schedule window, a `read_NN` setting or a producer fallback names. Unused messages and unused catalog tones use no memory. At start
 and at `--check`, `usrp-rc` shows the two quantities:
 
 ```text
@@ -947,13 +1036,14 @@ stats_code   =
 ### 9.2 Codes
 
 - A code can contain `0` to `9`, `*`, `A`, `B` and `C`.
-- The length of a code is 2 to 7 keys. The pad test prefix can also be 1 key, for the
-  `5` that most controllers use.
+- The length of a code is 2 to 7 keys. The pad test prefix and the read prefix can also be
+  1 key, for the `5` and `4` defaults.
 - `#` and `D` are not available in codes. They cancel and execute.
 - An empty code disables its command. In the example above, `stats_code` is empty.
 - The pad test prefix and the regen code take each key after them, to the unkey. Thus,
   no other code can start with one of them. With the defaults, no code can start with
   `5` or `31`. `--check` shows each code that does.
+- The read prefix takes the two digits after it. No other code can start with it.
 
 > **Note:** DTMF gives no security. A station that monitors the repeater can hear a code
 > and use it. Select the enabled commands with this risk in mind.
@@ -1006,6 +1096,7 @@ dtmf: '38': ACCEPTED command = usage
 | | | `'31*3': ACCEPTED command = regen *3` |
 | `ERROR` | The entry is complete, but no command can execute. | `'99': ERROR no command matched` |
 | | A link command on a repeater with no link. The reply is "No link service". | `'70': ERROR command = link status, no link service` |
+| | A read number with no message. No reply plays. | `'417': ERROR no message 17` |
 | `ABANDONED` | The entry stopped before it was complete. | `'12#': ABANDONED user terminated` |
 
 An `ABANDONED` line also names the timer that expired, if a timer expired. At
@@ -1204,6 +1295,8 @@ Levels above 1.0 are permitted, but they can cause clipping.
 | `link_off_code` | `73` | 2-7 keys | Link-off command. Empty is off. |
 | `link_status_code` | `70` | 2-7 keys | Link-status command. Empty is off. |
 | `repeater_code` | Empty | 2-7 keys | Repeater command: code + `0` is down, code + `1` is up. Empty is off. See [9.7](#97-repeater-down-and-up). |
+| `read_prefix` | `4` | 1-7 keys | Read prefix: prefix + 2 digits. Empty is off. See [2.9](#29-read-a-message). |
+| `read_00` to `read_99` | Empty | Message name | The message for read number 00 to 99 |
 | `regen_code` | `31` | 2-7 keys | DTMF regen: code + keys to send. Empty is off. See [9.8](#98-dtmf-regen). |
 | `regen_tone_ms` | `100` | 40-1000 | Regen tone length |
 | `regen_gap_ms` | `100` | 40-1000 | Silence between regen tones |
@@ -1262,7 +1355,16 @@ event's message in its place.
 
 A list holds a maximum of 8 names.
 
-### 11.11 `[messages]` and `[schedule]`
+### 11.11 `[external]`
+
+| Setting | Default | Function |
+| --- | --- | --- |
+| `dir` | `/run/usrp-rc/ext` | Directory of the producer files. An absolute path. |
+| *name* | None | One line for each producer: `name = lifetime [fallback]`. The lifetime is 1 to 604800 seconds. The fallback is a message name and is optional. A maximum of 16 producers. |
+
+A producer name has letters, digits and `_`. See [5.6](#56-producer-variables).
+
+### 11.12 `[messages]` and `[schedule]`
 
 See [section 5](#5-messages) and [section 7](#7-schedule).
 
@@ -1380,6 +1482,25 @@ first tone:
 ct_delay = 0.64
 ```
 
+### 12.10 Read the weather with code `417`
+
+The METAR producer in `producers/metar/` writes the fields of `wx`. A report is hourly, so
+a lifetime of 90 minutes includes one late report.
+
+```ini
+[external]
+wx = 5400 wx_unavailable
+
+[dtmf]
+read_17 = weather
+
+[messages]
+weather        = voice: WEATHER {wx.source} _ {wx.time} _ {wx.wind} _ {wx.visibility} _ {wx.sky} {wx.weather} _ {wx.temp} _ {wx.dewpoint} _ {wx.pressure}
+wx_unavailable = voice: WEATHER NOT CURRENT
+```
+
+`{wx.weather}` is empty if there is nothing to report, so it has no pause before it.
+
 ---
 
 ## 13. Log and troubleshooting
@@ -1409,6 +1530,9 @@ cause of a problem.
 | `a variable needs the voice clip` | A stock clip is missing. | Do `sudo make install`. It replaces all stock clips. |
 | No courtesy tone in one link state | The `ct_` setting for that state is empty. An empty setting plays no tone. | Set all three `ct_` settings. See [6.2](#62-courtesy-tones). |
 | A tail message does not play | `tail_every` is 0, or the conditions are not true. | Look for the `tail_every` warning. On a quiet repeater, the `tail_every` count can be not yet reached. `tail_min_interval` can also prevent the message. |
+| A read number plays nothing | The number has no message, or the producer data is not current and there is no fallback. | Look for `ERROR no message` or `external:` lines in the log. |
+| A producer variable plays nothing | The file is stale, missing or dropped. | Read the `external:` line for that variable. For `DROPPED`, the producer used a word that is not a clip. For `STALE`, make sure that the producer runs. |
+| `names no producer in [external]` | A variable names a producer that `[external]` does not declare. | Add the producer to `[external]`, or correct the name. |
 | A window opens at the wrong time | The clock or the time zone is wrong. | Examine the clock and time zone with `timedatectl`. |
 | Usage statistics reset at restart | `usrp-rc` cannot write the file. | Look for `stats: can't save` in the log. Make sure that `/var/local/usrp-rc` exists and the service file is current. Then do `sudo systemctl daemon-reload`. |
 | No audio from the link | The link is off. | Look for `73` in the log, or for `start_on = false`. |

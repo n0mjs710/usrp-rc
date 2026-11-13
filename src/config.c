@@ -81,6 +81,8 @@ void config_defaults(config_t *cfg)
     strncpy(cfg->dtmf.link_on_code, "72", sizeof(cfg->dtmf.link_on_code) - 1);
     strncpy(cfg->dtmf.link_off_code, "73", sizeof(cfg->dtmf.link_off_code) - 1);
     strncpy(cfg->dtmf.link_status_code, "70", sizeof(cfg->dtmf.link_status_code) - 1);
+    strncpy(cfg->dtmf.read_prefix, "4", sizeof(cfg->dtmf.read_prefix) - 1);
+    strncpy(cfg->external.dir, "/run/usrp-rc/ext", sizeof(cfg->external.dir) - 1);
 
     strncpy(cfg->events.time_message, "time_readback", sizeof(cfg->events.time_message) - 1);
     strncpy(cfg->events.stats_message, "stats_readback", sizeof(cfg->events.stats_message) - 1);
@@ -206,6 +208,7 @@ static const field_t FIELDS[] = {
     STR("dtmf",  "link_status_code", dtmf.link_status_code),
     STR("dtmf",  "repeater_code", dtmf.repeater_code),
     STR("dtmf",  "regen_code",    dtmf.regen_code),
+    STR("dtmf",  "read_prefix",   dtmf.read_prefix),
     INT("dtmf",  "regen_tone_ms", dtmf.regen_tone_ms, 40, 1000),
     INT("dtmf",  "regen_gap_ms",  dtmf.regen_gap_ms, 40, 1000),
     INT("dtmf",  "regen_lead_ms", dtmf.regen_lead_ms, 0, 2000),
@@ -239,9 +242,11 @@ static const field_t FIELDS[] = {
 
 #define MESSAGES_SECTION "messages"
 #define SCHEDULE_SECTION "schedule"
+#define EXTERNAL_SECTION "external"
 
 static const char *const SECTIONS[] = {
-    "log", "mmdvm", "link", "audio", "timers", "dtmf", "stats", "state", "events", MESSAGES_SECTION, SCHEDULE_SECTION, NULL,
+    "log", "mmdvm", "link", "audio", "timers", "dtmf", "stats", "state", "events", MESSAGES_SECTION, SCHEDULE_SECTION,
+    EXTERNAL_SECTION, NULL,
 };
 
 static const char *const ELEM_TYPES[] = {"cw", "voice", "tone", NULL};
@@ -665,13 +670,34 @@ static void read_field(const char *value, const char *path, const field_t *f, co
     }
 }
 
+/* read_NN in [dtmf]: the message the read prefix plays for keys NN. Returns false if
+ * the key isn't of that form. */
+static bool read_slot(const entry_t *e, config_t *cfg)
+{
+    const char *k = e->key;
+    if (strcmp(e->section, "dtmf") != 0 || strncmp(k, "read_", 5) != 0
+        || !isdigit((unsigned char)k[5]) || !isdigit((unsigned char)k[6]) || k[7])
+        return false;
+    char *slot = cfg->dtmf.read_messages[(k[5] - '0') * 10 + (k[6] - '0')];
+    if (!e->value[0] || strpbrk(e->value, " \t,"))
+        cfg_err("dtmf.%s: needs one message name\n", k);
+    else if (strlen(e->value) >= CFG_NAME_STR)
+        cfg_err("dtmf.%s: '%s' is too long (max %d characters)\n", k, e->value, CFG_NAME_STR - 1);
+    else
+        strcpy(slot, e->value);
+    return true;
+}
+
 static void read_settings(const entries_t *es, config_t *cfg)
 {
     for (int i = 0; i < es->n; i++) {
         const entry_t *e = &es->v[i];
-        if (strcmp(e->section, MESSAGES_SECTION) == 0 || strcmp(e->section, SCHEDULE_SECTION) == 0)
+        if (strcmp(e->section, MESSAGES_SECTION) == 0 || strcmp(e->section, SCHEDULE_SECTION) == 0
+            || strcmp(e->section, EXTERNAL_SECTION) == 0)
             continue;
         s_line = e->line;
+        if (read_slot(e, cfg))
+            continue;
 
         const field_t *f = NULL;
         for (size_t j = 0; j < NFIELDS && !f; j++)
@@ -686,6 +712,88 @@ static void read_settings(const entries_t *es, config_t *cfg)
         read_field(e->value, path, f, cfg);
     }
     s_line = 0;
+}
+
+/* A producer or field name: letters, digits and _, so it is also a safe file name. */
+static bool is_ident(const char *s, size_t len)
+{
+    if (len == 0)
+        return false;
+    for (size_t i = 0; i < len; i++)
+        if (!isalnum((unsigned char)s[i]) && s[i] != '_')
+            return false;
+    return true;
+}
+
+/* [external]: dir, and one line per producer, "lifetime_seconds [fallback_message]".
+ * Read before [messages], which name these producers. */
+static void read_external(const entries_t *es, config_t *cfg)
+{
+    config_external_t *x = &cfg->external;
+    for (int i = 0; i < es->n; i++) {
+        const entry_t *e = &es->v[i];
+        if (strcmp(e->section, EXTERNAL_SECTION) != 0)
+            continue;
+        s_line = e->line;
+        char path[64];
+        snprintf(path, sizeof(path), "external.%s", e->key);
+
+        if (strcmp(e->key, "dir") == 0) {
+            if (e->value[0] != '/' || strlen(e->value) >= sizeof(x->dir))
+                cfg_err("%s: needs an absolute path, at most %zu characters\n", path, sizeof(x->dir) - 1);
+            else
+                strcpy(x->dir, e->value);
+            continue;
+        }
+        if (!is_ident(e->key, strlen(e->key)) || strlen(e->key) >= CFG_NAME_STR) {
+            cfg_err("%s: a producer name is letters, digits and _, at most %d characters\n",
+                    path, CFG_NAME_STR - 1);
+            continue;
+        }
+        if (x->nproducers == CFG_MAX_PRODUCERS) {
+            cfg_err("%s: more than %d producers\n", path, CFG_MAX_PRODUCERS);
+            continue;
+        }
+        config_producer_t *p = &x->producers[x->nproducers];
+        memset(p, 0, sizeof(*p));
+        strcpy(p->name, e->key);
+
+        char copy[CFG_STR];
+        snprintf(copy, sizeof(copy), "%s", e->value);
+        char *save = NULL;
+        char *life = strtok_r(copy, " \t", &save);
+        char *fallback = strtok_r(NULL, " \t", &save);
+        long long secs;
+        if (!life || !parse_int(life, &secs) || secs < 1 || secs > 604800) {
+            cfg_err("%s: needs a lifetime in seconds, 1 to 604800, then optionally a message name\n", path);
+            continue;
+        }
+        if (strtok_r(NULL, " \t", &save)) {
+            cfg_err("%s: after the lifetime, only one message name\n", path);
+            continue;
+        }
+        if (fallback && strlen(fallback) >= CFG_NAME_STR) {
+            cfg_err("%s: '%s' is too long (max %d characters)\n", path, fallback, CFG_NAME_STR - 1);
+            continue;
+        }
+        p->lifetime_s = (int)secs;
+        if (fallback)
+            strcpy(p->fallback, fallback);
+        x->nproducers++;
+    }
+    s_line = 0;
+}
+
+const config_producer_t *config_find_producer(const config_t *cfg, const char *var)
+{
+    const char *dot = strchr(var, '.');
+    size_t len = dot ? (size_t)(dot - var) : strlen(var);
+    for (int i = 0; i < cfg->external.nproducers; i++) {
+        const config_producer_t *p = &cfg->external.producers[i];
+        if (strlen(p->name) == len && strncmp(p->name, var, len) == 0)
+            return p;
+    }
+    return NULL;
 }
 
 /* The bare callsign: {call} has to work for both CW and spelled-out voice, so
@@ -847,6 +955,31 @@ static void read_voice(char *words, const char *path, const config_t *cfg, confi
             if (!cfg->callsign[0])
                 cfg_err("%s: uses {call} but no callsign is set\n", path);
             add_voice_callsign(elem, path, cfg->callsign);
+        } else if (tok[0] == '{' && strchr(tok, '.')) {
+            /* {producer.field} */
+            size_t len = strlen(tok);
+            const char *dot = strchr(tok, '.');
+            if (tok[len - 1] != '}' || !is_ident(tok + 1, (size_t)(dot - tok - 1))
+                || !is_ident(dot + 1, (size_t)(tok + len - 1 - dot - 1)) || len - 2 >= CFG_NAME_STR) {
+                cfg_err("%s: '%s' is not a producer variable: {producer.field}, letters, digits and _\n",
+                        path, tok);
+                continue;
+            }
+            char name[CFG_NAME_STR];
+            snprintf(name, sizeof(name), "%.*s", (int)(len - 2), tok + 1);
+            if (!config_find_producer(cfg, name)) {
+                cfg_err("%s: '%s' names no producer in [external]\n", path, tok);
+                continue;
+            }
+            if (elem->n_voice_words == CFG_MAX_VOICE_WORDS)
+                cfg_err("%s: more than %d words\n", path, CFG_MAX_VOICE_WORDS);
+            if (elem->n_voice_words >= CFG_MAX_VOICE_WORDS) {
+                elem->n_voice_words = CFG_MAX_VOICE_WORDS + 1;
+                continue;
+            }
+            config_voice_word_t *w = &elem->voice_words[elem->n_voice_words++];
+            w->var = VOICE_VAR_EXTERNAL;
+            strcpy(w->clip, name);
         } else if (strchr(tok, '{')) {
             cfg_err("%s: unknown placeholder '%s' (see [messages] in the README for the list; each must be its own word)\n",
                     path, tok);
@@ -1601,6 +1734,7 @@ const config_dtmf_code_t CONFIG_DTMF_CODES[] = {
     {"repeater_code",    offsetof(config_dtmf_t, repeater_code),    CODE_UP_DOWN, COMMAND_REPEATER,    "repeater"},
     {"regen_code",       offsetof(config_dtmf_t, regen_code),       CODE_CAPTURE, COMMAND_REGEN,       "regen"},
     {"pad_test_prefix",  offsetof(config_dtmf_t, pad_test_prefix),  CODE_CAPTURE, COMMAND_PAD_TEST,    "DTMF test +"},
+    {"read_prefix",      offsetof(config_dtmf_t, read_prefix),      CODE_INDEX,   COMMAND_READ,        "read"},
 };
 const size_t CONFIG_NDTMF_CODES = sizeof(CONFIG_DTMF_CODES) / sizeof(CONFIG_DTMF_CODES[0]);
 
@@ -1620,8 +1754,9 @@ static void check_consistency(const config_t *cfg)
         /* # and D are the cancel and enter keys, so a code could never be typed. */
         if (code[strspn(code, "0123456789*ABC")])
             cfg_err(WHERE_FMT "dtmf.%s: '%s' can only use 0-9, *, A, B and C\n", WHERE_ARGS, CODES[i].key, code);
-        /* Only the pad test may be one key, as 5 is on nearly every controller. */
-        if (CODES[i].type != COMMAND_PAD_TEST && strlen(code) == 1)
+        /* Only the pad test and the read prefix may be one key: a one-key code takes
+         * that key away from every other code. */
+        if (CODES[i].type != COMMAND_PAD_TEST && CODES[i].type != COMMAND_READ && strlen(code) == 1)
             cfg_err(WHERE_FMT "dtmf.%s: '%s' must be at least 2 keys\n", WHERE_ARGS, CODES[i].key, code);
         for (size_t j = 0; j < i; j++)
             if (code[0] && strcmp(code, CODE(j)) == 0)
@@ -1632,12 +1767,14 @@ static void check_consistency(const config_t *cfg)
         const char *own = CODE(i);
         if (!own[0])
             continue;
-        /* A capture code takes every key after it, so no other code can start with one. */
-        if (CODES[i].kind == CODE_CAPTURE) {
+        /* A capture code takes every key after it, and the read prefix the two after it,
+         * so no other code can start with one. */
+        if (CODES[i].kind == CODE_CAPTURE || CODES[i].kind == CODE_INDEX) {
             for (size_t j = 0; j < NCODES; j++)
                 if (j != i && strcmp(CODE(j), own) != 0 && strncmp(CODE(j), own, strlen(own)) == 0)
-                    cfg_err(WHERE_FMT "dtmf.%s: '%s' starts with dtmf.%s '%s', which takes every key after it\n",
-                            WHERE_ARGS, CODES[j].key, CODE(j), CODES[i].key, own);
+                    cfg_err(WHERE_FMT "dtmf.%s: '%s' starts with dtmf.%s '%s', which takes %s after it\n",
+                            WHERE_ARGS, CODES[j].key, CODE(j), CODES[i].key, own,
+                            CODES[i].kind == CODE_CAPTURE ? "every key" : "the two keys");
         }
         /* An up/down command is its code plus 0 or 1, so those can't be other codes. */
         if (CODES[i].kind == CODE_UP_DOWN) {
@@ -1773,6 +1910,28 @@ static void validate(const entries_t *es, const config_t *cfg)
     if (!ev->impolite_id[0])
         cfg_err("events.impolite_id is required: it's the ID of last resort if mandatory_ids is empty\n");
 
+    for (int i = 0; i < CFG_READ_SLOTS; i++) {
+        if (!cfg->dtmf.read_messages[i][0])
+            continue;
+        char key[16], path[32];
+        snprintf(key, sizeof(key), "read_%02d", i);
+        snprintf(path, sizeof(path), "dtmf.%s", key);
+        const entry_t *e = entry_find(es, "dtmf", key);
+        s_line = e ? e->line : 0;
+        check_message_ref(cfg, path, cfg->dtmf.read_messages[i]);
+    }
+    for (int i = 0; i < cfg->external.nproducers; i++) {
+        const config_producer_t *p = &cfg->external.producers[i];
+        if (!p->fallback[0])
+            continue;
+        char path[64];
+        snprintf(path, sizeof(path), "external.%s", p->name);
+        const entry_t *e = entry_find(es, EXTERNAL_SECTION, p->name);
+        s_line = e ? e->line : 0;
+        check_message_ref(cfg, path, p->fallback);
+    }
+    s_line = 0;
+
     int before = s_errors;
     check_consistency(cfg);
     warn_settings(cfg, NULL);
@@ -1836,6 +1995,7 @@ int config_load(config_t *cfg, const char *path)
     }
 
     read_settings(&es, cfg);
+    read_external(&es, cfg);
     check_callsign(&es, cfg);
     log_set_level(cfg->log.level);
 
@@ -1851,6 +2011,12 @@ int config_load(config_t *cfg, const char *path)
 
 static bool message_in_use(const config_t *cfg, const char *name)
 {
+    for (int i = 0; i < CFG_READ_SLOTS; i++)
+        if (strcmp(cfg->dtmf.read_messages[i], name) == 0)
+            return true;
+    for (int i = 0; i < cfg->external.nproducers; i++)
+        if (strcmp(cfg->external.producers[i].fallback, name) == 0)
+            return true;
     for (size_t i = 0; i < NFIELDS; i++) {
         if (strcmp(FIELDS[i].section, "events") != 0)
             continue;

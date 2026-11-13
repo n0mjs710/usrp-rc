@@ -354,6 +354,27 @@ static void test_commands(void)
         press_all(&r, "31*1234");
         check("regen is 31 by default",
               command_session_end_of_tx(r.s, &c) && c.type == COMMAND_REGEN && strcmp(c.digits, "*1234") == 0);
+        press_all(&r, "417");
+        check("read prefix + a number with no message does nothing", !command_session_end_of_tx(r.s, &c));
+        strcpy(s_cfg.dtmf.read_messages[17], "metar");
+        strcpy(s_cfg.dtmf.read_messages[5], "five");
+        press_all(&r, "417");
+        check("read prefix 4 + 17 reads message 17",
+              command_session_end_of_tx(r.s, &c) && c.type == COMMAND_READ && strcmp(c.digits, "17") == 0);
+        press_all(&r, "405");
+        check("... always two keys: 05", command_session_end_of_tx(r.s, &c) && c.type == COMMAND_READ
+              && strcmp(c.digits, "05") == 0);
+        press_all(&r, "45");
+        check("one key isn't enough", !command_session_end_of_tx(r.s, &c));
+        press_all(&r, "4170");
+        check("three keys don't match", !command_session_end_of_tx(r.s, &c));
+        press_all(&r, "41*");
+        check("star isn't a number", !command_session_end_of_tx(r.s, &c));
+        r.got = 0;
+        press_all(&r, "417D");
+        check("D enters it", r.got == 1 && r.cmd.type == COMMAND_READ && strcmp(r.cmd.digits, "17") == 0);
+        memset(s_cfg.dtmf.read_messages, 0, sizeof(s_cfg.dtmf.read_messages));
+
         strcpy(s_cfg.dtmf.regen_code, "69");
         press_all(&r, "69*31234");
         check("regen sends everything after its code",

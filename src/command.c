@@ -80,6 +80,10 @@ static bool matches(const command_session_t *s, size_t i, bool whole)
             return !whole;
         return n == len + 1 && (s->digits[len] == '0' || s->digits[len] == '1');
     case CODE_CAPTURE: return n > len || !whole;
+    case CODE_INDEX:
+        if (n > len + 2 || strspn(s->digits + len, "0123456789") != n - len)
+            return false;
+        return n == len + 2 || !whole;
     }
     return false;
 }
@@ -105,6 +109,13 @@ static bool evaluate(command_session_t *s, command_t *out)
             out->type = COMMAND_NO_LINK;
         } else if (CODES[i].kind == CODE_UP_DOWN) {
             LOGI("dtmf: '%s': ACCEPTED command = %s %s\n", s->digits, CODES[i].name, *arg == '1' ? "up" : "down");
+        } else if (CODES[i].kind == CODE_INDEX) {
+            if (!s->cfg->dtmf.read_messages[atoi(arg)][0]) {
+                LOGI("dtmf: '%s': ERROR no message %s\n", s->digits, arg);
+                clear_digits(s);
+                return false;
+            }
+            LOGI("dtmf: '%s': ACCEPTED command = %s %s\n", s->digits, CODES[i].name, arg);
         } else if (CODES[i].kind == CODE_CAPTURE) {
             LOGI("dtmf: '%s': ACCEPTED command = %s %s\n", s->digits, CODES[i].name, arg);
         } else {

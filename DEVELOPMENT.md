@@ -71,13 +71,16 @@ Replies go through `port_queue_reply()` and play from the courtesy tone delay,
 the same slot the anxious ID uses.
 
 Every code is a row in `CONFIG_DTMF_CODES` in `src/config.c`: its setting, its kind
-(whole code, code + 0/1, or capture) and its command. `--check` validates from that
+(whole code, code + 0/1, capture, or index: code + exactly two digits 0-9) and its
+command. `--check` validates from that
 list and `command.c` matches against it, so a new command is a new row. Whether a
 command may run right now is one rule, `command_allowed()` in `main.c`.
 
 The capture codes (pad test, regen) switch `command.c` into capturing: every key after
 them, `#` and `D` included, goes into the entry until the unkey, which is why
-`check_consistency()` won't let another code start with one. Otherwise an entry
+`check_consistency()` won't let another code start with one. The read prefix is an
+index code, held to the same rule: its two digits pick a `read_NN` message, and an
+empty slot is an `ERROR` with no reply. Otherwise an entry
 that no code starts with is dropped at the digit that kills it. The mute doesn't
 care: any valid tone mutes both paths, so no DTMF leaks. Regen's link copy
 is the only controller audio that goes to the link. `main.c` keys the link and paces
@@ -143,6 +146,7 @@ The stateful pieces, and where their state lives:
 | DTMF | Decoder debounce; entry digits, capture, mute | Received frames |
 | STE | Delay line, lead trim | Received frames |
 | Schedule | `schedule_active[]`; `cfg` rebuilt from `base` | Minute timer |
+| Producer variables | None in memory: the files are the state. `s_ext_seen[]` only remembers each variable's last state, to log a change once | Each render |
 | Usage | Hour buckets | Usage callback, save timer |
 
 ## Schedule
@@ -153,6 +157,29 @@ windows have no start or end events to miss. `main.c` keeps the config as loaded
 module points at. So anything read from the config at the time it's used follows the
 schedule. Anything cached at startup (sockets, the codec, the DTMF decoder, the STE
 buffer, the DTMF cover tone) must be listed in `not_schedulable()` in `src/config.c`.
+
+## External producers
+
+A producer is a separate program that writes clip words to files; `{producer.field}`
+in a voice part speaks the file `<external.dir>/<producer>/<field>`. The contract is in
+MANUAL section 5.6, and `producers/metar/` is the first one.
+
+`usrp-rc` reads the file when the message renders, in the main loop. That is safe
+because the read is bounded (1024 bytes, 32 words) and the default directory is on
+tmpfs: nothing here waits on the network or on the producer. A producer that's slow,
+dead or never installed just leaves its files stale.
+
+- Freshness is the file's mtime against the producer's lifetime, judged per variable.
+  The producer sets the mtime to the time of the data.
+- A file with any word that isn't a clip is dropped whole (`ext_read()`): skipping a
+  word could change what the report means. Producers check the installed clip
+  directories themselves.
+- `message_render()` is automatic and never plays a fallback. `message_render_readback()`
+  is for DTMF reads. A fallback renders as automatic, so it can't nest.
+- The fallback is a message name, not words: only `[messages]` hold clips, so it gets
+  the same validation, and `config_prune_messages()` keeps it, like a `read_NN` message.
+- Validation at load checks that each variable names a declared producer and that
+  each fallback exists. File contents can't be checked at load.
 
 ## Usage statistics
 
