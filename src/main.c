@@ -77,6 +77,7 @@ typedef struct {
 
     config_t        base;     /* as loaded; cfg is this with any open schedule window applied */
     bool     schedule_active[CFG_MAX_SCHEDULE];
+    bool     started;           /* the port has started: a window can announce */
     uint64_t schedule_deadline;
 
     bool prev_mmdvm_keyup;
@@ -799,11 +800,19 @@ static void schedule_update(app_t *a, uint64_t now)
     struct tm when;
     localtime_r(&t, &when);
 
-    bool active[CFG_MAX_SCHEDULE];
-    schedule_evaluate(&a->base, &when, &a->cfg, active);
+    bool field_on[CFG_MAX_SCHEDULE] = {0}, active[CFG_MAX_SCHEDULE];
+    for (int i = 0; i < a->base.nschedule; i++)
+        if (a->base.schedule[i].field[0])
+            field_on[i] = message_field_current(&a->base, a->vocab, a->base.schedule[i].field);
+    schedule_evaluate(&a->base, &when, field_on, &a->cfg, active);
     for (int i = 0; i < a->base.nschedule; i++) {
+        const char *announce = a->base.schedule[i].announce;
         if (active[i] != a->schedule_active[i])
-            LOGI("schedule: '%s' %s\n", a->base.schedule[i].name, active[i] ? "started" : "ended");
+            LOGI("schedule: '%s' %s%s%s\n", a->base.schedule[i].name, active[i] ? "started" : "ended",
+                 active[i] && announce[0] ? ", ANNOUNCE " : "", active[i] ? announce : "");
+        /* Before the port starts, main() announces once it has. */
+        if (active[i] && !a->schedule_active[i] && a->started)
+            reply_with_message(a, announce);
         a->schedule_active[i] = active[i];
     }
     a->schedule_deadline = now + (uint64_t)(60 - when.tm_sec) * 1000;
@@ -1038,6 +1047,10 @@ int main(int argc, char *argv[])
         schedule_update(a, monotonic_ms());
 
     port_start(a->port, monotonic_ms());
+    a->started = true;
+    for (int i = 0; i < a->base.nschedule; i++)
+        if (a->schedule_active[i])
+            reply_with_message(a, a->base.schedule[i].announce);
 
     printf("usrp-rc %s: ready\n", USRP_RC_VERSION);
 

@@ -932,6 +932,26 @@ static voice_var_t voice_var(const char *tok)
     return VOICE_VAR_NONE;
 }
 
+/* {producer.field} into "producer.field", for a declared producer. */
+static bool parse_producer_var(const char *tok, const char *path, const config_t *cfg,
+                               char name[CFG_NAME_STR])
+{
+    size_t len = strlen(tok);
+    const char *dot = strchr(tok, '.');
+    if (tok[0] != '{' || !dot || tok[len - 1] != '}' || !is_ident(tok + 1, (size_t)(dot - tok - 1))
+        || !is_ident(dot + 1, (size_t)(tok + len - 1 - dot - 1)) || len - 2 >= CFG_NAME_STR) {
+        cfg_err("%s: '%s' is not a producer variable: {producer.field}, letters, digits and _\n",
+                path, tok);
+        return false;
+    }
+    snprintf(name, CFG_NAME_STR, "%.*s", (int)(len - 2), tok + 1);
+    if (!config_find_producer(cfg, name)) {
+        cfg_err("%s: '%s' names no producer in [external]\n", path, tok);
+        return false;
+    }
+    return true;
+}
+
 static void read_voice(char *words, const char *path, const config_t *cfg, config_message_t *out)
 {
     config_elem_t *elem = new_element(out, path);
@@ -956,21 +976,9 @@ static void read_voice(char *words, const char *path, const config_t *cfg, confi
                 cfg_err("%s: uses {call} but no callsign is set\n", path);
             add_voice_callsign(elem, path, cfg->callsign);
         } else if (tok[0] == '{' && strchr(tok, '.')) {
-            /* {producer.field} */
-            size_t len = strlen(tok);
-            const char *dot = strchr(tok, '.');
-            if (tok[len - 1] != '}' || !is_ident(tok + 1, (size_t)(dot - tok - 1))
-                || !is_ident(dot + 1, (size_t)(tok + len - 1 - dot - 1)) || len - 2 >= CFG_NAME_STR) {
-                cfg_err("%s: '%s' is not a producer variable: {producer.field}, letters, digits and _\n",
-                        path, tok);
-                continue;
-            }
             char name[CFG_NAME_STR];
-            snprintf(name, sizeof(name), "%.*s", (int)(len - 2), tok + 1);
-            if (!config_find_producer(cfg, name)) {
-                cfg_err("%s: '%s' names no producer in [external]\n", path, tok);
+            if (!parse_producer_var(tok, path, cfg, name))
                 continue;
-            }
             if (elem->n_voice_words == CFG_MAX_VOICE_WORDS)
                 cfg_err("%s: more than %d words\n", path, CFG_MAX_VOICE_WORDS);
             if (elem->n_voice_words >= CFG_MAX_VOICE_WORDS) {
@@ -1608,27 +1616,43 @@ static void read_schedule(const entries_t *es, config_t *cfg)
         memset(out, 0, sizeof(*out));
         strcpy(out->name, e->key);
 
+        /* [DAYS HH:MM-HH:MM] [{producer.field}] setting=value ... announce=message */
         char *copy = strdup(e->value);
         char *save = NULL;
-        char *days = strtok_r(copy, " \t", &save);
-        char *window = days ? strtok_r(NULL, " \t", &save) : NULL;
-        if (!window) {
-            cfg_err("%s: expected DAYS HH:MM-HH:MM setting=value\n", path);
-            free(copy);
-            continue;
+        char *tok = strtok_r(copy, " \t", &save);
+        if (tok && tok[0] != '{' && !strchr(tok, '=')) {
+            char *days = tok, *window = strtok_r(NULL, " \t", &save);
+            out->timed = true;
+            if (!parse_days(days, out))
+                cfg_err("%s: '%s' is not valid days (use sun..sat, daily, weekdays, weekends, 2nd-tue, 15th, last-day or dec-8, comma-separated; at most %d of the last four kinds)\n",
+                        path, days, CFG_MAX_DAY_RULES);
+            if (!window)
+                cfg_err("%s: expected DAYS HH:MM-HH:MM after '%s'\n", path, days);
+            else if (!parse_window(window, &out->start_min, &out->end_min))
+                cfg_err("%s: '%s' is not a valid time window (expected HH:MM-HH:MM, 24-hour)\n", path, window);
+            else if (out->start_min == out->end_min)
+                cfg_err("%s: window '%s' starts and ends at the same time\n", path, window);
+            tok = window ? strtok_r(NULL, " \t", &save) : NULL;
         }
-        if (!parse_days(days, out))
-            cfg_err("%s: '%s' is not valid days (use sun..sat, daily, weekdays, weekends, 2nd-tue, 15th, last-day or dec-8, comma-separated; at most %d of the last four kinds)\n",
-                    path, days, CFG_MAX_DAY_RULES);
-        if (!parse_window(window, &out->start_min, &out->end_min))
-            cfg_err("%s: '%s' is not a valid time window (expected HH:MM-HH:MM, 24-hour)\n", path, window);
-        else if (out->start_min == out->end_min)
-            cfg_err("%s: window '%s' starts and ends at the same time\n", path, window);
+        if (tok && tok[0] == '{') {
+            parse_producer_var(tok, path, cfg, out->field);
+            tok = strtok_r(NULL, " \t", &save);
+        }
+        if (!out->timed && !out->field[0])
+            cfg_err("%s: expected DAYS HH:MM-HH:MM, {producer.field} or both, then setting=value\n", path);
 
-        for (char *tok = strtok_r(NULL, " \t", &save); tok; tok = strtok_r(NULL, " \t", &save))
+        for (; tok; tok = strtok_r(NULL, " \t", &save)) {
+            if (strncmp(tok, "announce=", 9) == 0) {
+                if (!tok[9] || strlen(tok + 9) >= CFG_NAME_STR)
+                    cfg_err("%s: announce= needs a message name\n", path);
+                else
+                    strcpy(out->announce, tok + 9);
+                continue;
+            }
             read_override(tok, path, cfg, scratch, out);
-        if (out->nsets == 0)
-            cfg_err("%s: changes nothing (add at least one setting=value)\n", path);
+        }
+        if (out->nsets == 0 && !out->announce[0])
+            cfg_err("%s: changes nothing (add at least one setting=value, or announce=)\n", path);
 
         cfg->nschedule++;
         free(copy);
@@ -1971,6 +1995,15 @@ static void validate(const entries_t *es, const config_t *cfg)
             }
         }
     }
+    for (int i = 0; i < cfg->nschedule; i++) {
+        if (!cfg->schedule[i].announce[0])
+            continue;
+        char path[64];
+        snprintf(path, sizeof(path), "schedule.%s", cfg->schedule[i].name);
+        const entry_t *e = entry_find(es, SCHEDULE_SECTION, cfg->schedule[i].name);
+        s_line = e ? e->line : 0;
+        check_message_ref(cfg, path, cfg->schedule[i].announce);
+    }
     /* A fallback plays in place of a producer's words, so it can't use any itself. */
     for (int i = 0; i < cfg->external.nproducers; i++) {
         const config_producer_t *p = &cfg->external.producers[i];
@@ -2090,6 +2123,9 @@ static bool message_in_use(const config_t *cfg, const char *name)
             if (strcmp(names[j], name) == 0)
                 return true;
     }
+    for (int i = 0; i < cfg->nschedule; i++)
+        if (strcmp(cfg->schedule[i].announce, name) == 0)
+            return true;
     for (int i = 0; i < cfg->nschedule; i++)
         for (int j = 0; j < cfg->schedule[i].nsets; j++) {
             if (!cfg->schedule[i].sets[j].names)

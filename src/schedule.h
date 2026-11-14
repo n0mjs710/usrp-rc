@@ -10,9 +10,10 @@
 bool schedule_entry_active(const config_schedule_t *entry, const struct tm *when);
 
 /* The settings in force at this time: base, with each open window's settings
- * applied in file order, so a later entry wins. active[i] says whether entry i is
+ * applied in file order, so a later entry wins. field_on[i] says whether entry i's
+ * producer field has current words (NULL: none do). active[i] says whether entry i is
  * open. Nothing is remembered between calls: a window's changes end when it does,
  * and a restart in the middle of one picks it straight back up. out shares base's
  * messages, so only base is freed. */
-void schedule_evaluate(const config_t *base, const struct tm *when,
+void schedule_evaluate(const config_t *base, const struct tm *when, const bool *field_on,
                        config_t *out, bool active[CFG_MAX_SCHEDULE]);

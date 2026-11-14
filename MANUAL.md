@@ -791,8 +791,10 @@ net_running  = wed 19:30-20:30 timeout=600 hang=1 ct_link_on_message=net_ct
 ### 7.2 Window format
 
 ```text
-name = DAYS HH:MM-HH:MM setting=value [setting=value ...]
+name = [DAYS HH:MM-HH:MM] [{producer.field}] setting=value [setting=value ...]
 ```
+
+A window has days and times, a producer field, or both. See [7.9](#79-producer-windows).
 
 | Part | Rule |
 | --- | --- |
@@ -938,7 +940,37 @@ tail: 'net_tonight'
 schedule: 'net_reminder' ended
 ```
 
-### 7.9 Functions not available
+### 7.9 Producer windows
+
+A window can open on a producer field in place of days and times, or with them. The
+window is open while the field has current words. For producers, see
+[5.7](#57-producer-variables).
+
+`announce=message` plays the message one time when the window opens. If the repeater is
+idle, the transmitter keys for the message. The repeater then owes an ID, as after any
+transmission. No courtesy tone and no hang follow. If a station transmits, the message
+plays after the station unkeys, before the courtesy tone.
+
+```ini
+[messages]
+site_alarm = voice: {site.alarm} | tone: 697+1209:100 _50 770+1336:100
+wx_alert   = voice: {nws.alert}
+
+[schedule]
+alarm = {site.alarm} announce=site_alarm
+nws   = daily 07:00-22:00 {nws.alert} announce=wx_alert tail_messages+=wx_alert
+```
+
+- `alarm` keys the repeater when the alarm starts. The message includes DTMF tones, for
+  example to page a radio.
+- `nws` announces an alert one time, between 07:00 and 22:00. While the alert continues,
+  the alert is also a tail message.
+- `announce=` also operates in a window with only days and times.
+- The schedule examines the field at the start of each minute. Thus an announcement can
+  start up to 1 minute after the field changes.
+- After a restart, an open window announces again.
+
+### 7.10 Functions not available
 
 - A window cannot change `[link]` settings. Thus, a window cannot turn the link on or
   off.
@@ -1811,6 +1843,9 @@ producer and does not wait for it.
   a part of a file.
 - A file holds a maximum of 1024 bytes and 32 words. A number counts as the words that
   it speaks.
+- A schedule window can open on a field ([7.9](#79-producer-windows)). The schedule
+  examines the field one time each minute. Keep the words in such a field for 1 minute
+  or more, or the schedule can miss them.
 - How the producer runs is not part of the interface: a timer, a service or a cron job.
 
 ### C.2 Contents

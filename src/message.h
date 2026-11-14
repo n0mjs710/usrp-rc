@@ -37,6 +37,10 @@ int message_has_voice(const config_t *cfg, const char *name);
 rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
                                 const char *name, double morse_level_override);
 
+/* True if the producer variable var ("producer.field") has current words. It logs a
+ * change of state, as when the variable plays. */
+bool message_field_current(const config_t *cfg, vocab_cache_t *vocab, const char *var);
+
 /* Render voice clips by name, for replies built at run time rather than defined
  * in the config. A clip that doesn't exist is logged and skipped. Caller must
  * free(result.samples). */

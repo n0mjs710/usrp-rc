@@ -101,6 +101,12 @@ default_cw    = cw: {call}/R
 #
 #net_reminder = wed 07:00-19:25 tail_messages=net_tonight tail_every=5
 #net_running  = wed 19:30-20:30 timeout=600 hang=1 ct_link_on_message=net_ct ct_link_off_message=net_ct
+#
+# A window can also open while a producer field has current words, alone or with days
+# and times. announce=message plays once as the window opens, keying the transmitter
+# if the repeater is idle. See MANUAL.md 7.9.
+#
+#alarm = {site.alarm} announce=site_alarm
 
 # ── Optional: everything below shows the defaults ─────────────────────────
 #

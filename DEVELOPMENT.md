@@ -158,6 +158,12 @@ module points at. So anything read from the config at the time it's used follows
 schedule. Anything cached at startup (sockets, the codec, the DTMF decoder, the STE
 buffer, the DTMF cover tone) must be listed in `not_schedulable()` in `src/config.c`.
 
+A window can also depend on a producer field. `schedule_evaluate()` stays pure: the
+caller reads the fields first (`message_field_current()`) and passes the results in as
+`field_on[]`. `announce=` is the one start event. `schedule_update()` sees a window open
+by comparing against `schedule_active[]`, and plays the message through the DTMF reply
+path, `port_queue_reply()`. The windows open at startup announce after `port_start()`.
+
 ## External producers
 
 A producer is a separate program that writes clip words to files; `{producer.field}`

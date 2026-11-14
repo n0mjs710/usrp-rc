@@ -177,6 +177,16 @@ static const test_case_t CASES[] = {
     {"schedule empty window", BASE "[schedule]\na = wed 07:00-07:00 ct_link_on_message=\n", "starts and ends at the same time"},
     {"schedule no settings", BASE "[schedule]\na = wed 07:00-08:00\n", "schedule.a: changes nothing"},
     {"schedule too short",  BASE "[schedule]\na = wed\n", "schedule.a: expected DAYS HH:MM-HH:MM"},
+    {"field window",        BASE "[external]\nsite = 60\n[messages]\nalarm = voice: ALARM\n"
+                            "[schedule]\na = {site.alarm} announce=alarm\n", NULL},
+    {"field and time window", BASE "[external]\nsite = 60\n[schedule]\na = daily 07:00-22:00 {site.alarm} hang=1\n", NULL},
+    {"time window announce", BASE "[messages]\nhi = voice: HELLO\n[schedule]\na = daily 08:00-08:01 announce=hi\n", NULL},
+    {"window field undeclared", BASE "[schedule]\na = {site.alarm} hang=1\n", "schedule.a: '{site.alarm}' names no producer"},
+    {"announce no message", BASE "[external]\nsite = 60\n[schedule]\na = {site.alarm} announce=nope\n",
+                            "schedule.a: no message named 'nope'"},
+    {"announce empty",      BASE "[external]\nsite = 60\n[schedule]\na = {site.alarm} announce=\n",
+                            "schedule.a: announce= needs a message name"},
+    {"window with nothing", BASE "[schedule]\na = hang=1\n", "schedule.a: expected DAYS HH:MM-HH:MM, {producer.field} or both"},
     {"schedule a timer",    BASE "[schedule]\na = wed 07:00-08:00 hang=3 timeout=600 timers.ct_delay=0\n", NULL},
     {"schedule audio",      BASE "[schedule]\na = wed 07:00-08:00 morse_wpm=15 morse_pitch=600 master_gain=0.8\n", NULL},
     {"schedule dtmf",       BASE "[schedule]\na = wed 07:00-08:00 link_on_code= interdigit_ms=6000\n", NULL},
@@ -407,14 +417,14 @@ int main(void)
         bool active[CFG_MAX_SCHEDULE];
         struct tm t = {.tm_wday = 3, .tm_hour = 19, .tm_min = 30};
         load_text(BASE "[schedule]\nnet = wed 19:00-20:00 timeout=600 hang=1.5 morse_wpm=15 link_on_code=\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("numbers and codes apply while the window is open",
               run.timers.timeout == 600.0 && run.timers.hang == 1.5 && run.audio.morse_wpm == 15
               && run.dtmf.link_on_code[0] == 0);
         check("the file's own settings are untouched",
               s_cfg.timers.timeout == 180.0 && s_cfg.audio.morse_wpm == 20 && strcmp(s_cfg.dtmf.link_on_code, "72") == 0);
         t.tm_hour = 20;
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("and end with it", run.timers.timeout == 180.0 && run.timers.hang == s_cfg.timers.hang);
     }
 
@@ -558,48 +568,48 @@ int main(void)
         static config_t run;
         bool active[CFG_MAX_SCHEDULE];
 
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("before the window, the config's events apply",
               !active[0] && run.events.n_tail_messages == 0 && strcmp(run.events.ct_link_on_message, "m") == 0);
 
         t.tm_hour = 7; t.tm_min = 0;
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("the start minute is inside", active[0] && strcmp(run.events.tail_messages[0], "n") == 0
               && strcmp(run.events.ct_link_on_message, "n") == 0);
 
         t.tm_hour = 19; t.tm_min = 10;
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("where windows overlap, the later entry wins",
               active[0] && active[2] && strcmp(run.events.ct_link_on_message, "q") == 0 && strcmp(run.events.tail_messages[0], "n") == 0);
 
         t.tm_min = 25;
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("the end minute is outside", !active[0] && run.events.n_tail_messages == 0);
 
         t.tm_wday = THU; t.tm_hour = 12; t.tm_min = 0;
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("other days are untouched", !active[0] && !active[1] && strcmp(run.events.ct_link_on_message, "m") == 0);
 
         t.tm_wday = FRI; t.tm_hour = 23;
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("overnight: open late on its start day", active[1]);
         check("a list setting replaces the rotation",
               run.events.n_mandatory_ids == 2 && strcmp(run.events.mandatory_ids[1], "q") == 0);
 
         t.tm_wday = SAT; t.tm_hour = 1; t.tm_min = 59;
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("overnight: still open early the next day", active[1]);
         t.tm_hour = 2; t.tm_min = 0;
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("overnight: closed at the end", !active[1] && run.events.n_mandatory_ids == 1);
 
         t.tm_wday = FRI; t.tm_hour = 1;
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("overnight: not open early on its own start day", !active[1]);
 
         t.tm_wday = SUN; t.tm_hour = 1;
         load_text(BASE "[messages]\nm = cw: A\n[schedule]\nx = sat 23:00-01:30 tail_messages=m\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("overnight wraps Saturday into Sunday", active[0]);
         (void)MON; (void)TUE;
     }
@@ -612,57 +622,57 @@ int main(void)
         #define M "[messages]\na = cw: A\nb = cw: B\nc = cw: C\nd = cw: D\ne = cw: E\nf = cw: F\ng = cw: G\nh = cw: H\ni = cw: I\n"
 
         load_text(BASE M "[events]\ntail_messages = a\n[schedule]\nx = wed 00:00-23:59 tail_messages+=b\ny = wed 00:00-23:59 tail_messages+=c\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("+= builds on [events] and on earlier windows",
               run.events.n_tail_messages == 3 && strcmp(run.events.tail_messages[0], "a") == 0 && strcmp(run.events.tail_messages[1], "b") == 0 && strcmp(run.events.tail_messages[2], "c") == 0);
         check("the config's own list is untouched", s_cfg.events.n_tail_messages == 1);
 
         load_text(BASE M "[schedule]\nx = wed 00:00-23:59 tail_messages+=b\ny = 2nd-wed 00:00-23:59 tail_messages+=c\n");
         t.tm_year = 2026 - 1900; t.tm_mon = 10; t.tm_mday = 11;
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("your Wednesday case: the 2nd Wednesday gets both", run.events.n_tail_messages == 2);
         t.tm_mday = 4;
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("any other Wednesday gets the weekly one", run.events.n_tail_messages == 1 && strcmp(run.events.tail_messages[0], "b") == 0);
 
         load_text(BASE M "[events]\ntail_messages = a\n[schedule]\nx = wed 00:00-23:59 tail_messages+=a\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("+= doesn't add a name already there", run.events.n_tail_messages == 1);
 
         load_text(BASE M "[events]\ntail_messages = a,b,c\n[schedule]\nx = wed 00:00-23:59 tail_messages-=b\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("-= removes a name and keeps the order",
               run.events.n_tail_messages == 2 && strcmp(run.events.tail_messages[0], "a") == 0 && strcmp(run.events.tail_messages[1], "c") == 0);
 
         load_text(BASE M "[events]\ntail_messages = a,b\n[schedule]\nx = wed 00:00-23:59 tail_messages-=c\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("-= of a name not in the list changes nothing", run.events.n_tail_messages == 2);
 
         load_text(BASE M "[events]\ntail_messages = a,b\n[schedule]\nx = wed 00:00-23:59 tail_messages-=a,b\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("-= can empty an ordinary list", run.events.n_tail_messages == 0);
 
         load_text(BASE M "[events]\nmandatory_ids = a,b\n[schedule]\nx = wed 00:00-23:59 mandatory_ids-=a\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("-= takes one ID out of the rotation",
               run.events.n_mandatory_ids == 1 && strcmp(run.events.mandatory_ids[0], "b") == 0);
 
         load_text(BASE M "[events]\nmandatory_ids = a,b\n[schedule]\nx = wed 00:00-23:59 mandatory_ids-=a,b\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("-= can't remove the last mandatory ID",
               run.events.n_mandatory_ids == 1 && strcmp(run.events.mandatory_ids[0], "b") == 0);
 
         load_text(BASE M "[events]\ntail_messages = a,b,c,d,e,f,g,h\n[schedule]\nx = wed 00:00-23:59 tail_messages+=i\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("+= stops at the list's limit", run.events.n_tail_messages == 8 && strcmp(run.events.tail_messages[7], "h") == 0);
 
         load_text(BASE M "[events]\ntail_messages = a\n[schedule]\nx = wed 00:00-23:59 tail_messages+=b\ny = wed 00:00-23:59 tail_messages=c\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("a later = replaces what += built", run.events.n_tail_messages == 1 && strcmp(run.events.tail_messages[0], "c") == 0);
 
         t.tm_wday = 4;
         load_text(BASE M "[events]\ntail_messages = a\n[schedule]\nx = wed 00:00-23:59 tail_messages+=b\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("a closed window changes nothing", run.events.n_tail_messages == 1);
         #undef M
     }
@@ -694,7 +704,7 @@ int main(void)
             gmtime_r(&tn, &next);
             d.tm_hour = 20;
             d.tm_min = 0;
-            schedule_evaluate(&s_cfg, &d, &run, active);
+            schedule_evaluate(&s_cfg, &d, NULL, &run, active);
             for (int i = NTH; i <= LEAP; i++)
                 hits[i] += active[i];
             if (active[NTH] != (d.tm_wday == 2 && d.tm_mday >= 8 && d.tm_mday <= 14))
@@ -703,11 +713,11 @@ int main(void)
                 bad_last++;
             /* 01:00 on the 1st belongs to the night before; 01:00 on any other day doesn't. */
             d.tm_hour = 1;
-            schedule_evaluate(&s_cfg, &d, &run, active);
+            schedule_evaluate(&s_cfg, &d, NULL, &run, active);
             if (active[LATE] != (d.tm_mday == 1))
                 bad_late++;
             d.tm_hour = 2;
-            schedule_evaluate(&s_cfg, &d, &run, active);
+            schedule_evaluate(&s_cfg, &d, NULL, &run, active);
             if (active[LATE])
                 bad_late++;
         }
@@ -894,11 +904,38 @@ int main(void)
         check("a referenced message with nothing to say leaves the rest",
               message_render(&s_cfg, vc, "id", -1.0).n == temp_n + neg_n);
 
+        snprintf(conf, sizeof(conf), BASE "[external]\ndir = %s\nwx = 60\n"
+                 "[schedule]\nalert = {wx.a} hang=2\nday = daily 07:00-22:00 {wx.a} hang=3\n", dir);
+        check("a window with a field loads", load_text(conf) == 0);
+        {
+            static config_t run;
+            bool on[CFG_MAX_SCHEDULE], active[CFG_MAX_SCHEDULE];
+            struct tm noon = {.tm_hour = 12, .tm_mday = 14, .tm_mon = 10, .tm_year = 126, .tm_wday = 6};
+            struct tm night = noon;
+            night.tm_hour = 23;
+
+            write_file(fa, "TORNADO WARNING\n");
+            on[0] = message_field_current(&s_cfg, vc, "wx.a");
+            on[1] = on[0];
+            check("a field with current words is on", on[0]);
+            schedule_evaluate(&s_cfg, &noon, on, &run, active);
+            check("... and opens its windows", active[0] && active[1] && run.timers.hang == 3);
+            schedule_evaluate(&s_cfg, &night, on, &run, active);
+            check("a field and a time: both must be true", active[0] && !active[1] && run.timers.hang == 2);
+
+            write_file(fa, "");
+            check("an empty field is off", !message_field_current(&s_cfg, vc, "wx.a"));
+            utimes(fa, old);
+            check("a stale field is off", !message_field_current(&s_cfg, vc, "wx.a"));
+            schedule_evaluate(&s_cfg, &noon, NULL, &run, active);
+            check("with the field off, both are closed", !active[0] && !active[1]);
+        }
+
         char big[1100];
         memset(big, 'A', sizeof(big) - 1);
         big[sizeof(big) - 1] = 0;
         write_file(fa, big);
-        check("a file over 1024 bytes is dropped", LEN("temp") == neg_n);
+        check("a file over 1024 bytes is dropped", !message_field_current(&s_cfg, vc, "wx.a"));
         unlink(fa);
 
         vocab_cache_destroy(vc);

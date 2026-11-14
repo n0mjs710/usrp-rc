@@ -439,6 +439,13 @@ static ext_state_t ext_read(const config_t *cfg, vocab_cache_t *vocab, const cha
     return x->state;
 }
 
+bool message_field_current(const config_t *cfg, vocab_cache_t *vocab, const char *var)
+{
+    const config_producer_t *p = config_find_producer(cfg, var);
+    ext_words_t x;
+    return p && ext_read(cfg, vocab, var, p, &x) == EXT_FRESH && x.n > 0;
+}
+
 static void render_into(const config_t *cfg, vocab_cache_t *vocab, const config_message_t *m,
                         double morse_level, render_mode_t mode, sbuf_t *buf);
 

@@ -270,8 +270,12 @@ typedef struct {
     unsigned          days;        /* bit 0 = Sunday, as struct tm's tm_wday */
     config_day_rule_t rules[CFG_MAX_DAY_RULES];
     int               nrules;
+    bool              timed;       /* has days and a time window */
     int               start_min;   /* minutes past midnight */
     int               end_min;     /* exclusive; below start_min = runs past midnight */
+    char              field[CFG_NAME_STR];     /* "producer.field": open only while it has
+                                                * current words; empty = no condition */
+    char              announce[CFG_NAME_STR];  /* message to play as the window opens */
     config_override_t sets[CFG_MAX_SCHEDULE_SETS];
     int               nsets;
 } config_schedule_t;
