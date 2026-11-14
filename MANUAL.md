@@ -68,7 +68,7 @@ used. Speech and sound effects are WAV clips and text definitions.
 | Message | A named sequence of voice, CW and tone audio |
 | Event | A setting that names the message for one occasion |
 | Window | A schedule line that changes settings during a time period |
-| Producer | A separate program that writes words for messages, for example a weather report. See [Appendix C](#appendix-c-producer-interface). |
+| Producer | A separate program, a third-party extension, that writes words for messages, for example a weather report. See [Appendix C](#appendix-c-producer-interface). |
 
 ### 1.4 Units
 
@@ -1513,7 +1513,7 @@ ct_delay = 0.64
 
 ### 12.10 Read the weather with code `417`
 
-The METAR producer in `producers/metar/` writes the fields of `wx`. A report is hourly, so
+The sample METAR producer ([C.5](#c5-sample-producers)) writes the fields of `wx`. A report is hourly, so
 a lifetime of 90 minutes includes one late report.
 
 ```ini
@@ -1857,6 +1857,12 @@ report. This appendix gives the rules for a producer, and how to write messages 
 `usrp-rc` reads the files of a producer when a message plays. It does not run the
 producer and does not wait for it.
 
+Producers are third-party extensions. `usrp-rc` supplies the interface in this appendix.
+The author of each producer is responsible for that producer: its data source, its
+words, its installation and its support. Each word must be a clip in the `usrp-rc`
+vocabulary, or a clip that the producer supplies for `user_8k/` ([5.8](#58-site-voice-clips)). Any person can write a producer, in any
+language, without changes to `usrp-rc`.
+
 ### C.1 Files
 
 - One file for each field, at `<dir>/<producer>/<field>`. The default `dir` is
@@ -1925,7 +1931,15 @@ messages to agree with them. For example:
 - A producer can write its own words for data that it knows is missing, for example
   `NOT AVAILABLE`.
 
-### C.5 Included producers
+### C.5 Sample producers
 
-The source tree includes a METAR weather producer in `producers/metar/`. Its README gives
-the fields and the installation.
+The source tree includes producers that operate on the K0USY and WA0EDA repeaters, in
+`producers/`. They are samples. They show what a producer can do, and they are a start
+point for other producers. They are not part of `usrp-rc` and are not necessary to
+operate it.
+
+Each sample has a README that gives its fields and its installation.
+
+| Producer | Function |
+| --- | --- |
+| `producers/metar/` | The latest METAR weather report for one station, from the NOAA Aviation Weather Center |

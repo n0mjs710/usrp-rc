@@ -1,8 +1,11 @@
 # METAR producer
 
 `usrp-rc-metar` gets the latest METAR for one station from the NOAA Aviation Weather
-Center, and writes each field as voice-clip words for usrp-rc. It is a test case for
-the external producer interface.
+Center, and writes each field as voice-clip words for usrp-rc.
+
+This is a sample producer. It operates on the K0USY and WA0EDA repeaters, and shows
+what a producer can do. It is not part of usrp-rc, and usrp-rc does not need it. For
+the producer interface, see MANUAL.md Appendix C.
 
 ## Output
 
