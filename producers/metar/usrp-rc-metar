@@ -232,7 +232,7 @@ def decode(r, args):
         "sky": f_sky(r),
         "weather": f_weather(r),
         "temp": f_temp(t, ["TEMPERATURE"]),
-        "dewpoint": f_temp(d, ["D", "P"]),      # no DEWPOINT clip yet
+        "dewpoint": f_temp(d, ["DO", "POINT"]),   # DO sounds like DEW
         "humidity": f_humidity(t, d),
         "pressure": f_pressure(r, args.pressure_word),
     }
@@ -267,16 +267,15 @@ def vocab_index(dirs):
     return index
 
 
-def drop_unspeakable(fields, index):
-    """usrp-rc drops a variable whole if any clip is missing, so a field with a word
-    that is not a clip is written empty. Returns {field: [missing words]}."""
-    dropped = {}
+def unspeakable(fields, index):
+    """The words of each field that are not clips: {field: [missing words]}. The field is
+    still written as it is. usrp-rc then drops it and plays the fallback, if one is set."""
+    missing = {}
     for name, words in fields.items():
-        missing = [w for w in words if w not in index]
-        if missing:
-            dropped[name] = missing
-            fields[name] = []
-    return dropped
+        gone = [w for w in words if w not in index]
+        if gone:
+            missing[name] = gone
+    return missing
 
 
 def write_wav(fields, index, path, gap_ms):
@@ -286,7 +285,7 @@ def write_wav(fields, index, path, gap_ms):
         out.setsampwidth(2)
         out.setframerate(8000)
         for words in fields.values():
-            if not words:
+            if not words or any(w not in index for w in words):
                 continue
             for w in words:
                 with wave.open(index[w], "rb") as clip:
@@ -336,8 +335,8 @@ def main():
         print(f"metar: {args.station} FAILED: {e}", file=sys.stderr)
         return 1
 
-    for name, missing in drop_unspeakable(fields, index).items():
-        print(f"metar: {args.name}.{name} DROPPED, no clip for: {' '.join(missing)}", file=sys.stderr)
+    for name, missing in unspeakable(fields, index).items():
+        print(f"metar: {args.name}.{name} has NO CLIP for: {' '.join(missing)}", file=sys.stderr)
 
     if args.print:
         for name in FIELDS:

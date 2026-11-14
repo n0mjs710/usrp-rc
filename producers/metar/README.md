@@ -18,22 +18,23 @@ The producer writes one file for each field to `<dir>/<name>/`. The default is
 | `sky` | BROKEN CEILING TWO THOUSAND SIX HUNDRED (feet, no unit word). CLEAR, SCATTERED, BROKEN or OVERCAST; FEW is said as CLEAR. |
 | `weather` | LIGHT RAIN SHOWERS. Empty when there is nothing to report. |
 | `temp` | TEMPERATURE FORTY TWO DEGREES (Fahrenheit) |
-| `dewpoint` | D P THIRTY NINE DEGREES |
+| `dewpoint` | DO POINT THIRTY NINE DEGREES (DO sounds like DEW) |
 | `humidity` | WATER EIGHTY NINE PERCENT (relative humidity, calculated) |
 | `pressure` | PRESSURE THIRTY POINT ONE TWO (inches of mercury, no unit word) |
 
 - Each field is complete by itself, with its label, so a message can use one field
   alone, for example `voice: {wx.temp}` as a tail message. When the data is stale, the
-  whole field is silent, and a message of only that field does not play.
+  fallback plays in place of the field. With no fallback, the field is silent, and a
+  message of only that field does not play.
 - Wind direction is three digits, in degrees. Wind speeds are in miles per hour,
   converted from knots, with no unit word.
 - Each file's mtime is the observation time, not the fetch time.
 - Each file is written to a temp file, then renamed.
 - If the fetch fails, the producer writes nothing and exits with status 1. The files
   then become stale.
-- usrp-rc does not speak a variable that has a word with no clip. Thus, the producer
-  looks in the installed `user_8k/` and `vocab_8k/`, and writes a field with a missing word as an
-  empty file. It records each such field in the log as DROPPED, with the missing words.
+- usrp-rc drops a variable that has a word with no clip, and plays the fallback. The
+  producer looks in the installed `user_8k/` and `vocab_8k/`, and records each field with
+  a missing word in the log as `NO CLIP`, with the missing words.
 
 ## Options
 
@@ -105,15 +106,17 @@ Add these lines to `/etc/usrp-rc/usrp-rc.conf`. If the file already has a `[dtmf
 
 ```ini
 [external]
-wx = 5400 wx_unavailable
+wx = 5400
 
 [dtmf]
 read_17 = weather
 
 [messages]
-weather        = voice: WEATHER {wx.source} _ {wx.time} _ {wx.wind} _ {wx.visibility} _ {wx.sky} {wx.weather} _ {wx.temp} _ {wx.dewpoint} _ {wx.humidity} _ {wx.pressure}
-wx_unavailable = voice: WEATHER NOT CURRENT
+weather = voice: WEATHER {wx.source} _ {wx.time} _ {wx.wind} _ {wx.visibility} _ {wx.sky} {wx.weather} _ {wx.temp} _ {wx.dewpoint} _ {wx.humidity} _ {wx.pressure}
 ```
+
+A fallback is optional: `wx = 5400 wx_unavailable`. It plays once in place of each field
+that is not current, so it suits a message of one field better than this one.
 
 Then examine the configuration and restart:
 
@@ -122,7 +125,7 @@ usrp-rc --check /etc/usrp-rc/usrp-rc.conf && sudo systemctl restart usrp-rc
 ```
 
 Enter `417` on the air. The log shows `ACCEPTED command = read 17` and a `FRESH` line for
-each field. For more information, see MANUAL.md sections 2.9, 5.6 and 12.10.
+each field. For more information, see MANUAL.md section 5.7 and Appendix C.
 
 ### Useful commands
 

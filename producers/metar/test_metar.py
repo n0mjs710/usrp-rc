@@ -171,7 +171,7 @@ class TempPressure(unittest.TestCase):
     def test_temp(self):
         self.assertEqual(say(metar.f_temp(22.2, ["TEMPERATURE"])), "TEMPERATURE SEVENTY TWO DEGREES")
         self.assertEqual(say(metar.f_temp(-20.6, ["TEMPERATURE"])), "TEMPERATURE MINUS FIVE DEGREES")
-        self.assertEqual(say(metar.f_temp(None, ["D", "P"])), "D P NOT AVAILABLE")
+        self.assertEqual(say(metar.f_temp(None, ["DO", "POINT"])), "DO POINT NOT AVAILABLE")
 
     def test_humidity(self):
         self.assertEqual(say(metar.f_humidity(20, 20)), "WATER ONE HUNDRED PERCENT")
@@ -186,13 +186,12 @@ class TempPressure(unittest.TestCase):
         self.assertEqual(say(metar.f_pressure(r, "ALTIMETER")), "ALTIMETER TWENTY NINE POINT NINE TWO")
 
 
-class Drop(unittest.TestCase):
-    def test_field_with_missing_clip_is_emptied(self):
+class Unspeakable(unittest.TestCase):
+    def test_missing_clips_are_reported_and_the_field_kept(self):
         fields = {"temp": ["TEMPERATURE", "FORTY"], "humidity": ["RELATIVE", "HUMIDITY", "FORTY"]}
         index = {"TEMPERATURE": "", "FORTY": "", "PERCENT": ""}
-        dropped = metar.drop_unspeakable(fields, index)
-        self.assertEqual(dropped, {"humidity": ["RELATIVE", "HUMIDITY"]})
-        self.assertEqual(fields, {"temp": ["TEMPERATURE", "FORTY"], "humidity": []})
+        self.assertEqual(metar.unspeakable(fields, index), {"humidity": ["RELATIVE", "HUMIDITY"]})
+        self.assertEqual(fields["humidity"], ["RELATIVE", "HUMIDITY", "FORTY"])
 
 
 class Files(unittest.TestCase):

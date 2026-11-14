@@ -37,10 +37,6 @@ int message_has_voice(const config_t *cfg, const char *name);
 rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
                                 const char *name, double morse_level_override);
 
-/* message_render() for a DTMF read: a producer whose variables in the message are
- * all stale or missing plays its fallback message, once. Elsewhere they're just silent. */
-rendered_audio_t message_render_readback(const config_t *cfg, vocab_cache_t *vocab, const char *name);
-
 /* Render voice clips by name, for replies built at run time rather than defined
  * in the config. A clip that doesn't exist is logged and skipped. Caller must
  * free(result.samples). */

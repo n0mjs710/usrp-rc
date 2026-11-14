@@ -980,6 +980,22 @@ static void read_voice(char *words, const char *path, const config_t *cfg, confi
             config_voice_word_t *w = &elem->voice_words[elem->n_voice_words++];
             w->var = VOICE_VAR_EXTERNAL;
             strcpy(w->clip, name);
+        } else if (strncmp(tok, "{msg:", 5) == 0) {
+            /* {msg:name}: checked against the messages once they are all read */
+            size_t len = strlen(tok);
+            if (tok[len - 1] != '}' || len == 6 || len - 6 >= CFG_NAME_STR) {
+                cfg_err("%s: '%s' is not a message reference: {msg:name}\n", path, tok);
+                continue;
+            }
+            if (elem->n_voice_words == CFG_MAX_VOICE_WORDS)
+                cfg_err("%s: more than %d words\n", path, CFG_MAX_VOICE_WORDS);
+            if (elem->n_voice_words >= CFG_MAX_VOICE_WORDS) {
+                elem->n_voice_words = CFG_MAX_VOICE_WORDS + 1;
+                continue;
+            }
+            config_voice_word_t *w = &elem->voice_words[elem->n_voice_words++];
+            w->var = VOICE_VAR_MESSAGE;
+            snprintf(w->clip, sizeof(w->clip), "%.*s", (int)(len - 6), tok + 5);
         } else if (strchr(tok, '{')) {
             cfg_err("%s: unknown placeholder '%s' (see [messages] in the README for the list; each must be its own word)\n",
                     path, tok);
@@ -1623,6 +1639,20 @@ static void read_schedule(const entries_t *es, config_t *cfg)
 
 /* ── validation ─────────────────────────────────────────────────────────── */
 
+/* True if m holds a {msg:} reference, or, with producers, a {producer.field}. */
+static bool message_refers(const config_message_t *m, bool producers)
+{
+    for (int i = 0; i < m->nelements; i++) {
+        const config_elem_t *e = &m->elements[i];
+        for (int w = 0; e->type == ELEM_VOICE && w < e->n_voice_words; w++) {
+            voice_var_t v = e->voice_words[w].var;
+            if (v == VOICE_VAR_MESSAGE || (producers && v == VOICE_VAR_EXTERNAL))
+                return true;
+        }
+    }
+    return false;
+}
+
 static void check_message_ref(const config_t *cfg, const char *path, const char *name)
 {
     if (config_find_message(cfg, name))
@@ -1920,6 +1950,28 @@ static void validate(const entries_t *es, const config_t *cfg)
         s_line = e ? e->line : 0;
         check_message_ref(cfg, path, cfg->dtmf.read_messages[i]);
     }
+    /* One level only: a referenced message refers to nothing, so nothing can loop. */
+    for (int i = 0; i < cfg->nmessages; i++) {
+        const config_message_t *m = &cfg->messages[i];
+        char path[64];
+        snprintf(path, sizeof(path), "messages.%s", m->name);
+        s_line = m->line;
+        for (int j = 0; j < m->nelements; j++) {
+            const config_elem_t *el = &m->elements[j];
+            for (int w = 0; el->type == ELEM_VOICE && w < el->n_voice_words; w++) {
+                if (el->voice_words[w].var != VOICE_VAR_MESSAGE)
+                    continue;
+                const char *target = el->voice_words[w].clip;
+                const config_message_t *t = config_find_message(cfg, target);
+                if (!t)
+                    check_message_ref(cfg, path, target);
+                else if (message_refers(t, false))
+                    cfg_err("%s: {msg:%s} refers to a message that refers to another; only one level\n",
+                            path, target);
+            }
+        }
+    }
+    /* A fallback plays in place of a producer's words, so it can't use any itself. */
     for (int i = 0; i < cfg->external.nproducers; i++) {
         const config_producer_t *p = &cfg->external.producers[i];
         if (!p->fallback[0])
@@ -1928,7 +1980,11 @@ static void validate(const entries_t *es, const config_t *cfg)
         snprintf(path, sizeof(path), "external.%s", p->name);
         const entry_t *e = entry_find(es, EXTERNAL_SECTION, p->name);
         s_line = e ? e->line : 0;
-        check_message_ref(cfg, path, p->fallback);
+        const config_message_t *fm = config_find_message(cfg, p->fallback);
+        if (!fm)
+            check_message_ref(cfg, path, p->fallback);
+        else if (message_refers(fm, true))
+            cfg_err("%s: the fallback '%s' can't contain {msg:} or {producer.field}\n", path, p->fallback);
     }
     s_line = 0;
 
@@ -2011,6 +2067,14 @@ int config_load(config_t *cfg, const char *path)
 
 static bool message_in_use(const config_t *cfg, const char *name)
 {
+    for (int i = 0; i < cfg->nmessages; i++) {
+        const config_message_t *m = &cfg->messages[i];
+        for (int j = 0; j < m->nelements; j++)
+            for (int w = 0; m->elements[j].type == ELEM_VOICE && w < m->elements[j].n_voice_words; w++)
+                if (m->elements[j].voice_words[w].var == VOICE_VAR_MESSAGE
+                    && strcmp(m->elements[j].voice_words[w].clip, name) == 0)
+                    return true;
+    }
     for (int i = 0; i < CFG_READ_SLOTS; i++)
         if (strcmp(cfg->dtmf.read_messages[i], name) == 0)
             return true;

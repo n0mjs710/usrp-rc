@@ -104,6 +104,18 @@ static const test_case_t CASES[] = {
     {"two fallbacks",       BASE "[external]\nwx = 60 a b\n", "external.wx: after the lifetime, only one message name"},
     {"bad producer name",   BASE "[external]\nw-x = 60\n", "external.w-x: a producer name is letters, digits and _"},
     {"relative external dir", BASE "[external]\ndir = ext\n", "external.dir: needs an absolute path"},
+    {"message reference",   BASE "[messages]\na = voice: HELLO\nm = voice: {msg:a} THERE\n", NULL},
+    {"reference to nothing", BASE "[messages]\nm = voice: {msg:nope}\n", "messages.m: no message named 'nope'"},
+    {"reference two deep",  BASE "[messages]\na = voice: HELLO\nb = voice: {msg:a}\nm = voice: {msg:b}\n",
+                            "messages.m: {msg:b} refers to a message that refers to another; only one level"},
+    {"reference to itself", BASE "[messages]\nm = voice: HELLO {msg:m}\n",
+                            "messages.m: {msg:m} refers to a message that refers to another"},
+    {"empty reference",     BASE "[messages]\nm = voice: {msg:}\n", "messages.m: '{msg:}' is not a message reference"},
+    {"reference in cw",     BASE "[messages]\na = voice: HELLO\nm = cw: {msg:a}\n", "only {call} works in cw"},
+    {"fallback with a producer", BASE "[external]\nwx = 60 na\n[messages]\nna = voice: {wx.temp}\n",
+                            "external.wx: the fallback 'na' can't contain {msg:} or {producer.field}"},
+    {"fallback with a reference", BASE "[external]\nwx = 60 na\n[messages]\na = voice: HELLO\nna = voice: {msg:a}\n",
+                            "external.wx: the fallback 'na' can't contain {msg:} or {producer.field}"},
     {"read slot",           BASE "[dtmf]\nread_17 = m\n[messages]\nm = cw: A\n", NULL},
     {"read slot names a missing message", BASE "[dtmf]\nread_17 = nope\n", "dtmf.read_17: no message named 'nope'"},
     {"read slot with two names", BASE "[dtmf]\nread_17 = a, b\n", "dtmf.read_17: needs one message name"},
@@ -278,6 +290,18 @@ static int load_text(const char *text)
 }
 
 static int s_fail;
+
+/* The samples in a run of clips, back to back. */
+static size_t clips_n(vocab_cache_t *vc, const char *words)
+{
+    char copy[256], *save = NULL;
+    size_t total = 0, n;
+    snprintf(copy, sizeof(copy), "%s", words);
+    for (char *w = strtok_r(copy, " ", &save); w; w = strtok_r(NULL, " ", &save))
+        if (vocab_get(vc, w, &n))
+            total += n;
+    return total;
+}
 
 static void check(const char *name, int ok)
 {
@@ -812,52 +836,69 @@ int main(void)
         vocab_get(vc, "TEMPERATURE", &temp_n);
         vocab_get(vc, "NEGATIVE", &neg_n);
 
-        snprintf(conf, sizeof(conf), BASE "[external]\ndir = %s\nwx = 60 wxna\n"
-                 "[dtmf]\nread_17 = both\nread_18 = framed\n"
+        snprintf(conf, sizeof(conf), BASE "[external]\ndir = %s\nwx = 60 wxna\nquiet = 60\n"
+                 "[dtmf]\nread_17 = both\nread_18 = framed\nread_19 = id\nread_20 = none\n"
                  "[messages]\nwxna = voice: NEGATIVE\nboth = voice: {wx.a} {wx.b}\n"
-                 "framed = voice: TEMPERATURE {wx.a} _100\nunused = cw: A\n", dir);
+                 "framed = voice: TEMPERATURE {wx.a} _100\nnone = voice: {quiet.a}\n"
+                 "temp = voice: {wx.a}\nid = voice: TEMPERATURE {msg:temp}\n"
+                 "unused = cw: A\n", dir);
         int rc = load_text(conf);
         check("loads", rc == 0 && message_validate(&s_cfg, vc) == 0);
         config_prune_messages(&s_cfg);
-        check("a read slot and a fallback keep their messages", config_find_message(&s_cfg, "both")
-              && config_find_message(&s_cfg, "wxna") && !config_find_message(&s_cfg, "unused"));
+        check("a read slot, a fallback and a referenced message are kept", config_find_message(&s_cfg, "both")
+              && config_find_message(&s_cfg, "wxna") && config_find_message(&s_cfg, "temp")
+              && !config_find_message(&s_cfg, "unused"));
 
-        #define AUTO()     message_render(&s_cfg, vc, "both", -1.0).n
-        #define READBACK() message_render_readback(&s_cfg, vc, "both").n
+        #define LEN(name) message_render(&s_cfg, vc, name, -1.0).n
         struct timeval old[2] = {{.tv_sec = time(NULL) - 120}, {.tv_sec = time(NULL) - 120}};
 
         write_file(fa, "TEMPERATURE\n");
-        write_file(fb, "");
-        check("fresh words play; a fresh empty file is silent", AUTO() == temp_n && READBACK() == temp_n);
+        write_file(fb, "TEMPERATURE\n");
+        check("fresh words play", LEN("both") == 2 * temp_n);
+        check("the message's own words play around them", LEN("framed") == 2 * temp_n + 800);
+        check("{msg:} plays the message it names in place", LEN("id") == 2 * temp_n);
 
         write_file(fa, "TEMPERATURE _100\n");
-        check("_NNN in a file is a gap", AUTO() == temp_n + 800);
+        check("_NNN in a file is a gap", LEN("temp") == temp_n + 800);
+
+        write_file(fa, "-3.05\n");
+        check("a number is said: MINUS THREE POINT ZERO FIVE",
+              LEN("temp") == clips_n(vc, "MINUS THREE POINT ZERO FIVE"));
+        write_file(fa, "+1230\n");
+        check("... ONE THOUSAND TWO HUNDRED THIRTY", LEN("temp") == clips_n(vc, "ONE THOUSAND TWO HUNDRED THIRTY"));
+        write_file(fa, "TEMPERATURE 007 DEGREES\n");
+        check("... among words, with leading zeros dropped",
+              LEN("temp") == clips_n(vc, "TEMPERATURE SEVEN DEGREES"));
+        write_file(fa, "100000\n");
+        check("over 99,999 drops the variable to its fallback", LEN("temp") == neg_n);
+        write_file(fa, "3.\n");
+        check("'3.' isn't a number, or a clip: the fallback", LEN("temp") == neg_n);
 
         write_file(fa, "TEMPERATURE NOSUCHCLIP\n");
-        check("a word that isn't a clip drops the whole variable", AUTO() == 0);
-        check("... and a fresh producer gets no fallback", READBACK() == 0);
+        check("a word that isn't a clip plays the fallback", LEN("temp") == neg_n);
+        check("... in place, each time, around the message's own words",
+              LEN("both") == neg_n + temp_n && LEN("framed") == temp_n + neg_n + 800);
+        write_file(fa, "");
+        check("a fresh empty file is silent: nothing to report", LEN("temp") == 0);
 
         write_file(fa, "TEMPERATURE\n");
-        check("fresh: a read plays the message's own words too",
-              message_render_readback(&s_cfg, vc, "framed").n == 2 * temp_n + 800);
         utimes(fb, old);
-        check("one stale variable is silent, the rest still play", AUTO() == temp_n && READBACK() == temp_n);
-
+        check("a stale file plays the fallback", LEN("both") == temp_n + neg_n);
         utimes(fa, old);
-        check("all stale: silent when automatic", AUTO() == 0);
-        check("all stale: a read plays the fallback, once", READBACK() == neg_n);
-        check("all stale: a read plays the fallback alone, not the message's own words",
-              message_render_readback(&s_cfg, vc, "framed").n == neg_n);
+        check("... for every variable that is stale", LEN("both") == 2 * neg_n);
 
         unlink(fa);
         unlink(fb);
-        check("missing files count as stale", AUTO() == 0 && READBACK() == neg_n);
+        check("a missing file plays the fallback", LEN("both") == 2 * neg_n);
+        check("no fallback: silent", LEN("none") == 0);
+        check("a referenced message with nothing to say leaves the rest",
+              message_render(&s_cfg, vc, "id", -1.0).n == temp_n + neg_n);
 
         char big[1100];
         memset(big, 'A', sizeof(big) - 1);
         big[sizeof(big) - 1] = 0;
         write_file(fa, big);
-        check("a file over 1024 bytes is dropped", AUTO() == 0);
+        check("a file over 1024 bytes is dropped", LEN("temp") == neg_n);
         unlink(fa);
 
         vocab_cache_destroy(vc);

@@ -30,6 +30,7 @@ This manual applies to `usrp-rc` version 1.0. To see the installed version, ente
 
 - [Appendix A: Tone catalog](#appendix-a-tone-catalog)
 - [Appendix B: Voice clips](#appendix-b-voice-clips)
+- [Appendix C: Producer interface](#appendix-c-producer-interface)
 
 ---
 
@@ -52,6 +53,7 @@ used. Speech and sound effects are WAV clips and text definitions.
 | 3 to 10 | Functions and their configuration | Repeater operators |
 | 11 | All settings, with defaults and ranges | Repeater operators |
 | 12 and 13 | Examples, log messages and fault isolation | Repeater operators |
+| Appendix C | The producer interface | Producer authors, and operators who use a producer |
 
 ### 1.3 Terms
 
@@ -66,7 +68,7 @@ used. Speech and sound effects are WAV clips and text definitions.
 | Message | A named sequence of voice, CW and tone audio |
 | Event | A setting that names the message for one occasion |
 | Window | A schedule line that changes settings during a time period |
-| Producer | A separate program that writes words for messages, for example a weather report |
+| Producer | A separate program that writes words for messages, for example a weather report. See [Appendix C](#appendix-c-producer-interface). |
 
 ### 1.4 Units
 
@@ -221,8 +223,8 @@ operator assigns to that number. For example, `417` can play a weather report.
 
 - The number always has two digits. For number 1, enter `401`.
 - If the number has no message, nothing plays.
-- If the information is not current, the repeater can play a notice in its place, for
-  example "Weather not current". The operator selects the notice.
+- If the information is not available, the repeater can play a notice in its place, for
+  example "Weather not available". The operator selects the notice.
 
 ---
 
@@ -420,6 +422,7 @@ A voice part is a list of clip names. The clips play in sequence. For the stock 
 | `_400` | A pause of 400 ms |
 | `{call}` | The callsign, spelled: `W1XYZ` plays `W ONE X Y Z` |
 | `{time}` and other variables | See [5.5](#55-variables) |
+| `{msg:name}` | The message `name`. See [5.6](#56-message-references). |
 
 ### 5.3 CW parts
 
@@ -469,17 +472,29 @@ separate word in a `voice:` part.
 - `{time}`, `{ampm}` and `{greeting}` use the female `F_` clips. The other variables use
   the standard voice.
 - `{call}` is the only variable that also operates in `cw:` parts.
-- For words from a producer, for example `{wx.temp}`, see [5.6](#56-producer-variables).
+- For words from a producer, for example `{wx.temp}`, see [5.7](#57-producer-variables).
 - The time and date come from the system clock and time zone of the computer. If the
   computer uses UTC, the repeater also uses UTC.
 
-### 5.6 Producer variables
+### 5.6 Message references
 
-A producer is a separate program that supplies words for messages, for example a weather
-report. The producer writes files. `usrp-rc` reads a file when a message plays. It does not
-run the producer and does not wait for it.
+`{msg:name}` in a `voice:` part plays the message `name` in that location. The message
+can contain voice, CW and tone parts.
 
-Declare each producer in `[external]`, then use its fields in `voice:` parts as
+```ini
+[messages]
+temp = voice: {wx.temp}
+id   = voice: {call} REPEATER _ {msg:temp}
+```
+
+- A reference has one level only. A message that another message references cannot
+  contain `{msg:}`. Thus a message cannot reference itself.
+- If the referenced message plays nothing, the rest of the message plays.
+
+### 5.7 Producer variables
+
+A producer is a separate program that writes words for messages, for example a weather
+report. Declare each producer in `[external]`. Then use its fields in `voice:` parts as
 `{producer.field}`:
 
 ```ini
@@ -487,71 +502,21 @@ Declare each producer in `[external]`, then use its fields in `voice:` parts as
 wx = 5400 wx_unavailable
 
 [messages]
-weather        = voice: WEATHER {wx.source} _ {wx.wind} _ {wx.temp}
-wx_unavailable = voice: WEATHER NOT CURRENT
+temp           = voice: {wx.temp}
+wx_unavailable = voice: WEATHER NOT AVAILABLE
 ```
 
-`{wx.temp}` speaks the words in the file `/run/usrp-rc/ext/wx/temp`. The `wx` line gives
-the lifetime of the data in seconds, here 90 minutes, and a fallback message. The fallback
-is optional. See [11.11](#1111-external).
+- `5400` is the lifetime of the data in seconds.
+- `wx_unavailable` is the fallback. It is optional. It plays in place of each variable
+  that has no current data. With no fallback, nothing plays for that variable.
+- If a message plays nothing, the transmitter does not key for it.
+- The producer selects the words in each field. Write the messages to agree with them.
 
-When the message plays, each variable gets one of these results:
+For the producer interface, and for how to write messages for a producer, see
+[Appendix C](#appendix-c-producer-interface). For the settings, see
+[11.11](#1111-external).
 
-| File | Result |
-| --- | --- |
-| Fresh, with words | The words play. A file is fresh if it is younger than the lifetime. |
-| Fresh and empty | Nothing plays. The producer has nothing to report. |
-| Stale or missing | Nothing plays. On a DTMF read, the fallback can play. |
-| A word that is not a clip, or a file over the limits | Nothing plays. `usrp-rc` drops the whole variable, because one missing word can change the meaning. |
-
-The fallback plays only on a DTMF read ([2.9](#29-read-a-message)). IDs, tail messages and
-other automatic messages never play it.
-
-- If no producer in the message has a fresh file, only the fallbacks play. The words of the
-  message itself do not play.
-- If one producer has a fresh file and another has none, the message plays. The
-  fallback of the producer with no fresh file plays at its first variable.
-- Each fallback plays one time in a message.
-- A producer variable in a fallback message gets no fallback of its own.
-
-If a variable plays nothing, the pauses on the two sides of it play one after the other. Put
-pauses between variables only where they are necessary.
-
-At start, `usrp-rc` makes sure that each producer in a variable is in `[external]`, and that
-each fallback message exists. It cannot examine the words in the files at start, because
-they change, so `--check` does not read them. When a message plays, the log shows each
-change of state of a variable, one time:
-
-```text
-external: {wx.temp} FRESH
-external: {wx.temp} STALE, 10800 s old, lifetime 5400 s
-external: {wx.sky} DROPPED, no clip 'CLOUDY'
-external: {wx.wind} MISSING, No such file or directory
-```
-
-#### Producer interface
-
-These rules apply to the producer program:
-
-- One file for each field, at `<dir>/<producer>/<field>`. The default `dir` is
-  `/run/usrp-rc/ext`.
-- The file holds one line of clip names and pauses (`_` or `_NNN`), separated by spaces.
-  Variables in a file are not expanded.
-- A file holds a maximum of 1024 bytes and 32 words.
-- The modification time of the file is the time of the data, not the time of the write.
-- Write a temporary file in the same directory, then rename it. Then `usrp-rc` never reads
-  a part of a file.
-- Use only clips that are installed in `/usr/local/share/usrp-rc/user_8k/` and
-  `vocab_8k/`. A clip from another location can be absent on the repeater.
-- Labels and units are part of the field, for example `TEMPERATURE FORTY TWO DEGREES`.
-  Then the field is complete by itself, and it is silent as a whole when the data is
-  stale. A word in the message, outside the variable, still plays.
-- How the producer runs is not part of the interface: a timer, a service or a cron job.
-
-The source tree includes a METAR weather producer in `producers/metar/`. Its README gives
-the fields and the installation.
-
-### 5.7 Site voice clips
+### 5.8 Site voice clips
 
 To add a clip, or to replace a stock clip:
 
@@ -570,7 +535,7 @@ case-sensitive.
 > louder than repeat audio. MMDVM-Host pre-emphasis also increases high frequencies to the
 > transmitter. Start with peaks near -10 dBFS. Then adjust by ear or with a deviation meter.
 
-### 5.8 Limits
+### 5.9 Limits
 
 | Item | Limit |
 | --- | --- |
@@ -580,7 +545,7 @@ case-sensitive.
 | Message names and clip names | 31 characters |
 | Number of messages | No limit |
 
-### 5.9 Validation
+### 5.10 Validation
 
 At each start and at each `--check`, `usrp-rc` makes sure that each clip for each message
 exists. This includes the built-in replies.
@@ -596,10 +561,11 @@ exists. This includes the built-in replies.
 
 > **Note:** The validation cannot hear the audio. Listen to each new message on the air.
 
-### 5.10 Unused messages
+### 5.11 Unused messages
 
 After validation, `usrp-rc` keeps only the messages that an `[events]` setting, a
-schedule window, a `read_NN` setting or a producer fallback names. Unused messages and unused catalog tones use no memory. At start
+schedule window, a `read_NN` setting, a producer fallback or a `{msg:}` reference names.
+Unused messages and unused catalog tones use no memory. At start
 and at `--check`, `usrp-rc` shows the two quantities:
 
 ```text
@@ -794,7 +760,7 @@ ends as usual. Tail messages are off by default: to use them, set `tail_messages
 - A tail message does not wait in a queue. It plays a maximum of one time in each tail.
 - If a key-up interrupts a tail message, the message counts as played.
 - A message with nothing to say also counts as played, for example a producer variable
-  with no current data. The tail ends as usual, and the next tail message is the next name
+  with no current data and no fallback. The tail ends as usual, and the next tail message is the next name
   in the list. The log shows `tail: 'name' SILENT, nothing to say`.
 
 Example: set `tail_every = 1` and `tail_min_interval = 300`. A tail message then plays
@@ -1367,7 +1333,9 @@ A list holds a maximum of 8 names.
 | `dir` | `/run/usrp-rc/ext` | Directory of the producer files. An absolute path. |
 | *name* | None | One line for each producer: `name = lifetime [fallback]`. The lifetime is 1 to 604800 seconds. The fallback is a message name and is optional. A maximum of 16 producers. |
 
-A producer name has letters, digits and `_`. See [5.6](#56-producer-variables).
+A producer name has letters, digits and `_`. A fallback message cannot contain `{msg:}`
+or producer variables. See [5.7](#57-producer-variables) and
+[Appendix C](#appendix-c-producer-interface).
 
 ### 11.12 `[messages]` and `[schedule]`
 
@@ -1494,17 +1462,18 @@ a lifetime of 90 minutes includes one late report.
 
 ```ini
 [external]
-wx = 5400 wx_unavailable
+wx = 5400
 
 [dtmf]
 read_17 = weather
 
 [messages]
-weather        = voice: WEATHER {wx.source} _ {wx.time} _ {wx.wind} _ {wx.visibility} _ {wx.sky} {wx.weather} _ {wx.temp} _ {wx.dewpoint} _ {wx.pressure}
-wx_unavailable = voice: WEATHER NOT CURRENT
+weather = voice: WEATHER {wx.source} _ {wx.time} _ {wx.wind} _ {wx.visibility} _ {wx.sky} {wx.weather} _ {wx.temp} _ {wx.dewpoint} _ {wx.pressure}
 ```
 
-`{wx.weather}` is empty if there is nothing to report, so it has no pause before it.
+- `{wx.weather}` is empty if there is nothing to report, so it has no pause before it.
+- This example has no fallback. A fallback plays once for each variable with no current
+  data, here nine times.
 
 ---
 
@@ -1536,7 +1505,7 @@ cause of a problem.
 | No courtesy tone in one link state | The `ct_` setting for that state is empty. An empty setting plays no tone. | Set all three `ct_` settings. See [6.2](#62-courtesy-tones). |
 | A tail message does not play | `tail_every` is 0, or the conditions are not true. | Look for the `tail_every` warning. On a quiet repeater, the `tail_every` count can be not yet reached. `tail_min_interval` can also prevent the message. |
 | A read number plays nothing | The number has no message, or the producer data is not current and there is no fallback. | Look for `ERROR no message` or `external:` lines in the log. |
-| A producer variable plays nothing | The file is stale, missing or dropped. | Read the `external:` line for that variable. For `DROPPED`, the producer used a word that is not a clip. For `STALE`, make sure that the producer runs. |
+| A producer variable plays nothing or the fallback | The file is empty, stale, missing or dropped. | Read the `external:` line for that variable. See [Appendix C](#appendix-c-producer-interface). |
 | `names no producer in [external]` | A variable names a producer that `[external]` does not declare. | Add the producer to `[external]`, or correct the name. |
 | A window opens at the wrong time | The clock or the time zone is wrong. | Examine the clock and time zone with `timedatectl`. |
 | Usage statistics reset at restart | `usrp-rc` cannot write the file. | Look for `stats: can't save` in the log. Make sure that `/var/local/usrp-rc` exists and the service file is current. Then do `sudo systemctl daemon-reload`. |
@@ -1822,3 +1791,82 @@ Add an ending after a word: `voice: KEY UP _S`.
 <tr><td>_ed</td><td>_ing</td><td>_s</td><td>_teen</td><td>_ty</td><td></td></tr>
 <tr><td>_er</td><td>_ment</td><td>_ss</td><td>_th</td><td></td><td></td></tr>
 </table>
+
+---
+
+## Appendix C: Producer interface
+
+A producer is a separate program that writes words for messages, for example a weather
+report. This appendix gives the rules for a producer, and how to write messages for one.
+`usrp-rc` reads the files of a producer when a message plays. It does not run the
+producer and does not wait for it.
+
+### C.1 Files
+
+- One file for each field, at `<dir>/<producer>/<field>`. The default `dir` is
+  `/run/usrp-rc/ext`. The producer name is its name in `[external]`.
+- The `usrp-rc` user must be able to read the directories and the files.
+- The modification time of the file is the time of the data, not the time of the write.
+- Write a temporary file in the same directory, then rename it. Then `usrp-rc` never reads
+  a part of a file.
+- A file holds a maximum of 1024 bytes and 32 words. A number counts as the words that
+  it speaks.
+- How the producer runs is not part of the interface: a timer, a service or a cron job.
+
+### C.2 Contents
+
+A file holds words separated by spaces or line breaks:
+
+| Word | Result |
+| --- | --- |
+| A clip name | That clip. Use only clips installed in `/usr/local/share/usrp-rc/user_8k/` and `vocab_8k/`. |
+| `_` or `_NNN` | A pause, as in a message |
+| A number | The number, spoken. `1230` is "one thousand two hundred thirty", `-5` is "minus five" and `29.92` is "twenty nine point nine two". The maximum is 99999. |
+
+Variables such as `{time}` in a file are not expanded.
+
+### C.3 Results
+
+When a message plays, each producer variable gets one of these results:
+
+| File | Result |
+| --- | --- |
+| Current, with words | The words play. A file is current if it is younger than the lifetime. |
+| Current and empty | Nothing plays. The producer has nothing to report. |
+| Stale or missing | The fallback plays. |
+| A word that is not a clip or a number, or a file over the limits | The fallback plays. `usrp-rc` drops the whole variable, because one missing word can change the meaning. |
+
+The fallback plays in place of each such variable, each time. With no fallback, nothing
+plays for the variable.
+
+`--check` does not read the files, because they change. When a message plays, the log
+shows each change of state of a variable, one time:
+
+```text
+external: {wx.temp} FRESH
+external: {wx.temp} STALE, 10800 s old, lifetime 5400 s
+external: {wx.sky} DROPPED, no clip 'CLOUDY'
+external: {wx.wind} MISSING, No such file or directory
+```
+
+### C.4 Messages for a producer
+
+The producer selects the words in each field. The operator must know them, and write the
+messages to agree with them. For example:
+
+| The producer writes | The message |
+| --- | --- |
+| `TEMPERATURE TWENTY NINE DEGREES` | `temp = voice: {wx.temp}` |
+| `29` | `temp = voice: TEMPERATURE {wx.temp} DEGREES` |
+
+- The words of the message always play. If the variable has no current data, the
+  fallback or nothing plays between them.
+- If a variable plays nothing, the pauses on the two sides of it play one after the
+  other.
+- A producer can write its own words for data that it knows is missing, for example
+  `NOT AVAILABLE`.
+
+### C.5 Included producers
+
+The source tree includes a METAR weather producer in `producers/metar/`. Its README gives
+the fields and the installation.

@@ -162,7 +162,7 @@ buffer, the DTMF cover tone) must be listed in `not_schedulable()` in `src/confi
 
 A producer is a separate program that writes clip words to files; `{producer.field}`
 in a voice part speaks the file `<external.dir>/<producer>/<field>`. The contract is in
-MANUAL section 5.6, and `producers/metar/` is the first one.
+MANUAL Appendix C, and `producers/metar/` is the first one.
 
 `usrp-rc` reads the file when the message renders, in the main loop. That is safe
 because the read is bounded (1024 bytes, 32 words) and the default directory is on
@@ -171,15 +171,19 @@ dead or never installed just leaves its files stale.
 
 - Freshness is the file's mtime against the producer's lifetime, judged per variable.
   The producer sets the mtime to the time of the data.
-- A file with any word that isn't a clip is dropped whole (`ext_read()`): skipping a
-  word could change what the report means. Producers check the installed clip
-  directories themselves.
-- `message_render()` is automatic and never plays a fallback. `message_render_readback()`
-  is for DTMF reads. A fallback renders as automatic, so it can't nest.
+- A word is a clip, a `_` gap or a number (`ext_number()`, said like the stats
+  variables). A file with any other word is dropped whole (`ext_read()`): skipping a
+  word could change what the report means.
+- One rule everywhere: a stale, missing or dropped variable plays the fallback, if
+  there is one, each time it appears. A fresh empty file is silent. There is no
+  separate DTMF-read path; usrp-rc sets no policy beyond this.
+- A fallback can't contain `{msg:}` or a producer variable (`validate()`), so it can't
+  recurse. `{msg:name}` is one level only, for the same reason.
 - The fallback is a message name, not words: only `[messages]` hold clips, so it gets
   the same validation, and `config_prune_messages()` keeps it, like a `read_NN` message.
-- Validation at load checks that each variable names a declared producer and that
-  each fallback exists. File contents can't be checked at load.
+- Validation at load checks that each variable names a declared producer, that each
+  fallback and `{msg:}` target exists, and the two rules above. File contents can't be
+  checked at load.
 
 ## Usage statistics
 

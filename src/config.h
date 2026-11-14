@@ -42,6 +42,8 @@ typedef enum {
     VOICE_VAR_MINUTES_WEEK,  /* {minutes_week}: ... in the last 7 days */
     VOICE_VAR_EXTERNAL,   /* {producer.field}: a file an external producer writes;
                            * the word's clip holds "producer.field" */
+    VOICE_VAR_MESSAGE,    /* {msg:name}: another message, played in its place;
+                           * the word's clip holds the name */
 } voice_var_t;
 
 typedef struct {
@@ -283,7 +285,7 @@ typedef struct {
 typedef struct {
     char name[CFG_NAME_STR];
     int  lifetime_s;               /* a file older than this is stale */
-    char fallback[CFG_NAME_STR];   /* message for a DTMF read when all is stale; empty = none */
+    char fallback[CFG_NAME_STR];   /* plays for each variable with no words; empty = none */
 } config_producer_t;
 
 typedef struct {

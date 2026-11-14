@@ -54,6 +54,7 @@ timeout_message = timeout_warn
 # {call} works in voice and cw. Voice messages can also use these, each as its own
 # word, spoken as of when the message plays: {time}, {ampm}, {greeting}, {day}, {date},
 # {year}, {keyups_day}, {keyups_week}, {minutes_day}, {minutes_week}.
+# {msg:name} plays another message in its place; one level only.
 # {producer.field}, for example {wx.temp}, speaks words that a producer writes:
 # see [external] at the end.
 #
@@ -193,6 +194,7 @@ default_cw    = cw: {call}/R
 # Producers: separate programs that write words for messages, for example weather.
 # usrp-rc reads their files when a message plays and never waits for them.
 #dir = /run/usrp-rc/ext   # <dir>/<producer>/<field> is read as {producer.field}
-# One line per producer: name = lifetime_seconds [fallback_message]. Data older than
-# the lifetime is silent; a DTMF read with nothing current plays the fallback.
+# One line per producer: name = lifetime_seconds [fallback_message]. The fallback
+# plays in place of each variable with no current data; with none, it is silent.
+# See MANUAL.md Appendix C.
 #wx = 5400 wx_unavailable
