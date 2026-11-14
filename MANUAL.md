@@ -399,14 +399,15 @@ command reply that is due still plays before the transmitter stops.
 
 ### 5.1 Definition
 
-A message is a named sequence of audio in `[messages]`. It contains `voice:`, `cw:` and
-`tone:` parts. `|` joins the parts:
+A message is a named sequence of audio in `[messages]`. It contains `voice:`, `cw:`,
+`tone:` and `dtmf:` parts. `|` joins the parts:
 
 ```ini
 [messages]
 my_voice = voice: THISIS {call} REPEATER
 my_cw    = cw: {call}/R
 my_tone  = tone: 330:50 495:50 660:50
+my_page  = dtmf: 123#
 my_mix   = voice: THISIS {call} | tone: 880:100 | cw: {call}/R
 ```
 
@@ -448,6 +449,29 @@ The notes play from left to right:
 | Frequency | 0 to 4000 Hz |
 | Duration of one note | 1 to 60000 ms |
 | Level | 0 to 2 |
+
+#### DTMF parts
+
+A `dtmf:` part sends DTMF keys, for example to page a radio. The groups play from left
+to right:
+
+| Item | Result |
+| --- | --- |
+| `123#` | The keys `1`, `2`, `3` and `#` |
+| `123#:80/50` | Each key on for 80 ms, then 50 ms of silence |
+| `_500` | 500 ms of silence |
+| `123#@0.6` | These keys at level 0.6, in place of `audio.tone_level` |
+
+```ini
+[messages]
+page = dtmf: 123 _1500 456#:80/80
+```
+
+- The keys are `0` to `9`, `A` to `D`, `*` and `#`.
+- Silence follows each key, also the last key of a group.
+- With no `:ON/OFF`, the timing is `dtmf.regen_tone_ms` and `dtmf.regen_gap_ms`,
+  100 ms and 100 ms by default.
+- The durations are 1 to 60000 ms. The silence can be 0.
 
 For the tone catalog, see [Appendix A](#appendix-a-tone-catalog).
 
@@ -540,7 +564,7 @@ case-sensitive.
 | Item | Limit |
 | --- | --- |
 | Length of one message or one clip | 3 minutes |
-| Parts in one message | 32. Each note is one part. Each `voice:` or `cw:` part is one part. |
+| Parts in one message | 32. Each note, each DTMF key group and each pause is one part. Each `voice:` or `cw:` part is one part. |
 | Words and pauses in one `voice:` part | 32 |
 | Message names and clip names | 31 characters |
 | Number of messages | No limit |
@@ -953,7 +977,7 @@ plays after the station unkeys, before the courtesy tone.
 
 ```ini
 [messages]
-site_alarm = voice: {site.alarm} | tone: 697+1209:100 _50 770+1336:100
+site_alarm = voice: {site.alarm} | dtmf: 123#
 wx_alert   = voice: {nws.alert}
 
 [schedule]

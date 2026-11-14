@@ -176,6 +176,11 @@ static const test_case_t CASES[] = {
     {"schedule bad time",   BASE "[schedule]\na = wed 25:00-26:00 ct_link_on_message=\n", "schedule.a: '25:00-26:00' is not a valid time window"},
     {"schedule empty window", BASE "[schedule]\na = wed 07:00-07:00 ct_link_on_message=\n", "starts and ends at the same time"},
     {"schedule no settings", BASE "[schedule]\na = wed 07:00-08:00\n", "schedule.a: changes nothing"},
+    {"dtmf part",           BASE "[messages]\na = dtmf: 123*#abcd\nb = dtmf: 12:50/25 _500 34@0.5 56:80/80@1\n", NULL},
+    {"dtmf bad key",        BASE "[messages]\na = dtmf: 12E\n", "messages.a: bad dtmf '12E'"},
+    {"dtmf bad timing",     BASE "[messages]\na = dtmf: 12:/50\n", "messages.a: bad dtmf '12:/50'"},
+    {"dtmf level too high", BASE "[messages]\na = dtmf: 12@3\n", "messages.a: bad dtmf '12@3'"},
+    {"dtmf empty",          BASE "[messages]\na = dtmf:\n", "messages.a: dtmf needs at least one key"},
     {"schedule too short",  BASE "[schedule]\na = wed\n", "schedule.a: expected DAYS HH:MM-HH:MM"},
     {"field window",        BASE "[external]\nsite = 60\n[messages]\nalarm = voice: ALARM\n"
                             "[schedule]\na = {site.alarm} announce=alarm\n", NULL},
@@ -229,7 +234,7 @@ static const test_case_t CASES[] = {
     {"type without a colon", BASE "[messages]\na = voice REPEATER\n", "line 4: messages.a: 'voice' needs a colon after it, e.g. voice: ..."},
     {"tone without a colon", BASE "[messages]\na = tone 660:50\n", "'tone' needs a colon after it"},
     {"later part without a colon", BASE "[messages]\na = cw: ID | voice REPEATER\n", "'voice' needs a colon after it"},
-    {"no type at all",      BASE "[messages]\na = REPEATER\n", "expected cw:, voice:, or tone: before 'REPEATER'"},
+    {"no type at all",      BASE "[messages]\na = REPEATER\n", "expected cw:, voice:, tone: or dtmf: before 'REPEATER'"},
     {"space before the colon is fine", BASE "[messages]\na = voice : REPEATER\n", NULL},
     {"message has no content", BASE "[messages]\na =\n", "messages.a: has no content"},
     {"empty part",          BASE "[messages]\na = cw: ID |\n", "empty part"},
@@ -941,6 +946,21 @@ int main(void)
         vocab_cache_destroy(vc);
         rmdir(sub);
         rmdir(dir);
+    }
+
+    printf("[13] dtmf parts\n");
+    {
+        load_text(BASE "[dtmf]\nregen_tone_ms = 100\nregen_gap_ms = 60\n[messages]\n"
+                  "a = dtmf: 12\nb = dtmf: 12:50/25\nc = dtmf: 1 _500 2\nd = dtmf: 1:50/0 2:50/0\n");
+        const config_elem_t *e = element("a", 0);
+        check("keys are one part", e && e->type == ELEM_DTMF && strcmp(e->cw_text, "12") == 0);
+        #define DLEN(name) message_render(&s_cfg, NULL, name, -1.0).n
+        check("the regen timing by default, each key with its off time", DLEN("a") == 2 * (100 + 60) * 8);
+        check(":ON/OFF sets the timing", DLEN("b") == 2 * (50 + 25) * 8);
+        check("_MS is a pause between groups", DLEN("c") == (2 * (100 + 60) + 500) * 8);
+        check("groups in a row keep their spacing", DLEN("d") == 2 * 50 * 8);
+        check("lowercase keys are read as uppercase",
+              load_text(BASE "[messages]\na = dtmf: abcd\n") == 0 && strcmp(element("a", 0)->cw_text, "ABCD") == 0);
     }
 
     if (s_fail) {

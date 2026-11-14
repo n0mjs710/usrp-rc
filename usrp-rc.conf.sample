@@ -65,6 +65,7 @@ timeout_message = timeout_warn
 #     name = tone: 500+700:100                 two frequencies together
 #     name = tone: 1760:30 _30 1760:30         _MS is silence
 #     name = tone: 1200:60@0.9                 @LEVEL overrides audio.tone_level for one note
+#     name = dtmf: 123# _500 456:80/50         DTMF keys; :ON/OFF ms, default dtmf.regen_ timing
 #     name = voice: THISIS {call} | cw: {call} | joins parts into one message
 #
 # A ready-made tone catalog is always available by name -- see tones.conf, which

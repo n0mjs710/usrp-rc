@@ -249,7 +249,7 @@ static const char *const SECTIONS[] = {
     EXTERNAL_SECTION, NULL,
 };
 
-static const char *const ELEM_TYPES[] = {"cw", "voice", "tone", NULL};
+static const char *const ELEM_TYPES[] = {"cw", "voice", "tone", "dtmf", NULL};
 
 /* Searched in order, like the vocab directories: a working-directory copy
  * for running from a source tree, then the installed one. */
@@ -1069,6 +1069,69 @@ static bool parse_tone(const char *tok, config_elem_t *elem)
     return *end == '\0';
 }
 
+/* KEYS[:ON[/OFF]][@LEVEL]: keys 0-9, A-D, * and #. Each key is followed by its off
+ * time. Unset times come from the DTMF regen settings when the message plays. */
+static bool parse_dtmf(const char *tok, config_elem_t *elem)
+{
+    size_t n = strspn(tok, "0123456789ABCDabcd*#");
+    if (n == 0 || n >= sizeof(elem->cw_text))
+        return false;
+    for (size_t i = 0; i < n; i++)
+        elem->cw_text[i] = (char)toupper((unsigned char)tok[i]);
+    elem->cw_text[n] = '\0';
+    elem->ms = elem->off_ms = -1;
+    elem->amp = -1.0;
+    const char *p = tok + n;
+    char *end;
+    if (*p == ':') {
+        long on = strtol(p + 1, &end, 10);
+        if (end == p + 1 || on < 1 || on > 60000)
+            return false;
+        elem->ms = (int)on;
+        p = end;
+        if (*p == '/') {
+            long off = strtol(p + 1, &end, 10);
+            if (end == p + 1 || off < 0 || off > 60000)
+                return false;
+            elem->off_ms = (int)off;
+            p = end;
+        }
+    }
+    if (*p == '@') {
+        elem->amp = strtod(p + 1, &end);
+        if (end == p + 1 || !(elem->amp >= 0.0 && elem->amp <= 2.0))
+            return false;
+        p = end;
+    }
+    return *p == '\0';
+}
+
+/* Key groups, and _MS pauses, which are tone silences. */
+static void read_dtmf(char *text, const char *path, config_message_t *out)
+{
+    char *save = NULL;
+    int count = 0;
+    for (char *tok = strtok_r(text, " \t", &save); tok; tok = strtok_r(NULL, " \t", &save)) {
+        count++;
+        config_elem_t *elem = new_element(out, path);
+        if (!elem)
+            continue;
+        bool ok;
+        if (tok[0] == '_') {
+            elem->type = ELEM_TONE;
+            ok = parse_tone(tok, elem);
+        } else {
+            elem->type = ELEM_DTMF;
+            ok = parse_dtmf(tok, elem);
+        }
+        if (!ok)
+            cfg_err("%s: bad dtmf '%s' (expected keys 0-9 A-D * #, then optionally :ON/OFF in ms and @LEVEL; or _MS for a pause)\n",
+                    path, tok);
+    }
+    if (count == 0)
+        cfg_err("%s: dtmf needs at least one key, e.g. dtmf: 123#\n", path);
+}
+
 static void read_tones(char *tones, const char *path, config_message_t *out)
 {
     char *save = NULL;
@@ -1108,7 +1171,7 @@ static void read_message_part(char *part, const char *path, bool catalog,
 {
     part = trim(part);
     if (!part[0]) {
-        cfg_err("%s: empty part (expected cw:, voice:, or tone:)\n", path);
+        cfg_err("%s: empty part (expected cw:, voice:, tone: or dtmf:)\n", path);
         return;
     }
     char *colon = strchr(part, ':');
@@ -1119,7 +1182,7 @@ static void read_message_part(char *part, const char *path, bool catalog,
         if (choice_index(ELEM_TYPES, word) >= 0)
             cfg_err("%s: '%s' needs a colon after it, e.g. %s: ...\n", path, word, word);
         else
-            cfg_err("%s: expected cw:, voice:, or tone: before '%s'\n", path, part);
+            cfg_err("%s: expected cw:, voice:, tone: or dtmf: before '%s'\n", path, part);
         return;
     }
     *colon = '\0';
@@ -1134,12 +1197,14 @@ static void read_message_part(char *part, const char *path, bool catalog,
         read_voice(args, path, cfg, out);
     } else if (strcmp(part, "tone") == 0) {
         read_tones(args, path, out);
+    } else if (strcmp(part, "dtmf") == 0) {
+        read_dtmf(args, path, out);
     } else {
         const char *hint = closest_of(part, ELEM_TYPES);
         if (hint)
             cfg_err("%s: unknown type '%s' (did you mean %s?)\n", path, part, hint);
         else
-            cfg_err("%s: unknown type '%s' (expected cw, voice, or tone)\n", path, part);
+            cfg_err("%s: unknown type '%s' (expected cw, voice, tone or dtmf)\n", path, part);
     }
 }
 

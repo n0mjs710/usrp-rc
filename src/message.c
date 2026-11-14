@@ -548,6 +548,20 @@ static void render_into(const config_t *cfg, vocab_cache_t *vocab, const config_
             }
             break;
         }
+        case ELEM_DTMF: {
+            /* The regen generator. Each key is followed by its off time, the last one too,
+             * so groups in a row keep their spacing. */
+            size_t n;
+            int on  = e->ms >= 0 ? e->ms : cfg->dtmf.regen_tone_ms;
+            int off = e->off_ms >= 0 ? e->off_ms : cfg->dtmf.regen_gap_ms;
+            double amp = e->amp >= 0.0 ? e->amp : cfg->audio.tone_level;
+            int16_t *samples = tone_render_dtmf(e->cw_text, 0, on, off, off, amp, &n);
+            if (samples) {
+                sbuf_append(buf, samples, n);
+                free(samples);
+            }
+            break;
+        }
         }
     }
 }

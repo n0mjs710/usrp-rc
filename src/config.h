@@ -22,6 +22,7 @@ typedef enum {
     ELEM_CW,
     ELEM_VOICE,
     ELEM_TONE,
+    ELEM_DTMF,   /* a group of keys: cw_text holds them, ms and off_ms the timing */
 } elem_type_t;
 
 /* One word in a voice element's space-separated clip list: either a real
@@ -61,11 +62,12 @@ typedef struct {
      * `voice: THISIS _ W ONE` in the config splits into 4 words here. */
     config_voice_word_t voice_words[CFG_MAX_VOICE_WORDS];
     int      n_voice_words;
-    /* tone */
+    /* tone, and dtmf */
     double   freq1;
     double   freq2;
-    int      ms;
-    double   amp;   /* < 0 = use cfg->audio.tone_level */
+    int      ms;      /* dtmf: each key's on time; < 0 = dtmf.regen_tone_ms */
+    int      off_ms;  /* dtmf: the silence after each key; < 0 = dtmf.regen_gap_ms */
+    double   amp;     /* < 0 = use cfg->audio.tone_level */
 } config_elem_t;
 
 typedef struct {
