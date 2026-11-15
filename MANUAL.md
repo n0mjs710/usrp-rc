@@ -1943,3 +1943,4 @@ Each sample has a README that gives its fields and its installation.
 | Producer | Function |
 | --- | --- |
 | `producers/metar/` | The latest METAR weather report for one station, from the NOAA Aviation Weather Center |
+| `producers/nws/` | The active National Weather Service watches and warnings for a list of counties, to open a schedule window |
