@@ -30,14 +30,14 @@ For operation and the settings reference, see [MANUAL.md](MANUAL.md).
 Version: 1.0. To update from 1.0b or an earlier `main`, see [UPGRADE.md](UPGRADE.md).
 
 > [!WARNING]
-> **MMDVM-Host FM audio quality.** At the date of this document (November 2026),
-> MMDVM-Host has defects that decrease the audio quality of FM mode. The symptoms are
-> crackles, distortion and an incorrect frequency response (EQ). The defects are worst
-> on the network and with `[FM] LinkMode=1`, because these two functions use the same
-> code path. For the best performance, use the patched versions of MMDVM and MMDVM-Host
-> at [github.com/n0mjs710](https://github.com/n0mjs710). The fixes are submitted
-> upstream as [g4klx/MMDVM#365](https://github.com/g4klx/MMDVM/pull/365) and
-> [g4klx/MMDVM-Host#902](https://github.com/g4klx/MMDVM-Host/pull/902).
+> **MMDVM FM audio quality.** MMDVM and MMDVM-Host releases before November 2026 have
+> defects that decrease the audio quality of FM mode. The symptoms are crackles,
+> distortion and an incorrect frequency response (EQ). The defects are worst on the
+> network and with `[FM] LinkMode=1`, because these two functions use the same code
+> path. The MMDVM-Host fix is merged upstream:
+> [g4klx/MMDVM-Host#902](https://github.com/g4klx/MMDVM-Host/pull/902). The firmware fix
+> is submitted as [g4klx/MMDVM#365](https://github.com/g4klx/MMDVM/pull/365). Until it is
+> merged, use the patched firmware at [github.com/n0mjs710](https://github.com/n0mjs710).
 
 ## Contents
 
@@ -70,8 +70,9 @@ The controller functions are:
 - Courtesy tones, with different tones for local traffic, link traffic and link off
 - Hang timer, kerchunk filter and time-out timer
 - Squelch tail elimination
-- CW, voice and tone messages, and tail messages
-- Clock and calendar schedule
+- CW, voice, tone and DTMF messages, and tail messages
+- Clock and calendar schedule, and schedule windows that a producer opens, for example
+  a site alarm that keys the repeater with an announcement
 - DTMF commands, DTMF regen to send commands over the link, and an echo test
 - Messages with words from separate programs (producers), for example a weather report
   read by DTMF. Producers are third-party extensions. A sample METAR weather producer is
@@ -364,9 +365,11 @@ directly from its LPC data by an emulation of the TMS5220 speech synthesizer, fr
 - The synthesis core is a port of the MAME `tms5220` core. Its ROM tables were verified
   against decapped TMS5220 and TMS5220C dies. It reproduces the behavior of the chip at
   the sample level, to the 8-bit DAC output.
-- The vocabulary, `Vocab_Master.cpp`, has 623 words. It was assembled from the LPCSpeech
-  AVR, FF-800 and Talkie vocabularies. Where more than one recording of a word existed,
-  the best one was selected by listening. Misnamed words were corrected.
+- The vocabulary was assembled from the LPCSpeech AVR, FF-800 and Talkie vocabularies.
+  Where more than one recording of a word existed, the best one was selected by
+  listening. Misnamed words were corrected.
+- The set is curated for repeater use. Words are added when a use for them is found.
+  A word can also serve for another word that sounds the same: `DO` is also "dew".
 
 In a side-by-side comparison with an ACC controller, the two voices cannot be told apart.
 

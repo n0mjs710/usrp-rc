@@ -192,7 +192,8 @@ default_cw    = cw: {call}/R
 #regen_code      = 31     # + keys to send as fresh DTMF, here and over the link if it's on
 #read_prefix     = 4      # + two digits NN: plays the message named by read_NN
 #read_17         = weather   # read_00 to read_99: 417 plays the message 'weather'
-#regen_tone_ms   = 100    # regen settings take effect at startup only
+#regen_tone_ms   = 100    # regen settings take effect at startup only; tone and gap
+                          # are also the default timing of dtmf: message parts
 #regen_gap_ms    = 100
 #regen_lead_ms   = 200    # silence on the link before the first tone
 #regen_level     = 0.5

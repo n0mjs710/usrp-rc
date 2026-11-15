@@ -383,16 +383,21 @@ static void link_rx_end(app_t *a, uint64_t now, const char *why)
     port_on_link_keyup(a->port, false, now);
 }
 
+/* Nothing more to or from the link: the link turned off, or the repeater down. */
+static void link_cut(app_t *a)
+{
+    regen_stop(a, "cut short");
+    link_rx_end(a, monotonic_ms(), NULL);
+}
+
 static void set_link(app_t *a, bool up)
 {
     if (a->link_up != up)
         LOGI("link: turned %s by command\n", up ? "on" : "off");
     a->link_up = up;
     port_set_link_up(a->port, up);
-    if (!up) {
-        regen_stop(a, "cut short");
-        link_rx_end(a, monotonic_ms(), NULL);
-    }
+    if (!up)
+        link_cut(a);
     update_link_tx(a);
 }
 
@@ -507,10 +512,8 @@ static void run_command(app_t *a, const command_t *c)
         if (name[0])
             r = message_render(&a->cfg, a->vocab, name, -1.0);
         port_set_repeater_down(a->port, down, r.samples, r.n, monotonic_ms());
-        if (down) {
-            regen_stop(a, "cut short");
-            link_rx_end(a, monotonic_ms(), NULL);
-        }
+        if (down)
+            link_cut(a);
         update_link_tx(a);
         save_repeater_state(a, down);
         break;

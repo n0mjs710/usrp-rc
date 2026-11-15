@@ -51,7 +51,8 @@ typedef struct {
     bool        is_gap;
     int         gap_ms;             /* valid when is_gap; -1 = use configured default */
     voice_var_t var;                /* filled in when the message plays */
-    char        clip[CFG_NAME_STR]; /* valid when !is_gap and no var */
+    char        clip[CFG_NAME_STR]; /* !is_gap: the clip; with VOICE_VAR_EXTERNAL,
+                                     * "producer.field"; with VOICE_VAR_MESSAGE, the name */
 } config_voice_word_t;
 
 typedef struct {

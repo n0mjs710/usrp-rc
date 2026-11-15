@@ -19,7 +19,7 @@ maintenance = voice: SORRY WE ARE DOWN FOR MAINTENANCE
 ```
 
 For more data, see [README.md](../README.md), "Voice clips", and
-[MANUAL.md](../MANUAL.md), section 5.6.
+[MANUAL.md](../MANUAL.md), section 5.8.
 
 ## Preparation of recordings
 

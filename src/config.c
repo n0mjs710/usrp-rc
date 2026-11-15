@@ -888,15 +888,24 @@ static void read_cw(char *text, const char *path, const config_t *cfg, config_me
     elem->cw_text[used] = '\0';
 }
 
-static void add_voice_clip(config_elem_t *elem, const char *path, const char *clip)
+/* The next word of a voice part, or NULL when it is full. Past the limit, n_voice_words
+ * stays one over, so it is reported once; read_voice() sets it back. */
+static config_voice_word_t *new_voice_word(config_elem_t *elem, const char *path)
 {
     if (elem->n_voice_words == CFG_MAX_VOICE_WORDS)
         cfg_err("%s: more than %d words\n", path, CFG_MAX_VOICE_WORDS);
     if (elem->n_voice_words >= CFG_MAX_VOICE_WORDS) {
-        elem->n_voice_words = CFG_MAX_VOICE_WORDS + 1;   /* report once */
-        return;
+        elem->n_voice_words = CFG_MAX_VOICE_WORDS + 1;
+        return NULL;
     }
-    config_voice_word_t *w = &elem->voice_words[elem->n_voice_words++];
+    return &elem->voice_words[elem->n_voice_words++];
+}
+
+static void add_voice_clip(config_elem_t *elem, const char *path, const char *clip)
+{
+    config_voice_word_t *w = new_voice_word(elem, path);
+    if (!w)
+        return;
     if (strlen(clip) >= sizeof(w->clip)) {
         cfg_err("%s: clip name '%s' is too long (max %zu characters)\n", path, clip, sizeof(w->clip) - 1);
         return;
@@ -963,62 +972,39 @@ static void read_voice(char *words, const char *path, const config_t *cfg, confi
     for (char *tok = strtok_r(words, " \t", &save); tok; tok = strtok_r(NULL, " \t", &save)) {
         int gap_ms;
         voice_var_t var = voice_var(tok);
+        config_voice_word_t *w;
         if (var != VOICE_VAR_NONE) {
-            if (elem->n_voice_words == CFG_MAX_VOICE_WORDS)
-                cfg_err("%s: more than %d words\n", path, CFG_MAX_VOICE_WORDS);
-            if (elem->n_voice_words >= CFG_MAX_VOICE_WORDS) {
-                elem->n_voice_words = CFG_MAX_VOICE_WORDS + 1;
-                continue;
-            }
-            elem->voice_words[elem->n_voice_words++].var = var;
+            if ((w = new_voice_word(elem, path)))
+                w->var = var;
         } else if (strcmp(tok, "{call}") == 0) {
             if (!cfg->callsign[0])
                 cfg_err("%s: uses {call} but no callsign is set\n", path);
             add_voice_callsign(elem, path, cfg->callsign);
         } else if (tok[0] == '{' && strchr(tok, '.')) {
             char name[CFG_NAME_STR];
-            if (!parse_producer_var(tok, path, cfg, name))
-                continue;
-            if (elem->n_voice_words == CFG_MAX_VOICE_WORDS)
-                cfg_err("%s: more than %d words\n", path, CFG_MAX_VOICE_WORDS);
-            if (elem->n_voice_words >= CFG_MAX_VOICE_WORDS) {
-                elem->n_voice_words = CFG_MAX_VOICE_WORDS + 1;
-                continue;
+            if (parse_producer_var(tok, path, cfg, name) && (w = new_voice_word(elem, path))) {
+                w->var = VOICE_VAR_EXTERNAL;
+                strcpy(w->clip, name);
             }
-            config_voice_word_t *w = &elem->voice_words[elem->n_voice_words++];
-            w->var = VOICE_VAR_EXTERNAL;
-            strcpy(w->clip, name);
         } else if (strncmp(tok, "{msg:", 5) == 0) {
             /* {msg:name}: checked against the messages once they are all read */
             size_t len = strlen(tok);
             if (tok[len - 1] != '}' || len == 6 || len - 6 >= CFG_NAME_STR) {
                 cfg_err("%s: '%s' is not a message reference: {msg:name}\n", path, tok);
-                continue;
+            } else if ((w = new_voice_word(elem, path))) {
+                w->var = VOICE_VAR_MESSAGE;
+                snprintf(w->clip, sizeof(w->clip), "%.*s", (int)(len - 6), tok + 5);
             }
-            if (elem->n_voice_words == CFG_MAX_VOICE_WORDS)
-                cfg_err("%s: more than %d words\n", path, CFG_MAX_VOICE_WORDS);
-            if (elem->n_voice_words >= CFG_MAX_VOICE_WORDS) {
-                elem->n_voice_words = CFG_MAX_VOICE_WORDS + 1;
-                continue;
-            }
-            config_voice_word_t *w = &elem->voice_words[elem->n_voice_words++];
-            w->var = VOICE_VAR_MESSAGE;
-            snprintf(w->clip, sizeof(w->clip), "%.*s", (int)(len - 6), tok + 5);
         } else if (strchr(tok, '{')) {
-            cfg_err("%s: unknown placeholder '%s' (see [messages] in the README for the list; each must be its own word)\n",
+            cfg_err("%s: unknown placeholder '%s' (see MANUAL.md 5.5 for the list; each must be its own word)\n",
                     path, tok);
         } else if (parse_voice_gap(tok, &gap_ms)) {
             if (gap_ms > 60000)
                 cfg_err("%s: pause '%s' is too long (max 60000 ms)\n", path, tok);
-            if (elem->n_voice_words == CFG_MAX_VOICE_WORDS)
-                cfg_err("%s: more than %d words\n", path, CFG_MAX_VOICE_WORDS);
-            if (elem->n_voice_words >= CFG_MAX_VOICE_WORDS) {
-                elem->n_voice_words = CFG_MAX_VOICE_WORDS + 1;
-                continue;
+            if ((w = new_voice_word(elem, path))) {
+                w->is_gap = true;
+                w->gap_ms = gap_ms;
             }
-            config_voice_word_t *w = &elem->voice_words[elem->n_voice_words++];
-            w->is_gap = true;
-            w->gap_ms = gap_ms;
         } else {
             add_voice_clip(elem, path, tok);
         }
@@ -1443,8 +1429,6 @@ static bool parse_window(const char *text, int *start, int *end)
     return true;
 }
 
-static void check_message_ref(const config_t *cfg, const char *path, const char *name);
-
 /* Why a setting can't go in a schedule window, or NULL if it can. */
 static const char *not_schedulable(const field_t *f)
 {
@@ -1520,8 +1504,7 @@ static const field_t *find_schedule_field(const char *name, const char *path)
     return NULL;
 }
 
-static void read_override(char *tok, const char *path, const config_t *cfg, config_t *scratch,
-                          config_schedule_t *out)
+static void read_override(char *tok, const char *path, config_t *scratch, config_schedule_t *out)
 {
     char *eq = strchr(tok, '=');
     if (!eq) {
@@ -1603,7 +1586,6 @@ static void read_override(char *tok, const char *path, const config_t *cfg, conf
         count++;
         if (strlen(name) >= CFG_NAME_STR)
             cfg_err("%s: '%s' is too long (max %d characters)\n", path, name, CFG_NAME_STR - 1);
-        check_message_ref(cfg, path, name);
     }
     int max = f->type == FT_NAME_LIST ? (int)(f->size / CFG_NAME_STR) : 1;
     if (count > max)
@@ -1714,7 +1696,7 @@ static void read_schedule(const entries_t *es, config_t *cfg)
                     strcpy(out->announce, tok + 9);
                 continue;
             }
-            read_override(tok, path, cfg, scratch, out);
+            read_override(tok, path, scratch, out);
         }
         if (out->nsets == 0 && !out->announce[0])
             cfg_err("%s: changes nothing (add at least one setting=value, or announce=)\n", path);
@@ -1757,26 +1739,68 @@ static void check_message_ref(const config_t *cfg, const char *path, const char 
         cfg_err("%s: no message named '%s'\n", path, name);
 }
 
-/* Check one [events] setting. Empty means that event plays nothing. */
-static void check_event(const entries_t *es, const config_t *cfg, const char *key,
-                        const char names[][CFG_NAME_STR], int n)
-{
-    const entry_t *e = entry_find(es, "events", key);
-    s_line = e ? e->line : 0;
-    char path[64];
-    snprintf(path, sizeof(path), "events.%s", key);
-    for (int i = 0; i < n; i++)
-        if (names[i][0])
-            check_message_ref(cfg, path, names[i]);
-    s_line = 0;
-}
-
 /* The names an [events] setting holds. Every [events] setting is a message name, so
  * walking FIELDS covers all of them, including any added later. */
 static int event_names(const config_t *cfg, const field_t *f, const char (**names)[CFG_NAME_STR])
 {
     *names = (const char (*)[CFG_NAME_STR])((const char *)cfg + f->offset);
     return f->type == FT_NAME_LIST ? *(const int *)((const char *)cfg + f->count_offset) : 1;
+}
+
+/* Every place a setting names a message, one name at a time: the [events] settings,
+ * read_NN, producer fallbacks, schedule windows and {msg:} references. validate()
+ * checks each one and message_in_use() keeps each one, so a new kind goes only here.
+ * A true return from fn stops the walk. */
+typedef bool (*message_ref_fn)(void *arg, const char *section, const char *key, const char *name);
+
+static bool message_refs(const config_t *cfg, message_ref_fn fn, void *arg)
+{
+    for (size_t i = 0; i < NFIELDS; i++) {
+        if (strcmp(FIELDS[i].section, "events") != 0)
+            continue;
+        const char (*names)[CFG_NAME_STR];
+        int n = event_names(cfg, &FIELDS[i], &names);
+        for (int j = 0; j < n; j++)
+            if (names[j][0] && fn(arg, "events", FIELDS[i].key, names[j]))
+                return true;
+    }
+    for (int i = 0; i < CFG_READ_SLOTS; i++) {
+        char key[16];
+        snprintf(key, sizeof(key), "read_%02d", i);
+        if (cfg->dtmf.read_messages[i][0] && fn(arg, "dtmf", key, cfg->dtmf.read_messages[i]))
+            return true;
+    }
+    for (int i = 0; i < cfg->external.nproducers; i++) {
+        const config_producer_t *p = &cfg->external.producers[i];
+        if (p->fallback[0] && fn(arg, EXTERNAL_SECTION, p->name, p->fallback))
+            return true;
+    }
+    for (int i = 0; i < cfg->nschedule; i++) {
+        const config_schedule_t *w = &cfg->schedule[i];
+        if (w->announce[0] && fn(arg, SCHEDULE_SECTION, w->name, w->announce))
+            return true;
+        for (int j = 0; j < w->nsets; j++) {
+            if (!w->sets[j].names)
+                continue;
+            char copy[CFG_STR];
+            snprintf(copy, sizeof(copy), "%s", w->sets[j].value);
+            char *save = NULL;
+            for (char *n = strtok_r(copy, ",", &save); n; n = strtok_r(NULL, ",", &save))
+                if (strlen(n) < CFG_NAME_STR && fn(arg, SCHEDULE_SECTION, w->name, n))
+                    return true;
+        }
+    }
+    for (int i = 0; i < cfg->nmessages; i++) {
+        const config_message_t *m = &cfg->messages[i];
+        for (int j = 0; j < m->nelements; j++) {
+            const config_elem_t *e = &m->elements[j];
+            for (int w = 0; e->type == ELEM_VOICE && w < e->n_voice_words; w++)
+                if (e->voice_words[w].var == VOICE_VAR_MESSAGE
+                    && fn(arg, MESSAGES_SECTION, m->name, e->voice_words[w].clip))
+                    return true;
+        }
+    }
+    return false;
 }
 
 static int count_names(const char *value)
@@ -1997,6 +2021,22 @@ static void check_address(const char *path, const char *value)
         cfg_err("%s: '%s' must be an IPv4 address, such as 127.0.0.1\n", path, value);
 }
 
+typedef struct {
+    const entries_t *es;
+    const config_t  *cfg;
+} ref_check_t;
+
+static bool check_ref(void *arg, const char *section, const char *key, const char *name)
+{
+    const ref_check_t *r = arg;
+    const entry_t *e = entry_find(r->es, section, key);
+    s_line = e ? e->line : 0;
+    char path[96];
+    make_path(path, sizeof(path), section, key);
+    check_message_ref(r->cfg, path, name);
+    return false;
+}
+
 static void validate(const entries_t *es, const config_t *cfg)
 {
     const config_events_t *ev = &cfg->events;
@@ -2019,70 +2059,33 @@ static void validate(const entries_t *es, const config_t *cfg)
                     frame_bytes, USRP_OPUS_MAX_BYTES);
     }
 
-    for (size_t i = 0; i < NFIELDS; i++) {
-        if (strcmp(FIELDS[i].section, "events") != 0)
-            continue;
-        const char (*names)[CFG_NAME_STR];
-        int n = event_names(cfg, &FIELDS[i], &names);
-        check_event(es, cfg, FIELDS[i].key, names, n);
-    }
+    message_refs(cfg, check_ref, &(ref_check_t){es, cfg});
     if (!ev->impolite_id[0])
         cfg_err("events.impolite_id is required: it's the ID of last resort if mandatory_ids is empty\n");
 
-    for (int i = 0; i < CFG_READ_SLOTS; i++) {
-        if (!cfg->dtmf.read_messages[i][0])
-            continue;
-        char key[16], path[32];
-        snprintf(key, sizeof(key), "read_%02d", i);
-        snprintf(path, sizeof(path), "dtmf.%s", key);
-        const entry_t *e = entry_find(es, "dtmf", key);
-        s_line = e ? e->line : 0;
-        check_message_ref(cfg, path, cfg->dtmf.read_messages[i]);
-    }
     /* One level only: a referenced message refers to nothing, so nothing can loop. */
     for (int i = 0; i < cfg->nmessages; i++) {
         const config_message_t *m = &cfg->messages[i];
-        char path[64];
-        snprintf(path, sizeof(path), "messages.%s", m->name);
         s_line = m->line;
         for (int j = 0; j < m->nelements; j++) {
             const config_elem_t *el = &m->elements[j];
             for (int w = 0; el->type == ELEM_VOICE && w < el->n_voice_words; w++) {
-                if (el->voice_words[w].var != VOICE_VAR_MESSAGE)
-                    continue;
-                const char *target = el->voice_words[w].clip;
-                const config_message_t *t = config_find_message(cfg, target);
-                if (!t)
-                    check_message_ref(cfg, path, target);
-                else if (message_refers(t, false))
-                    cfg_err("%s: {msg:%s} refers to a message that refers to another; only one level\n",
-                            path, target);
+                const config_message_t *t = config_find_message(cfg, el->voice_words[w].clip);
+                if (el->voice_words[w].var == VOICE_VAR_MESSAGE && t && message_refers(t, false))
+                    cfg_err("messages.%s: {msg:%s} refers to a message that refers to another; only one level\n",
+                            m->name, t->name);
             }
         }
-    }
-    for (int i = 0; i < cfg->nschedule; i++) {
-        if (!cfg->schedule[i].announce[0])
-            continue;
-        char path[64];
-        snprintf(path, sizeof(path), "schedule.%s", cfg->schedule[i].name);
-        const entry_t *e = entry_find(es, SCHEDULE_SECTION, cfg->schedule[i].name);
-        s_line = e ? e->line : 0;
-        check_message_ref(cfg, path, cfg->schedule[i].announce);
     }
     /* A fallback plays in place of a producer's words, so it can't use any itself. */
     for (int i = 0; i < cfg->external.nproducers; i++) {
         const config_producer_t *p = &cfg->external.producers[i];
-        if (!p->fallback[0])
-            continue;
-        char path[64];
-        snprintf(path, sizeof(path), "external.%s", p->name);
+        const config_message_t *fm = p->fallback[0] ? config_find_message(cfg, p->fallback) : NULL;
         const entry_t *e = entry_find(es, EXTERNAL_SECTION, p->name);
         s_line = e ? e->line : 0;
-        const config_message_t *fm = config_find_message(cfg, p->fallback);
-        if (!fm)
-            check_message_ref(cfg, path, p->fallback);
-        else if (message_refers(fm, true))
-            cfg_err("%s: the fallback '%s' can't contain {msg:} or {producer.field}\n", path, p->fallback);
+        if (fm && message_refers(fm, true))
+            cfg_err("external.%s: the fallback '%s' can't contain {msg:} or {producer.field}\n",
+                    p->name, p->fallback);
     }
     s_line = 0;
 
@@ -2163,46 +2166,16 @@ int config_load(config_t *cfg, const char *path)
     return s_errors ? -1 : 0;
 }
 
+static bool names_message(void *arg, const char *section, const char *key, const char *name)
+{
+    (void)section;
+    (void)key;
+    return strcmp(name, (const char *)arg) == 0;
+}
+
 static bool message_in_use(const config_t *cfg, const char *name)
 {
-    for (int i = 0; i < cfg->nmessages; i++) {
-        const config_message_t *m = &cfg->messages[i];
-        for (int j = 0; j < m->nelements; j++)
-            for (int w = 0; m->elements[j].type == ELEM_VOICE && w < m->elements[j].n_voice_words; w++)
-                if (m->elements[j].voice_words[w].var == VOICE_VAR_MESSAGE
-                    && strcmp(m->elements[j].voice_words[w].clip, name) == 0)
-                    return true;
-    }
-    for (int i = 0; i < CFG_READ_SLOTS; i++)
-        if (strcmp(cfg->dtmf.read_messages[i], name) == 0)
-            return true;
-    for (int i = 0; i < cfg->external.nproducers; i++)
-        if (strcmp(cfg->external.producers[i].fallback, name) == 0)
-            return true;
-    for (size_t i = 0; i < NFIELDS; i++) {
-        if (strcmp(FIELDS[i].section, "events") != 0)
-            continue;
-        const char (*names)[CFG_NAME_STR];
-        int n = event_names(cfg, &FIELDS[i], &names);
-        for (int j = 0; j < n; j++)
-            if (strcmp(names[j], name) == 0)
-                return true;
-    }
-    for (int i = 0; i < cfg->nschedule; i++)
-        if (strcmp(cfg->schedule[i].announce, name) == 0)
-            return true;
-    for (int i = 0; i < cfg->nschedule; i++)
-        for (int j = 0; j < cfg->schedule[i].nsets; j++) {
-            if (!cfg->schedule[i].sets[j].names)
-                continue;
-            char copy[CFG_STR];
-            snprintf(copy, sizeof(copy), "%s", cfg->schedule[i].sets[j].value);
-            char *save = NULL;
-            for (char *n = strtok_r(copy, ",", &save); n; n = strtok_r(NULL, ",", &save))
-                if (strcmp(n, name) == 0)
-                    return true;
-        }
-    return false;
+    return message_refs(cfg, names_message, (void *)name);
 }
 
 void config_prune_messages(config_t *cfg)

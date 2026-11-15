@@ -136,7 +136,7 @@ The stateful pieces, and where their state lives:
 | ID owed | `id_owed`, `id_deadline`, the two rotations | PTT rising, repeated keyups, IDs starting |
 | Time-outs | Per source: the flag, the deadline; local `tot_used`/`start` | Keyups, the courtesy tone |
 | Tail messages | `tails_since_message`, `tail_last_ms`, `tail_rot` | Each hang's end |
-| Reply | `reply`, one deep | Commands; played at `ct_delay` |
+| Reply | `reply`, one deep | Commands and `announce=`; played at `ct_delay`, or at once when idle |
 | Echo test | Port `echo_armed`, then `main.c` `echo_recording` | Command, next local keyup, unkey or hang's end |
 | Repeater down | `down`, and the state file | Repeater command |
 | Link on/off | `link_up` (the port's copy picks the courtesy tone) | Link commands |
@@ -168,7 +168,7 @@ path, `port_queue_reply()`. The windows open at startup announce after `port_sta
 
 A producer is a separate program that writes clip words to files; `{producer.field}`
 in a voice part speaks the file `<external.dir>/<producer>/<field>`. The contract is in
-MANUAL Appendix C, and `producers/metar/` is the first one.
+MANUAL Appendix C, and `producers/metar/` is a sample.
 
 `usrp-rc` reads the file when the message renders, in the main loop. That is safe
 because the read is bounded (1024 bytes, 32 words) and the default directory is on
@@ -206,13 +206,18 @@ pushed to GitHub from this dev box and pulled/built on the NanoPi NEO —
 there's nothing Pi-specific in the source; it's plain C11 against
 `libopus`.
 
+The NanoPi NEO stays the target on purpose: it has fewer resources than a typical
+Raspberry Pi, so a controller that runs well there also runs on older and simpler
+SBCs.
+
 ## Regenerating `vocab_8k/` from source audio
 
-`vocab_8k/` (623 clips) is committed to the repo pre-built, converted from
-a render of `Vocab_Master.cpp` in
-[TI LPC Speech Tools](https://github.com/n0mjs710/lpc) to the 8 kHz mono S16LE both audio paths use —
-a normal clone and build never needs `sox` or the 48 kHz source. Only
-regenerate it if the reference vocabulary itself changes:
+`vocab_8k/` is committed to the repo pre-built, converted from renders made with
+[TI LPC Speech Tools](https://github.com/n0mjs710/lpc) to the 8 kHz mono S16LE both
+audio paths use — a normal clone and build never needs `sox` or the 48 kHz source.
+The set is curated: words are added as uses for them turn up. MANUAL Appendix B lists
+every clip, so update it when the set changes.
+Only regenerate the clips if the reference vocabulary itself changes:
 
 ```bash
 sudo apt-get install -y sox
