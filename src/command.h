@@ -9,8 +9,8 @@
  * happens to the audio while they're being entered.
  *
  * Commands follow the ACC three-tier structure: user commands, control operator
- * commands behind a prefix, and programming commands behind an unlock. Only the
- * user tier has commands so far (see command.c).
+ * commands behind a prefix, and programming commands behind an unlock. The
+ * programming tier has no commands (see command.c).
  *
  * Everything is clocked by the audio frames passed in, one per 20 ms of
  * received audio, so nothing here needs a timer of its own. */
@@ -19,12 +19,21 @@
 
 typedef struct {
     command_type_t type;
+    bool           control_op;   /* entered behind dtmf.control_op_prefix */
     char           digits[COMMAND_MAX_DIGITS + 1];
 } command_t;
 
 typedef struct command_session command_session_t;
 
 int  command_session_create(command_session_t **out, const config_t *cfg);
+
+/* A session fed keys instead of audio: the control terminal, a receiver like any
+ * other. `label` starts its log lines in place of "dtmf". */
+int  command_session_create_keys(command_session_t **out, const config_t *cfg, const char *label);
+
+/* One key. True, with `out` set, if it was D and entered a command. End the entry
+ * with command_session_end_of_tx(), as at an unkey. */
+bool command_session_key(command_session_t *s, char key, command_t *out);
 void command_session_destroy(command_session_t *s);
 
 /* Feed one 160-sample frame of received audio, before any delay or muting.

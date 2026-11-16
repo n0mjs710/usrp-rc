@@ -30,6 +30,7 @@ This manual applies to `usrp-rc` version 1.0. To see the installed version, ente
 
 - [Appendix A: Tone catalog](#appendix-a-tone-catalog)
 - [Appendix B: Voice clips](#appendix-b-voice-clips)
+- [Appendix C: Producer interface](#appendix-c-producer-interface)
 
 ---
 
@@ -52,6 +53,7 @@ used. Speech and sound effects are WAV clips and text definitions.
 | 3 to 10 | Functions and their configuration | Repeater operators |
 | 11 | All settings, with defaults and ranges | Repeater operators |
 | 12 and 13 | Examples, log messages and fault isolation | Repeater operators |
+| Appendix C | The producer interface | Producer authors, and operators who use a producer |
 
 ### 1.3 Terms
 
@@ -66,6 +68,7 @@ used. Speech and sound effects are WAV clips and text definitions.
 | Message | A named sequence of voice, CW and tone audio |
 | Event | A setting that names the message for one occasion |
 | Window | A schedule line that changes settings during a time period |
+| Producer | A separate program, a third-party extension, that writes words for messages, for example a weather report. See [Appendix C](#appendix-c-producer-interface). |
 
 ### 1.4 Units
 
@@ -94,6 +97,7 @@ commands operate only if the operator sets `[dtmf] enabled = true`.
 | `72` | Link on | "Link on" |
 | `73` | Link off | "Link off" |
 | `70` | Link status | "Link on" or "Link off". The link state does not change. |
+| `4` + 2 digits | Read | The message for that number, for example a weather report. See [2.9](#29-read-a-message). |
 | `5` + keys | Pad test | The keys. Use this command to test the DTMF tones of a radio. |
 | `31` + keys | DTMF regen | The keys, as new DTMF tones. See [2.6](#26-dtmf-regen). |
 
@@ -149,9 +153,9 @@ If the repeater has no link, `70`, `72` and `73` reply "No link service".
 
 An entry that does not agree with a command has no effect. No error sound plays.
 
-When the repeater has timed out a local transmission, or is down, it accepts only the
-repeater command. Timed out, the command must end with `D`: an unkey does not enter it.
-See [6.3](#63-time-out) and [9.7](#97-repeater-down-and-up).
+When the repeater has timed out a local transmission, or is down, it accepts only control
+operator commands. Timed out, the command must end with `D`: an unkey does not enter it.
+See [6.3](#63-time-out) and [9.7](#97-control-operator-commands).
 
 ### 2.5 Pad test
 
@@ -210,7 +214,17 @@ Use this command to hear how your signal sounds through the repeater.
 | Courtesy tone | The transmission has ended. The next station can transmit. Different tones can show local traffic, link traffic and link off. |
 | Cover tone: a beep, one time each second | A station enters a DTMF command. |
 | Short falling tones | The time-out timer stopped a long transmission. Unkey to reset the timer. |
-| "Repeater down" or "Repeater up" with no repeated audio | The repeater is timed out or down, and a station entered the repeater command. |
+| "Repeater down" or "Repeater up" with no repeated audio | The repeater is timed out or down, and a control operator entered repeater down or up. |
+
+### 2.9 Read a message
+
+Enter `4` and a number of two digits, then unkey. The repeater plays the message that the
+operator assigns to that number. For example, `417` can play a weather report.
+
+- The number always has two digits. For number 1, enter `401`.
+- If the number has no message, nothing plays.
+- If the information is not available, the repeater can play a notice in its place, for
+  example "Weather not available". The operator selects the notice.
 
 ---
 
@@ -385,14 +399,15 @@ command reply that is due still plays before the transmitter stops.
 
 ### 5.1 Definition
 
-A message is a named sequence of audio in `[messages]`. It contains `voice:`, `cw:` and
-`tone:` parts. `|` joins the parts:
+A message is a named sequence of audio in `[messages]`. It contains `voice:`, `cw:`,
+`tone:` and `dtmf:` parts. `|` joins the parts:
 
 ```ini
 [messages]
 my_voice = voice: THISIS {call} REPEATER
 my_cw    = cw: {call}/R
 my_tone  = tone: 330:50 495:50 660:50
+my_page  = dtmf: 123#
 my_mix   = voice: THISIS {call} | tone: 880:100 | cw: {call}/R
 ```
 
@@ -408,6 +423,7 @@ A voice part is a list of clip names. The clips play in sequence. For the stock 
 | `_400` | A pause of 400 ms |
 | `{call}` | The callsign, spelled: `W1XYZ` plays `W ONE X Y Z` |
 | `{time}` and other variables | See [5.5](#55-variables) |
+| `{msg:name}` | The message `name`. See [5.6](#56-message-references). |
 
 ### 5.3 CW parts
 
@@ -434,6 +450,29 @@ The notes play from left to right:
 | Duration of one note | 1 to 60000 ms |
 | Level | 0 to 2 |
 
+#### DTMF parts
+
+A `dtmf:` part sends DTMF keys, for example to page a radio. The groups play from left
+to right:
+
+| Item | Result |
+| --- | --- |
+| `123#` | The keys `1`, `2`, `3` and `#` |
+| `123#:80/50` | Each key on for 80 ms, then 50 ms of silence |
+| `_500` | 500 ms of silence |
+| `123#@0.6` | These keys at level 0.6, in place of `audio.tone_level` |
+
+```ini
+[messages]
+page = dtmf: 123 _1500 456#:80/80
+```
+
+- The keys are `0` to `9`, `A` to `D`, `*` and `#`.
+- Silence follows each key, also the last key of a group.
+- With no `:ON/OFF`, the timing is `dtmf.regen_tone_ms` and `dtmf.regen_gap_ms`,
+  100 ms and 100 ms by default.
+- The durations are 1 to 60000 ms. The silence can be 0.
+
 For the tone catalog, see [Appendix A](#appendix-a-tone-catalog).
 
 ### 5.5 Variables
@@ -457,10 +496,51 @@ separate word in a `voice:` part.
 - `{time}`, `{ampm}` and `{greeting}` use the female `F_` clips. The other variables use
   the standard voice.
 - `{call}` is the only variable that also operates in `cw:` parts.
+- For words from a producer, for example `{wx.temp}`, see [5.7](#57-producer-variables).
 - The time and date come from the system clock and time zone of the computer. If the
   computer uses UTC, the repeater also uses UTC.
 
-### 5.6 Site voice clips
+### 5.6 Message references
+
+`{msg:name}` in a `voice:` part plays the message `name` in that location. The message
+can contain voice, CW and tone parts.
+
+```ini
+[messages]
+temp = voice: {wx.temp}
+id   = voice: {call} REPEATER _ {msg:temp}
+```
+
+- A reference has one level only. A message that another message references cannot
+  contain `{msg:}`. Thus a message cannot reference itself.
+- If the referenced message plays nothing, the rest of the message plays.
+
+### 5.7 Producer variables
+
+A producer is a separate program that writes words for messages, for example a weather
+report. Declare each producer in `[external]`. Then use its fields in `voice:` parts as
+`{producer.field}`:
+
+```ini
+[external]
+wx = 5400 wx_unavailable
+
+[messages]
+temp           = voice: {wx.temp}
+wx_unavailable = voice: WEATHER NOT AVAILABLE
+```
+
+- `5400` is the lifetime of the data in seconds.
+- `wx_unavailable` is the fallback. It is optional. It plays in place of each variable
+  that has no current data. With no fallback, nothing plays for that variable.
+- If a message plays nothing, the transmitter does not key for it.
+- The producer selects the words in each field. Write the messages to agree with them.
+
+For the producer interface, and for how to write messages for a producer, see
+[Appendix C](#appendix-c-producer-interface). For the settings, see
+[11.12](#1112-external).
+
+### 5.8 Site voice clips
 
 To add a clip, or to replace a stock clip:
 
@@ -479,17 +559,17 @@ case-sensitive.
 > louder than repeat audio. MMDVM-Host pre-emphasis also increases high frequencies to the
 > transmitter. Start with peaks near -10 dBFS. Then adjust by ear or with a deviation meter.
 
-### 5.7 Limits
+### 5.9 Limits
 
 | Item | Limit |
 | --- | --- |
 | Length of one message or one clip | 3 minutes |
-| Parts in one message | 32. Each note is one part. Each `voice:` or `cw:` part is one part. |
+| Parts in one message | 32. Each note, each DTMF key group and each pause is one part. Each `voice:` or `cw:` part is one part. |
 | Words and pauses in one `voice:` part | 32 |
 | Message names and clip names | 31 characters |
 | Number of messages | No limit |
 
-### 5.8 Validation
+### 5.10 Validation
 
 At each start and at each `--check`, `usrp-rc` makes sure that each clip for each message
 exists. This includes the built-in replies.
@@ -505,10 +585,11 @@ exists. This includes the built-in replies.
 
 > **Note:** The validation cannot hear the audio. Listen to each new message on the air.
 
-### 5.9 Unused messages
+### 5.11 Unused messages
 
-After validation, `usrp-rc` keeps only the messages that an `[events]` setting or a
-schedule window names. Unused messages and unused catalog tones use no memory. At start
+After validation, `usrp-rc` keeps only the messages that an `[events]` setting, a
+schedule window, a `read_NN` setting, a producer fallback or a `{msg:}` reference names.
+Unused messages and unused catalog tones use no memory. At start
 and at `--check`, `usrp-rc` shows the two quantities:
 
 ```text
@@ -532,6 +613,9 @@ nothing.
 | `impolite_id` | When the ID timer expires during a transmission. The ID mixes with the conversation. CW plays at `audio.impolite_morse_level`. **Necessary.** | No |
 
 A setting with a list rotates through the list. Each ID is the next name in the list.
+
+A control operator can also send an ID of each type by DTMF. See
+[9.7](#97-control-operator-commands).
 
 #### ID rules
 
@@ -642,7 +726,7 @@ During a local time-out, the repeater continues to decode DTMF from the receiver
 
 - A command must end with `D`. The carrier of a timed-out station does not drop, thus
   an unkey cannot enter the command. An entry without `D` is discarded at the unkey.
-- All commands are available.
+- Only control operator commands are available. See [9.7](#97-control-operator-commands).
 - The repeater keys the transmitter for the reply. It does not repeat the receiver audio.
 
 > **CAUTION:** With `link_timeout = 0`, a link that stays keyed holds the transmitter on
@@ -702,9 +786,9 @@ ends as usual. Tail messages are off by default: to use them, set `tail_messages
 
 - A tail message does not wait in a queue. It plays a maximum of one time in each tail.
 - If a key-up interrupts a tail message, the message counts as played.
-- A message with nothing to say also counts as played. The tail ends as usual, and the
-  next tail message is the next name in the list. The log shows
-  `tail: 'name' SILENT, nothing to say`.
+- A message with nothing to say also counts as played, for example a producer variable
+  with no current data and no fallback. The tail ends as usual, and the next tail message is the next name
+  in the list. The log shows `tail: 'name' SILENT, nothing to say`.
 
 Example: set `tail_every = 1` and `tail_min_interval = 300`. A tail message then plays
 at the end of a hang if 5 minutes have passed since the last tail message started.
@@ -734,8 +818,10 @@ net_running  = wed 19:30-20:30 timeout=600 hang=1 ct_link_on_message=net_ct
 ### 7.2 Window format
 
 ```text
-name = DAYS HH:MM-HH:MM setting=value [setting=value ...]
+name = [DAYS HH:MM-HH:MM] [{producer.field}] setting=value [setting=value ...]
 ```
+
+A window has days and times, a producer field, or both. See [7.9](#79-producer-windows).
 
 | Part | Rule |
 | --- | --- |
@@ -881,7 +967,37 @@ tail: 'net_tonight'
 schedule: 'net_reminder' ended
 ```
 
-### 7.9 Functions not available
+### 7.9 Producer windows
+
+A window can open on a producer field in place of days and times, or with them. The
+window is open while the field has current words. For producers, see
+[5.7](#57-producer-variables).
+
+`announce=message` plays the message one time when the window opens. If the repeater is
+idle, the transmitter keys for the message. The repeater then owes an ID, as after any
+transmission. No courtesy tone and no hang follow. If a station transmits, the message
+plays after the station unkeys, before the courtesy tone.
+
+```ini
+[messages]
+site_alarm = voice: {site.alarm} | dtmf: 123#
+wx_alert   = voice: {nws.alert}
+
+[schedule]
+alarm = {site.alarm} announce=site_alarm
+nws   = daily 07:00-22:00 {nws.alert} announce=wx_alert tail_messages+=wx_alert
+```
+
+- `alarm` keys the repeater when the alarm starts. The message includes DTMF tones, for
+  example to page a radio.
+- `nws` announces an alert one time, between 07:00 and 22:00. While the alert continues,
+  the alert is also a tail message.
+- `announce=` also operates in a window with only days and times.
+- The schedule examines the field at the start of each minute. Thus an announcement can
+  start up to 1 minute after the field changes.
+- After a restart, an open window announces again.
+
+### 7.10 Functions not available
 
 - A window cannot change `[link]` settings. Thus, a window cannot turn the link on or
   off.
@@ -906,7 +1022,8 @@ schedule: 'net_reminder' ended
 - To hear the link state without a change, use the link-status command, `70`.
 - To show the link state with each courtesy tone, set different messages in
   `ct_link_on_message` and `ct_link_off_message`. See [6.2](#62-courtesy-tones).
-- At this time, each station can use `72` and `73`. A control operator level is planned.
+- Each station can use `72` and `73`. A control operator command to lock out the link
+  commands is planned.
 - At this time, `codec = opus` operates only with other tools from the same author.
 
 ### 8.2 Traffic priority
@@ -937,7 +1054,9 @@ Local traffic has priority over link traffic.
 ### 9.1 Function
 
 `usrp-rc` decodes DTMF from the repeater receiver only. It does not decode tones from the
-link. For command entry, see [section 2](#2-over-the-air-operation).
+link. For command entry, see [section 2](#2-over-the-air-operation). The control terminal
+is a second receiver, on the computer that runs `usrp-rc`. See
+[9.9](#99-control-terminal).
 
 ```ini
 [dtmf]
@@ -950,13 +1069,16 @@ stats_code   =
 ### 9.2 Codes
 
 - A code can contain `0` to `9`, `*`, `A`, `B` and `C`.
-- The length of a code is 2 to 7 keys. The pad test prefix can also be 1 key, for the
-  `5` that most controllers use.
+- The length of a code is 2 to 7 keys. The pad test prefix and the read prefix can also be
+  1 key, for the `5` and `4` defaults.
 - `#` and `D` are not available in codes. They cancel and execute.
 - An empty code disables its command. In the example above, `stats_code` is empty.
 - The pad test prefix and the regen code take each key after them, to the unkey. Thus,
   no other code can start with one of them. With the defaults, no code can start with
   `5` or `31`. `--check` shows each code that does.
+- The read prefix takes the two digits after it. No other code can start with it.
+- No code can start with the control operator prefix. See
+  [9.7](#97-control-operator-commands).
 
 > **Note:** DTMF gives no security. A station that monitors the repeater can hear a code
 > and use it. Select the enabled commands with this risk in mind.
@@ -964,9 +1086,13 @@ stats_code   =
 ### 9.3 Command levels
 
 The commands follow the ACC model: user commands, control operator commands and
-programming commands. At this time, only user commands are available. The configuration
-file replaces DTMF programming. The programming level stays in the design for possible
-future use.
+programming commands.
+
+| Level | Codes | Section |
+| --- | --- | --- |
+| User | Each code is a setting. Each station can use them. | [2.1](#21-dtmf-commands) |
+| Control operator | Fixed codes behind a prefix that the operator sets | [9.7](#97-control-operator-commands) |
+| Programming | None. The configuration file replaces DTMF programming. The level stays in the design for possible future use. | |
 
 ### 9.4 Muting
 
@@ -1009,42 +1135,74 @@ dtmf: '38': ACCEPTED command = usage
 | | | `'31*3': ACCEPTED command = regen *3` |
 | `ERROR` | The entry is complete, but no command can execute. | `'99': ERROR no command matched` |
 | | A link command on a repeater with no link. The reply is "No link service". | `'70': ERROR command = link status, no link service` |
+| | A read number with no message. No reply plays. | `'417': ERROR no message 17` |
+| | A forced ID of a type that is not set. No ID plays. | `'123330': ERROR no initial ID 0` |
 | `ABANDONED` | The entry stopped before it was complete. | `'12#': ABANDONED user terminated` |
 
 An `ABANDONED` line also names the timer that expired, if a timer expired. At
 `log.level = debug`, the log also shows each digit and each tone that was too short.
 
-### 9.7 Repeater down and up
+### 9.7 Control operator commands
 
-The repeater command takes the repeater out of service and puts it back. Enter the code,
-then `0` or `1`:
+Control operator commands are not for general use. Each command is the control operator
+prefix, then a fixed 2-digit code, then the parameters, if the command has them. The
+codes are fixed and published in this manual. Only the prefix protects them.
 
-| Entry | Result | Reply |
+The prefix is `control_op_prefix`. The default is `123`, the factory prefix of ACC
+controllers. Thus, the commands operate on a new installation without more setup.
+
+> **CAUTION:** Each station that reads this manual knows the default prefix. Change
+> `control_op_prefix` before the repeater goes on the air. An empty prefix disables all
+> control operator commands.
+
+| Entry (default prefix) | Command | Reply |
 | --- | --- | --- |
-| Code + `0` | Repeater down | "Repeater down", then an ID |
-| Code + `1` | Repeater up | "Repeater up" |
+| `123` `00` | Repeater up | "Repeater up" |
+| `123` `01` | Repeater down | "Repeater down", then an ID |
+| `123` `33` `0` | Send the initial ID | The ID |
+| `123` `33` `1` | Send the impolite ID | The ID |
+| `123` `33` `2` | Send the anxious ID | The ID |
+| `123` `33` `3` | Send the mandatory ID | The ID |
 
-`repeater_code` is empty by default. Thus, the command is off until the operator sets a
-code.
+The codes `00`, `01` and `33` are ACC codes. Where ACC has a code for the same function,
+`usrp-rc` uses that code.
 
-> **CAUTION:** At this time, each station can use each command. A station that hears the
-> code can take the repeater out of service. Set a code only if this risk is acceptable.
-> A control operator level is planned.
+- After the prefix, a code can use the same digits as a user code. No user code can start
+  with the prefix. `--check` shows each user code that does.
+- Control operator commands operate when the repeater is down, and during a local
+  time-out. Down stops the repeated audio, not the controller: the replies and the IDs
+  key the transmitter.
+
+#### Send an ID
+
+The ID plays after the unkey, as a command reply. It is a usual ID:
+
+- An ID from a list (`initial_ids`, `mandatory_ids`) is the next ID in the list. The
+  rotation moves to the ID after it.
+- The ID satisfies the ID requirement and starts the ID timer again. See
+  [6.1](#61-identification).
+- The impolite ID plays at `audio.impolite_morse_level`. It plays in the tail, not
+  mixed with a conversation.
+- If `initial_ids` or `anxious_id` is empty, that command does nothing. If
+  `mandatory_ids` is empty, the impolite ID plays in its place.
+- The ID does not go to the link.
+
+#### Repeater down and up
 
 When the repeater is down:
 
 - No audio goes through the repeater: no local repeat, no local audio to the link, and
   no link audio to the transmitter.
-- The repeater continues to decode DTMF from the receiver, but accepts only the repeater
-  command.
-- No courtesy tones, tail messages, IDs or time-outs occur.
+- The repeater continues to decode DTMF from the receiver, but accepts only control
+  operator commands.
+- No courtesy tones, tail messages, automatic IDs or time-outs occur.
 - The down state stays after a restart. It is kept in `[state] file`. The startup message
   does not play.
 
 The reply "Repeater down" is a transmission. Thus, the repeater sends a mandatory ID
 immediately after it. No other ID is then necessary while the repeater is down.
 
-If a station enters code + `1` with `D` and stays keyed, the repeater repeats that
+If a station enters repeater up with `D` and stays keyed, the repeater repeats that
 station immediately. The reply plays in its tail.
 
 ### 9.8 DTMF regen
@@ -1076,6 +1234,95 @@ regen_code =
 - The log shows `link: KEY -> peer (DTMF)` at the start and `link: DTMF sent` at the
   end. Link off, repeater down or a stop of `usrp-rc` stops the tones. The log then shows
   `link: DTMF cut short`.
+
+### 9.9 Control terminal
+
+The control terminal, `usrp-crx`, is a control receiver on the computer that runs
+`usrp-rc`. An operator who is logged in enters DTMF keys, and the repeater operates as if
+the keys came from a receiver. The terminal also shows the log as it occurs, and the state
+of the repeater. Thus, the operator can follow the repeater without a radio.
+
+```text
+14:06:02 crx (cort): '12301': ACCEPTED command = repeater down
+14:06:02 port: repeater DOWN
+14:06:02 ptt: ON   reason=controller
+──────────────────────────────────────────────────────────────────────────────
+ W0XYZ  DOWN   link OFF   TX ON   RX —   no ID pending
+──────────────────────────────────────────────────────────────────────────────
+crx> 123 00
+```
+
+#### Entries
+
+- Each line is one entry, as one transmission. Enter is the unkey.
+- The keys and the codes are the same as on the air. All commands operate: user
+  commands and control operator commands. The control operator prefix is necessary.
+- `#` cancels and `D` executes, as on the air.
+- Spaces are permitted for clarity, for example `123 33 1`. Lowercase `a` to `d` are
+  the same as `A` to `D`.
+- The terminal has no time limits between keys. The timers for DTMF from a receiver do
+  not apply.
+- The same rules apply as for a receiver. For example, when the repeater is down, only
+  control operator commands operate.
+
+| Key | Function |
+| --- | --- |
+| `0`-`9`, `*`, `#`, `A`-`D`, space | Entry. Other keys sound the bell. |
+| Enter | Sends the entry |
+| Backspace | Deletes the last key |
+| Up, Down | Earlier entries. They are kept in `~/.usrp-crx_history`. |
+| Ctrl+U | Clears the entry |
+| Ctrl+L | Draws the screen again |
+| Ctrl+C, Ctrl+D | Exit |
+
+#### Display
+
+- The log area shows the log at the `info` level, with the time. At connection, it
+  shows the last 25 lines first. `debug` lines do not go to the terminal.
+- The lines of an entry at the terminal start with `crx (user):`. Lines from the
+  receiver start with `dtmf:`.
+- The status line shows the callsign, the repeater state (`UP`, `DOWN` or `TIMED OUT`),
+  the link state, the transmitter, the active receiver and the ID timer. `DOWN` and
+  `TIMED OUT` show in reverse video. The link state does not show if no link is set.
+- `ID pending 6:58` shows that an ID is necessary, and the time to the ID timer expiry.
+  `no ID pending` shows that no ID is necessary.
+
+#### One entry from a script
+
+```bash
+usrp-crx 123 01
+```
+
+The program sends the entry, shows the log lines that the entry caused, and stops.
+
+| Exit status | Meaning |
+| --- | --- |
+| 0 | A command operated. |
+| 1 | No command operated: an error, or the command was dropped. |
+| 2 | No connection to `usrp-rc` |
+
+Put `#` and `*` in quotes, for example `usrp-crx '5#'`. The shell gives a special
+meaning to them.
+
+#### Access
+
+- Members of the group `usrp-rc` can use the terminal. `make install` creates the group
+  and adds the user `mmdvm`, if it exists. To add a different user:
+
+  ```bash
+  sudo usermod -aG usrp-rc <user>
+  ```
+
+  The change applies at the next login. Without the group, only `root` can use the
+  terminal.
+- The terminal is available only on the computer that runs `usrp-rc`. For remote
+  access, log in with SSH.
+- Two connections are permitted: for example, a session and one entry from a script. A
+  third connection closes the oldest. That terminal shows `taken over`. Push Enter there
+  to connect again. Thus, a session that a bad network connection left open cannot lock
+  out the operator.
+- If `usrp-rc` stops, the terminal connects again every 2 seconds.
+- If the terminal cannot be made, `usrp-rc` operates without it and logs a warning.
 
 ---
 
@@ -1206,7 +1453,9 @@ Levels above 1.0 are permitted, but they can cause clipping.
 | `link_on_code` | `72` | 2-7 keys | Link-on command. Empty is off. |
 | `link_off_code` | `73` | 2-7 keys | Link-off command. Empty is off. |
 | `link_status_code` | `70` | 2-7 keys | Link-status command. Empty is off. |
-| `repeater_code` | Empty | 2-7 keys | Repeater command: code + `0` is down, code + `1` is up. Empty is off. See [9.7](#97-repeater-down-and-up). |
+| `control_op_prefix` | `123` | 1-7 keys | Control operator prefix. Empty disables all control operator commands. See [9.7](#97-control-operator-commands). |
+| `read_prefix` | `4` | 1-7 keys | Read prefix: prefix + 2 digits. Empty is off. See [2.9](#29-read-a-message). |
+| `read_00` to `read_99` | Empty | Message name | The message for read number 00 to 99 |
 | `regen_code` | `31` | 2-7 keys | DTMF regen: code + keys to send. Empty is off. See [9.8](#98-dtmf-regen). |
 | `regen_tone_ms` | `100` | 40-1000 | Regen tone length |
 | `regen_gap_ms` | `100` | 40-1000 | Silence between regen tones |
@@ -1235,7 +1484,13 @@ Levels above 1.0 are permitted, but they can cause clipping.
 | --- | --- | --- |
 | `file` | `/var/local/usrp-rc/state` | Keeps the repeater down state after a restart. Empty does not keep it. |
 
-### 11.10 `[events]`
+### 11.10 `[crx]`
+
+| Setting | Default | Function |
+| --- | --- | --- |
+| `socket` | `/run/usrp-rc/crx.sock` | Socket of the control terminal. Empty disables the terminal. See [9.9](#99-control-terminal). |
+
+### 11.11 `[events]`
 
 All `[events]` settings are message names. Empty plays nothing. No event uses another
 event's message in its place.
@@ -1265,7 +1520,18 @@ event's message in its place.
 
 A list holds a maximum of 8 names.
 
-### 11.11 `[messages]` and `[schedule]`
+### 11.12 `[external]`
+
+| Setting | Default | Function |
+| --- | --- | --- |
+| `dir` | `/run/usrp-rc/ext` | Directory of the producer files. An absolute path. |
+| *name* | None | One line for each producer: `name = lifetime [fallback]`. The lifetime is 1 to 604800 seconds. The fallback is a message name and is optional. A maximum of 16 producers. |
+
+A producer name has letters, digits and `_`. A fallback message cannot contain `{msg:}`
+or producer variables. See [5.7](#57-producer-variables) and
+[Appendix C](#appendix-c-producer-interface).
+
+### 11.13 `[messages]` and `[schedule]`
 
 See [section 5](#5-messages) and [section 7](#7-schedule).
 
@@ -1383,6 +1649,26 @@ first tone:
 ct_delay = 0.64
 ```
 
+### 12.10 Read the weather with code `417`
+
+The sample METAR producer ([C.5](#c5-sample-producers)) writes the fields of `wx`. A report is hourly, so
+a lifetime of 90 minutes includes one late report.
+
+```ini
+[external]
+wx = 5400
+
+[dtmf]
+read_17 = weather
+
+[messages]
+weather = voice: WEATHER {wx.source} _ {wx.time} _ {wx.wind} _ {wx.visibility} _ {wx.sky} {wx.weather} _ {wx.temp} _ {wx.dewpoint} _ {wx.pressure}
+```
+
+- `{wx.weather}` is empty if there is nothing to report, so it has no pause before it.
+- This example has no fallback. A fallback plays once for each variable with no current
+  data, here nine times.
+
 ---
 
 ## 13. Log and troubleshooting
@@ -1412,6 +1698,9 @@ cause of a problem.
 | `a variable needs the voice clip` | A stock clip is missing. | Do `sudo make install`. It replaces all stock clips. |
 | No courtesy tone in one link state | The `ct_` setting for that state is empty. An empty setting plays no tone. | Set all three `ct_` settings. See [6.2](#62-courtesy-tones). |
 | A tail message does not play | `tail_every` is 0, or the conditions are not true. | Look for the `tail_every` warning. On a quiet repeater, the `tail_every` count can be not yet reached. `tail_min_interval` can also prevent the message. |
+| A read number plays nothing | The number has no message, or the producer data is not current and there is no fallback. | Look for `ERROR no message` or `external:` lines in the log. |
+| A producer variable plays nothing or the fallback | The file is empty, stale, missing or dropped. | Read the `external:` line for that variable. See [Appendix C](#appendix-c-producer-interface). |
+| `names no producer in [external]` | A variable names a producer that `[external]` does not declare. | Add the producer to `[external]`, or correct the name. |
 | A window opens at the wrong time | The clock or the time zone is wrong. | Examine the clock and time zone with `timedatectl`. |
 | Usage statistics reset at restart | `usrp-rc` cannot write the file. | Look for `stats: can't save` in the log. Make sure that `/var/local/usrp-rc` exists and the service file is current. Then do `sudo systemctl daemon-reload`. |
 | No audio from the link | The link is off. | Look for `73` in the log, or for `start_on = false`. |
@@ -1696,3 +1985,100 @@ Add an ending after a word: `voice: KEY UP _S`.
 <tr><td>_ed</td><td>_ing</td><td>_s</td><td>_teen</td><td>_ty</td><td></td></tr>
 <tr><td>_er</td><td>_ment</td><td>_ss</td><td>_th</td><td></td><td></td></tr>
 </table>
+
+---
+
+## Appendix C: Producer interface
+
+A producer is a separate program that writes words for messages, for example a weather
+report. This appendix gives the rules for a producer, and how to write messages for one.
+`usrp-rc` reads the files of a producer when a message plays. It does not run the
+producer and does not wait for it.
+
+Producers are third-party extensions. `usrp-rc` supplies the interface in this appendix.
+The author of each producer is responsible for that producer: its data source, its
+words, its installation and its support. Each word must be a clip in the `usrp-rc`
+vocabulary, or a clip that the producer supplies for `user_8k/` ([5.8](#58-site-voice-clips)). Any person can write a producer, in any
+language, without changes to `usrp-rc`.
+
+### C.1 Files
+
+- One file for each field, at `<dir>/<producer>/<field>`. The default `dir` is
+  `/run/usrp-rc/ext`. The producer name is its name in `[external]`.
+- The `usrp-rc` user must be able to read the directories and the files.
+- The modification time of the file is the time of the data, not the time of the write.
+- Write a temporary file in the same directory, then rename it. Then `usrp-rc` never reads
+  a part of a file.
+- A file holds a maximum of 1024 bytes and 32 words. A number counts as the words that
+  it speaks.
+- A schedule window can open on a field ([7.9](#79-producer-windows)). The schedule
+  examines the field one time each minute. Keep the words in such a field for 1 minute
+  or more, or the schedule can miss them.
+- How the producer runs is not part of the interface: a timer, a service or a cron job.
+
+### C.2 Contents
+
+A file holds words separated by spaces or line breaks:
+
+| Word | Result |
+| --- | --- |
+| A clip name | That clip. Use only clips installed in `/usr/local/share/usrp-rc/user_8k/` and `vocab_8k/`. |
+| `_` or `_NNN` | A pause, as in a message |
+| A number | The number, spoken. `1230` is "one thousand two hundred thirty", `-5` is "minus five" and `29.92` is "twenty nine point nine two". The maximum is 99999. |
+
+Variables such as `{time}` in a file are not expanded.
+
+### C.3 Results
+
+When a message plays, each producer variable gets one of these results:
+
+| File | Result |
+| --- | --- |
+| Current, with words | The words play. A file is current if it is younger than the lifetime. |
+| Current and empty | Nothing plays. The producer has nothing to report. |
+| Stale or missing | The fallback plays. |
+| A word that is not a clip or a number, or a file over the limits | The fallback plays. `usrp-rc` drops the whole variable, because one missing word can change the meaning. |
+
+The fallback plays in place of each such variable, each time. With no fallback, nothing
+plays for the variable.
+
+`--check` does not read the files, because they change. When a message plays, the log
+shows each change of state of a variable, one time:
+
+```text
+external: {wx.temp} FRESH
+external: {wx.temp} STALE, 10800 s old, lifetime 5400 s
+external: {wx.sky} DROPPED, no clip 'CLOUDY'
+external: {wx.wind} MISSING, No such file or directory
+```
+
+### C.4 Messages for a producer
+
+The producer selects the words in each field. The operator must know them, and write the
+messages to agree with them. For example:
+
+| The producer writes | The message |
+| --- | --- |
+| `TEMPERATURE TWENTY NINE DEGREES` | `temp = voice: {wx.temp}` |
+| `29` | `temp = voice: TEMPERATURE {wx.temp} DEGREES` |
+
+- The words of the message always play. If the variable has no current data, the
+  fallback or nothing plays between them.
+- If a variable plays nothing, the pauses on the two sides of it play one after the
+  other.
+- A producer can write its own words for data that it knows is missing, for example
+  `NOT AVAILABLE`.
+
+### C.5 Sample producers
+
+The source tree includes producers that operate on the K0USY and WA0EDA repeaters, in
+`producers/`. They are samples. They show what a producer can do, and they are a start
+point for other producers. They are not part of `usrp-rc` and are not necessary to
+operate it.
+
+Each sample has a README that gives its fields and its installation.
+
+| Producer | Function |
+| --- | --- |
+| `producers/metar/` | The latest METAR weather report for one station, from the NOAA Aviation Weather Center |
+| `producers/nws/` | The active National Weather Service watches and warnings for a list of counties, to open a schedule window |

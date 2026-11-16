@@ -71,13 +71,16 @@ Replies go through `port_queue_reply()` and play from the courtesy tone delay,
 the same slot the anxious ID uses.
 
 Every code is a row in `CONFIG_DTMF_CODES` in `src/config.c`: its setting, its kind
-(whole code, code + 0/1, or capture) and its command. `--check` validates from that
+(whole code, code + 0/1, capture, or index: code + exactly two digits 0-9) and its
+command. `--check` validates from that
 list and `command.c` matches against it, so a new command is a new row. Whether a
 command may run right now is one rule, `command_allowed()` in `main.c`.
 
 The capture codes (pad test, regen) switch `command.c` into capturing: every key after
 them, `#` and `D` included, goes into the entry until the unkey, which is why
-`check_consistency()` won't let another code start with one. Otherwise an entry
+`check_consistency()` won't let another code start with one. The read prefix is an
+index code, held to the same rule: its two digits pick a `read_NN` message, and an
+empty slot is an `ERROR` with no reply. Otherwise an entry
 that no code starts with is dropped at the digit that kills it. The mute doesn't
 care: any valid tone mutes both paths, so no DTMF leaks. Regen's link copy
 is the only controller audio that goes to the link. `main.c` keys the link and paces
@@ -133,7 +136,7 @@ The stateful pieces, and where their state lives:
 | ID owed | `id_owed`, `id_deadline`, the two rotations | PTT rising, repeated keyups, IDs starting |
 | Time-outs | Per source: the flag, the deadline; local `tot_used`/`start` | Keyups, the courtesy tone |
 | Tail messages | `tails_since_message`, `tail_last_ms`, `tail_rot` | Each hang's end |
-| Reply | `reply`, one deep | Commands; played at `ct_delay` |
+| Reply | `reply`, one deep | Commands and `announce=`; played at `ct_delay`, or at once when idle |
 | Echo test | Port `echo_armed`, then `main.c` `echo_recording` | Command, next local keyup, unkey or hang's end |
 | Repeater down | `down`, and the state file | Repeater command |
 | Link on/off | `link_up` (the port's copy picks the courtesy tone) | Link commands |
@@ -143,6 +146,7 @@ The stateful pieces, and where their state lives:
 | DTMF | Decoder debounce; entry digits, capture, mute | Received frames |
 | STE | Delay line, lead trim | Received frames |
 | Schedule | `schedule_active[]`; `cfg` rebuilt from `base` | Minute timer |
+| Producer variables | None in memory: the files are the state. `s_ext_seen[]` only remembers each variable's last state, to log a change once | Each render |
 | Usage | Hour buckets | Usage callback, save timer |
 
 ## Schedule
@@ -153,6 +157,39 @@ windows have no start or end events to miss. `main.c` keeps the config as loaded
 module points at. So anything read from the config at the time it's used follows the
 schedule. Anything cached at startup (sockets, the codec, the DTMF decoder, the STE
 buffer, the DTMF cover tone) must be listed in `not_schedulable()` in `src/config.c`.
+
+A window can also depend on a producer field. `schedule_evaluate()` stays pure: the
+caller reads the fields first (`message_field_current()`) and passes the results in as
+`field_on[]`. `announce=` is the one start event. `schedule_update()` sees a window open
+by comparing against `schedule_active[]`, and plays the message through the DTMF reply
+path, `port_queue_reply()`. The windows open at startup announce after `port_start()`.
+
+## External producers
+
+A producer is a separate program that writes clip words to files; `{producer.field}`
+in a voice part speaks the file `<external.dir>/<producer>/<field>`. The contract is in
+MANUAL Appendix C, and `producers/metar/` is a sample.
+
+`usrp-rc` reads the file when the message renders, in the main loop. That is safe
+because the read is bounded (1024 bytes, 32 words) and the default directory is on
+tmpfs: nothing here waits on the network or on the producer. A producer that's slow,
+dead or never installed just leaves its files stale.
+
+- Freshness is the file's mtime against the producer's lifetime, judged per variable.
+  The producer sets the mtime to the time of the data.
+- A word is a clip, a `_` gap or a number (`ext_number()`, said like the stats
+  variables). A file with any other word is dropped whole (`ext_read()`): skipping a
+  word could change what the report means.
+- One rule everywhere: a stale, missing or dropped variable plays the fallback, if
+  there is one, each time it appears. A fresh empty file is silent. There is no
+  separate DTMF-read path; usrp-rc sets no policy beyond this.
+- A fallback can't contain `{msg:}` or a producer variable (`validate()`), so it can't
+  recurse. `{msg:name}` is one level only, for the same reason.
+- The fallback is a message name, not words: only `[messages]` hold clips, so it gets
+  the same validation, and `config_prune_messages()` keeps it, like a `read_NN` message.
+- Validation at load checks that each variable names a declared producer, that each
+  fallback and `{msg:}` target exists, and the two rules above. File contents can't be
+  checked at load.
 
 ## Usage statistics
 
@@ -169,13 +206,18 @@ pushed to GitHub from this dev box and pulled/built on the NanoPi NEO —
 there's nothing Pi-specific in the source; it's plain C11 against
 `libopus`.
 
+The NanoPi NEO stays the target on purpose: it has fewer resources than a typical
+Raspberry Pi, so a controller that runs well there also runs on older and simpler
+SBCs.
+
 ## Regenerating `vocab_8k/` from source audio
 
-`vocab_8k/` (623 clips) is committed to the repo pre-built, converted from
-a render of `Vocab_Master.cpp` in
-[TI LPC Speech Tools](https://github.com/n0mjs710/lpc) to the 8 kHz mono S16LE both audio paths use —
-a normal clone and build never needs `sox` or the 48 kHz source. Only
-regenerate it if the reference vocabulary itself changes:
+`vocab_8k/` is committed to the repo pre-built, converted from renders made with
+[TI LPC Speech Tools](https://github.com/n0mjs710/lpc) to the 8 kHz mono S16LE both
+audio paths use — a normal clone and build never needs `sox` or the 48 kHz source.
+The set is curated: words are added as uses for them turn up. MANUAL Appendix B lists
+every clip, so update it when the set changes.
+Only regenerate the clips if the reference vocabulary itself changes:
 
 ```bash
 sudo apt-get install -y sox

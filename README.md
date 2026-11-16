@@ -30,14 +30,14 @@ For operation and the settings reference, see [MANUAL.md](MANUAL.md).
 Version: 1.0. To update from 1.0b or an earlier `main`, see [UPGRADE.md](UPGRADE.md).
 
 > [!WARNING]
-> **MMDVM-Host FM audio quality.** At the date of this document (November 2026),
-> MMDVM-Host has defects that decrease the audio quality of FM mode. The symptoms are
-> crackles, distortion and an incorrect frequency response (EQ). The defects are worst
-> on the network and with `[FM] LinkMode=1`, because these two functions use the same
-> code path. For the best performance, use the patched versions of MMDVM and MMDVM-Host
-> at [github.com/n0mjs710](https://github.com/n0mjs710). The fixes are submitted
-> upstream as [g4klx/MMDVM#365](https://github.com/g4klx/MMDVM/pull/365) and
-> [g4klx/MMDVM-Host#902](https://github.com/g4klx/MMDVM-Host/pull/902).
+> **MMDVM FM audio quality.** MMDVM and MMDVM-Host releases before November 2026 have
+> defects that decrease the audio quality of FM mode. The symptoms are crackles,
+> distortion and an incorrect frequency response (EQ). The defects are worst on the
+> network and with `[FM] LinkMode=1`, because these two functions use the same code
+> path. The MMDVM-Host fix is merged upstream:
+> [g4klx/MMDVM-Host#902](https://github.com/g4klx/MMDVM-Host/pull/902). The firmware fix
+> is submitted as [g4klx/MMDVM#365](https://github.com/g4klx/MMDVM/pull/365). Until it is
+> merged, use the patched firmware at [github.com/n0mjs710](https://github.com/n0mjs710).
 
 ## Contents
 
@@ -70,9 +70,13 @@ The controller functions are:
 - Courtesy tones, with different tones for local traffic, link traffic and link off
 - Hang timer, kerchunk filter and time-out timer
 - Squelch tail elimination
-- CW, voice and tone messages, and tail messages
-- Clock and calendar schedule
+- CW, voice, tone and DTMF messages, and tail messages
+- Clock and calendar schedule, and schedule windows that a producer opens, for example
+  a site alarm that keys the repeater with an announcement
 - DTMF commands, DTMF regen to send commands over the link, and an echo test
+- Messages with words from separate programs (producers), for example a weather report
+  read by DTMF. Producers are third-party extensions. A sample METAR weather producer is
+  in `producers/metar/`.
 - Usage statistics
 
 All controller functions operate locally. They do not need a network connection or a
@@ -169,11 +173,22 @@ frame timing.
    sudo systemctl daemon-reload
    ```
 
+4. `make install` creates the group `usrp-rc`, whose members can use the control
+   terminal, `usrp-crx`. If the user `mmdvm` exists, `make install` adds it to the group.
+   For each other control operator:
+
+   ```bash
+   sudo usermod -aG usrp-rc <user>
+   ```
+
+   A group change applies at the next login.
+
 ### Installed files
 
 | Path | Contents |
 | --- | --- |
 | `/usr/local/bin/usrp-rc` | Program |
+| `/usr/local/bin/usrp-crx` | Control terminal. See [MANUAL.md](MANUAL.md#99-control-terminal) 9.9. |
 | `/etc/usrp-rc/usrp-rc.conf` | Configuration |
 | `/etc/usrp-rc/usrp-rc.conf.sample` | Sample configuration, with all settings and their defaults |
 | `/usr/local/share/usrp-rc/tones.conf` | Tone catalog |
@@ -181,6 +196,7 @@ frame timing.
 | `/usr/local/share/usrp-rc/user_8k/` | Site voice clips |
 | `/usr/local/lib/systemd/system/usrp-rc.service` | systemd service |
 | `/var/local/usrp-rc/` | Usage statistics and the repeater down state |
+| `/run/usrp-rc/crx.sock` | Socket of the control terminal, while `usrp-rc` operates |
 
 > **Note:** `make install` does not replace a configuration file that exists. If no
 > configuration exists, it copies the sample to `usrp-rc.conf`.
@@ -317,6 +333,8 @@ configuration has errors.
 | Stop the service | `sudo systemctl stop usrp-rc` |
 | Restart the service | `sudo systemctl restart usrp-rc` |
 | Monitor the log | `journalctl -u usrp-rc -f` |
+| Control terminal: DTMF entries, the log and the repeater state | `usrp-crx` (group `usrp-rc`) |
+| One DTMF entry, for example repeater down | `usrp-crx 123 01` |
 
 At startup, the log shows the number of messages defined and the number in use.
 
@@ -361,9 +379,11 @@ directly from its LPC data by an emulation of the TMS5220 speech synthesizer, fr
 - The synthesis core is a port of the MAME `tms5220` core. Its ROM tables were verified
   against decapped TMS5220 and TMS5220C dies. It reproduces the behavior of the chip at
   the sample level, to the 8-bit DAC output.
-- The vocabulary, `Vocab_Master.cpp`, has 623 words. It was assembled from the LPCSpeech
-  AVR, FF-800 and Talkie vocabularies. Where more than one recording of a word existed,
-  the best one was selected by listening. Misnamed words were corrected.
+- The vocabulary was assembled from the LPCSpeech AVR, FF-800 and Talkie vocabularies.
+  Where more than one recording of a word existed, the best one was selected by
+  listening. Misnamed words were corrected.
+- The set is curated for repeater use. Words are added when a use for them is found.
+  A word can also serve for another word that sounds the same: `DO` is also "dew".
 
 In a side-by-side comparison with an ACC controller, the two voices cannot be told apart.
 

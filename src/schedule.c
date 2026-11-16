@@ -71,12 +71,14 @@ bool schedule_entry_active(const config_schedule_t *entry, const struct tm *when
         || (now < entry->end_min && day_matches(entry, day_before(today)));
 }
 
-void schedule_evaluate(const config_t *base, const struct tm *when,
+void schedule_evaluate(const config_t *base, const struct tm *when, const bool *field_on,
                        config_t *out, bool active[CFG_MAX_SCHEDULE])
 {
     *out = *base;
     for (int i = 0; i < base->nschedule; i++) {
-        active[i] = schedule_entry_active(&base->schedule[i], when);
+        const config_schedule_t *e = &base->schedule[i];
+        active[i] = (!e->timed || schedule_entry_active(e, when))
+                 && (!e->field[0] || (field_on && field_on[i]));
         if (!active[i])
             continue;
         for (int j = 0; j < base->schedule[i].nsets; j++)

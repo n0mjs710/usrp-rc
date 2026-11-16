@@ -99,6 +99,7 @@ struct port {
     /* command reply waiting for the tail; malloc'd, NULL = none */
     int16_t     *reply;
     size_t       reply_len;
+    id_kind_t    reply_id;   /* a forced ID: it counts as sent once it starts */
 
     /* The echo test is waiting for a local keyup to record, until the tail ends. */
     bool         echo_armed;
@@ -213,15 +214,17 @@ static port_state_t rest_state(const port_t *p)
 static void update_ptt(port_t *p)
 {
     const char *why;
-    if (cor_active(p))
+    bool want = true;
+    if (cor_active(p)) {
         why = local_active(p) ? "repeat" : "link-fwd";
-    else if (ctrl_buf_playing(p) || p->ctrl.on_drain || mix_playing(p))
+    } else if (ctrl_buf_playing(p) || p->ctrl.on_drain || mix_playing(p)) {
         why = "controller";
-    else if (p->state == PORT_TAIL)
+    } else if (p->state == PORT_TAIL) {
         why = "tail";
-    else
+    } else {
+        want = false;
         why = p->down ? "repeater-down" : p->state == PORT_TIMEOUT ? "timed-out" : "idle";
-    bool want = strcmp(why, "repeater-down") && strcmp(why, "timed-out") && strcmp(why, "idle");
+    }
     /* Controller audio is followed by a gap before the drop. */
     if (!want && p->ptt && p->last_audio == LAST_CTRL && p->cfg->audio.message_gap_ms > 0) {
         pad(p, p->cfg->audio.message_gap_ms);
@@ -239,6 +242,14 @@ static void update_ptt(port_t *p)
         p->id_owed = true;
     if (p->set_ptt_cb)
         p->set_ptt_cb(p->set_ptt_arg, want, why);
+}
+
+/* The next index of a rotating list of n, advancing the rotation. */
+static int rotate(int *rot, int n)
+{
+    int idx = *rot % n;
+    *rot = (idx + 1) % n;
+    return idx;
 }
 
 /* False if there was nothing to play. */
@@ -259,6 +270,7 @@ static void reply_discard(port_t *p)
     free(p->reply);
     p->reply     = NULL;
     p->reply_len = 0;
+    p->reply_id  = ID_NONE;
 }
 
 /* ct_delay and the hang are silences of their own: they serve as the gap. */
@@ -282,12 +294,31 @@ static void schedule_id(port_t *p, uint64_t now)
 
 /* An ID counts as sent once it starts: nothing is owed, and the timer restarts. It
  * stays an ID in the buffer until it drains, should anyone key over it. */
-static void queue_id(port_t *p, const char *name, uint64_t now)
+static void id_sent(port_t *p, id_kind_t kind, uint64_t now)
 {
     p->id_owed = false;
     schedule_id(p, now);
-    p->ctrl.id = message_has_voice(p->cfg, name) ? ID_VOICE : ID_CW;
+    p->ctrl.id = kind;
+}
+
+static id_kind_t id_kind(const port_t *p, const char *name)
+{
+    return message_has_voice(p->cfg, name) ? ID_VOICE : ID_CW;
+}
+
+static void queue_id(port_t *p, const char *name, uint64_t now)
+{
+    id_sent(p, id_kind(p, name), now);
     queue_message(p, name, -1.0);
+}
+
+/* The waiting reply starts now. */
+static void reply_play(port_t *p, uint64_t now)
+{
+    ctrl_buf_queue(p, p->reply, p->reply_len);
+    if (p->reply_id != ID_NONE)
+        id_sent(p, p->reply_id, now);
+    reply_discard(p);
 }
 
 /* ── transitions ────────────────────────────────────────────────────────── */
@@ -425,9 +456,7 @@ static const char *mandatory_id_next(port_t *p)
     int n = p->ev->n_mandatory_ids;
     if (n == 0)
         return p->ev->impolite_id;
-    int idx = p->id_rot_mandatory % n;
-    p->id_rot_mandatory = (idx + 1) % n;
-    return p->ev->mandatory_ids[idx];
+    return p->ev->mandatory_ids[rotate(&p->id_rot_mandatory, n)];
 }
 
 /* Keyed already, the ID joins whatever is playing. Otherwise it is a transmission of
@@ -446,8 +475,7 @@ static const char *initial_id_next(port_t *p)
     int n = p->ev->n_initial_ids;
     if (n == 0)
         return NULL;
-    int idx = p->id_rot_initial % n;
-    p->id_rot_initial = (idx + 1) % n;
+    int idx = rotate(&p->id_rot_initial, n);
     LOGI("id: initial  '%s'  (%d/%d)\n", p->ev->initial_ids[idx], idx + 1, n);
     return p->ev->initial_ids[idx];
 }
@@ -537,8 +565,7 @@ static void on_ct_delay(port_t *p, uint64_t now)
     }
 
     if (p->reply) {
-        ctrl_buf_queue(p, p->reply, p->reply_len);
-        reply_discard(p);
+        reply_play(p, now);
         p->ctrl.on_drain = message_then_ct;
         return;
     }
@@ -569,9 +596,7 @@ static void tail_finish(port_t *p, uint64_t now)
  * there was nothing to play. */
 static bool tail_play(port_t *p, uint64_t now)
 {
-    int idx = p->tail_rot % p->ev->n_tail_messages;
-    const char *name = p->ev->tail_messages[idx];
-    p->tail_rot = (idx + 1) % p->ev->n_tail_messages;
+    const char *name = p->ev->tail_messages[rotate(&p->tail_rot, p->ev->n_tail_messages)];
     p->tails_since_message = 0;
     p->tail_last_ms = now;
     if (!queue_message(p, name, -1.0)) {
@@ -736,6 +761,26 @@ static void start_local_timer(port_t *p, uint64_t now)
     p->local_timeout_deadline = now + (uint64_t)((left > 0.0 ? left : 0.0) * 1000.0);
 }
 
+static void start_link_timer(port_t *p, uint64_t now)
+{
+    double limit = p->cfg->timers.link_timeout;
+    p->link_timeout_deadline = limit > 0.0 && !p->down ? now + (uint64_t)(limit * 1000.0) : 0;
+}
+
+/* After either source keys or unkeys: an edge of the two together, a time-out
+ * released, and PTT. */
+static void cor_changed(port_t *p, port_source_t source, bool was_active, bool released, uint64_t now)
+{
+    bool active = cor_active(p);
+    if (active != was_active) {
+        if (active) cor_active_edge(p, source, now);
+        else        cor_idle_edge(p, source, now);
+    }
+    if (released)
+        timeout_released(p, source, now);
+    update_ptt(p);
+}
+
 void port_on_mmdvm_keyup(port_t *p, bool active, uint64_t now)
 {
     bool old_combined = cor_active(p);
@@ -761,15 +806,7 @@ void port_on_mmdvm_keyup(port_t *p, bool active, uint64_t now)
         p->last_source = SRC_LOCAL;
     else if (link_active(p))
         p->last_source = SRC_LINK;
-
-    bool new_combined = cor_active(p);
-    if (new_combined != old_combined) {
-        if (new_combined) cor_active_edge(p, SRC_LOCAL, now);
-        else              cor_idle_edge(p, SRC_LOCAL, now);
-    }
-    if (released)
-        timeout_released(p, SRC_LOCAL, now);
-    update_ptt(p);
+    cor_changed(p, SRC_LOCAL, old_combined, released, now);
 }
 
 void port_on_link_keyup(port_t *p, bool active, uint64_t now)
@@ -778,8 +815,7 @@ void port_on_link_keyup(port_t *p, bool active, uint64_t now)
     bool released = !active && p->link_timed_out;
 
     if (active) {
-        double limit = p->cfg->timers.link_timeout;
-        p->link_timeout_deadline = limit > 0.0 && !p->down ? now + (uint64_t)(limit * 1000.0) : 0;
+        start_link_timer(p, now);
     } else {
         p->link_timeout_deadline = 0;
         p->link_timed_out = false;
@@ -790,15 +826,7 @@ void port_on_link_keyup(port_t *p, bool active, uint64_t now)
         p->last_source = SRC_LINK;
     else if (local_active(p))
         p->last_source = SRC_LOCAL;
-
-    bool new_combined = cor_active(p);
-    if (new_combined != old_combined) {
-        if (new_combined) cor_active_edge(p, SRC_LINK, now);
-        else              cor_idle_edge(p, SRC_LINK, now);
-    }
-    if (released)
-        timeout_released(p, SRC_LINK, now);
-    update_ptt(p);
+    cor_changed(p, SRC_LINK, old_combined, released, now);
 }
 
 void port_arm_echo(port_t *p)
@@ -813,24 +841,46 @@ bool port_take_echo(port_t *p)
     return armed;
 }
 
-void port_queue_reply(port_t *p, int16_t *samples, size_t n, uint64_t now)
+static void queue_reply(port_t *p, int16_t *samples, size_t n, id_kind_t id, uint64_t now)
 {
     reply_discard(p);
     if (!samples || n == 0) {
         free(samples);
         return;
     }
-    if (p->state != PORT_IDLE) {
-        p->reply     = samples;
-        p->reply_len = n;
+    p->reply     = samples;
+    p->reply_len = n;
+    p->reply_id  = id;
+    if (p->state != PORT_IDLE)
         return;
-    }
     /* No tail to wait for: it is a transmission of its own. */
     if (p->id_deadline == 0)
         schedule_id(p, now);
-    ctrl_buf_queue(p, samples, n);
-    free(samples);
+    reply_play(p, now);
     update_ptt(p);
+}
+
+void port_queue_reply(port_t *p, int16_t *samples, size_t n, uint64_t now)
+{
+    queue_reply(p, samples, n, ID_NONE, now);
+}
+
+void port_force_id(port_t *p, char type, uint64_t now)
+{
+    const config_events_t *ev = p->ev;
+    const char *name = NULL;
+    double level = -1.0;
+    switch (type) {
+    case '0': name = initial_id_next(p); break;
+    case '1': name = ev->impolite_id; level = p->cfg->audio.impolite_morse_level; break;
+    case '2': name = ev->anxious_id; break;
+    case '3': name = mandatory_id_next(p); break;
+    }
+    if (!name || !name[0])
+        return;
+    LOGI("id: FORCED  '%s'\n", name);
+    rendered_audio_t r = message_render(p->cfg, p->vocab, name, level);
+    queue_reply(p, r.samples, r.n, id_kind(p, name), now);
 }
 
 /* ── repeater down / up ────────────────────────────────────────────────── */
@@ -876,19 +926,18 @@ void port_set_repeater_down(port_t *p, bool down, int16_t *reply, size_t n, uint
         LOGI("port: repeater UP (already up)\n");
         port_queue_reply(p, reply, n, now);
         return;
-    } else {
-        p->down = false;
-        LOGW("port: repeater UP\n");
-        quiesce(p, now);
     }
+    p->down = false;
+    LOGW("port: repeater UP\n");
+    quiesce(p, now);
 
     /* A station still keyed (a command ended with D) is repeated at once, and the
      * reply waits for its tail like any other. */
     if (cor_active(p)) {
         if (p->mmdvm_active)
             start_local_timer(p, now);
-        if (p->link_active && p->cfg->timers.link_timeout > 0.0)
-            p->link_timeout_deadline = now + (uint64_t)(p->cfg->timers.link_timeout * 1000.0);
+        if (p->link_active)
+            start_link_timer(p, now);
         cor_active_edge(p, p->mmdvm_active ? SRC_LOCAL : SRC_LINK, now);
     }
     port_queue_reply(p, reply, n, now);
@@ -962,6 +1011,15 @@ bool port_link_gate_open(const port_t *p)
 bool port_local_timed_out(const port_t *p)
 {
     return p->local_timed_out;
+}
+
+bool port_rx_local(const port_t *p) { return p->mmdvm_active; }
+bool port_rx_link(const port_t *p)  { return p->link_active; }
+
+bool port_id_pending(const port_t *p, uint64_t *due)
+{
+    *due = p->id_deadline;
+    return p->id_owed;
 }
 
 void port_ctrl_pull(port_t *p, int16_t out[160], uint64_t now)

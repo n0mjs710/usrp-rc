@@ -10,3 +10,6 @@ usrp-rc.conf
 # itself (and its README) is tracked so it exists out of the box.
 user_8k/*.wav
 user_8k/*.WAV
+
+# Python bytecode
+__pycache__/

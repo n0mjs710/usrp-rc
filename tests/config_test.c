@@ -14,6 +14,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <time.h>
 
 #define BASE "[link]\nenabled = false\n"
 
@@ -86,7 +89,42 @@ static const test_case_t CASES[] = {
     {"variable joined to a word", BASE "[messages]\na = voice: {time}Z\n", "unknown placeholder '{time}Z'"},
     {"dtmf code uses D",    BASE "[dtmf]\ntime_code = 3D\n", "dtmf.time_code: '3D' can only use"},
     {"dtmf code used twice", BASE "[dtmf]\nlink_on_code = 39\n", "dtmf.link_on_code: '39' is already used by dtmf.time_code"},
-    {"repeater code clash",  BASE "[dtmf]\nrepeater_code = 12\nlink_status_code = 120\n", "dtmf.repeater_code: '120' is already used by dtmf.link_status_code"},
+    {"control op code clash", BASE "[dtmf]\ncontrol_op_prefix = 12\nlink_status_code = 1200\n",
+                            "dtmf.link_status_code: '1200' starts with dtmf.control_op_prefix '12'"},
+    {"repeater code is gone", BASE "[dtmf]\nrepeater_code = 11\n", "dtmf.repeater_code: unknown setting"},
+    {"producer declared",   BASE "[external]\nwx = 5400\n[messages]\nm = voice: {wx.temp}\n", NULL},
+    {"producer fallback",   BASE "[external]\nwx = 5400 wxna\n[messages]\nwxna = voice: NEGATIVE\nm = voice: {wx.temp}\n", NULL},
+    {"external dir",        BASE "[external]\ndir = /tmp/ext\n", NULL},
+    {"undeclared producer", BASE "[messages]\nm = voice: {wx.temp}\n", "messages.m: '{wx.temp}' names no producer in [external]"},
+    {"bad producer variable", BASE "[external]\nwx = 60\n[messages]\nm = voice: {wx.te-mp}\n",
+                            "messages.m: '{wx.te-mp}' is not a producer variable"},
+    {"producer variable in cw", "callsign = W1XYZ\n" BASE "[external]\nwx = 60\n[messages]\nm = cw: {wx.temp}\n", "only {call} works in cw"},
+    {"producer without lifetime", BASE "[external]\nwx =\n", "external.wx: needs a lifetime in seconds"},
+    {"producer lifetime zero", BASE "[external]\nwx = 0\n", "external.wx: needs a lifetime in seconds"},
+    {"producer lifetime text", BASE "[external]\nwx = soon\n", "external.wx: needs a lifetime in seconds"},
+    {"fallback isn't a message", BASE "[external]\nwx = 60 nope\n", "external.wx: no message named 'nope'"},
+    {"two fallbacks",       BASE "[external]\nwx = 60 a b\n", "external.wx: after the lifetime, only one message name"},
+    {"bad producer name",   BASE "[external]\nw-x = 60\n", "external.w-x: a producer name is letters, digits and _"},
+    {"relative external dir", BASE "[external]\ndir = ext\n", "external.dir: needs an absolute path"},
+    {"message reference",   BASE "[messages]\na = voice: HELLO\nm = voice: {msg:a} THERE\n", NULL},
+    {"reference to nothing", BASE "[messages]\nm = voice: {msg:nope}\n", "messages.m: no message named 'nope'"},
+    {"reference two deep",  BASE "[messages]\na = voice: HELLO\nb = voice: {msg:a}\nm = voice: {msg:b}\n",
+                            "messages.m: {msg:b} refers to a message that refers to another; only one level"},
+    {"reference to itself", BASE "[messages]\nm = voice: HELLO {msg:m}\n",
+                            "messages.m: {msg:m} refers to a message that refers to another"},
+    {"empty reference",     BASE "[messages]\nm = voice: {msg:}\n", "messages.m: '{msg:}' is not a message reference"},
+    {"reference in cw",     BASE "[messages]\na = voice: HELLO\nm = cw: {msg:a}\n", "only {call} works in cw"},
+    {"fallback with a producer", BASE "[external]\nwx = 60 na\n[messages]\nna = voice: {wx.temp}\n",
+                            "external.wx: the fallback 'na' can't contain {msg:} or {producer.field}"},
+    {"fallback with a reference", BASE "[external]\nwx = 60 na\n[messages]\na = voice: HELLO\nna = voice: {msg:a}\n",
+                            "external.wx: the fallback 'na' can't contain {msg:} or {producer.field}"},
+    {"read slot",           BASE "[dtmf]\nread_17 = m\n[messages]\nm = cw: A\n", NULL},
+    {"read slot names a missing message", BASE "[dtmf]\nread_17 = nope\n", "dtmf.read_17: no message named 'nope'"},
+    {"read slot with two names", BASE "[dtmf]\nread_17 = a, b\n", "dtmf.read_17: needs one message name"},
+    {"read slot with one digit", BASE "[dtmf]\nread_7 = m\n[messages]\nm = cw: A\n", "dtmf.read_7: unknown setting"},
+    {"read prefix can be off", BASE "[dtmf]\nread_prefix =\n", NULL},
+    {"code under read prefix", BASE "[dtmf]\ntime_code = 49\n",
+                            "dtmf.time_code: '49' starts with dtmf.read_prefix '4', which takes the two keys after it"},
     {"opus frame too big",   "[link]\nremote_host = 127.0.0.1\ncodec = opus\nopus_bitrate = 64000\nopus_frame_ms = 60\n", "480 bytes a frame, over the 256-byte limit"},
     {"link host is a name",  "[link]\nremote_host = localhost\n", "link.remote_host: 'localhost' must be an IPv4 address"},
     {"mmdvm address bad",    BASE "[mmdvm]\nrpt_address = 127.0.0.300\n", "mmdvm.rpt_address: '127.0.0.300' must be an IPv4 address"},
@@ -95,10 +133,16 @@ static const test_case_t CASES[] = {
     {"code under pad test",  BASE "[dtmf]\ntime_code = 55\n", "dtmf.time_code: '55' starts with dtmf.pad_test_prefix '5', which takes every key after it"},
     {"regen under pad test", BASE "[dtmf]\nregen_code = 59\n", "dtmf.regen_code: '59' starts with dtmf.pad_test_prefix '5'"},
     {"code under regen",     BASE "[dtmf]\nregen_code = 69\nlink_on_code = 691\n", "dtmf.link_on_code: '691' starts with dtmf.regen_code '69'"},
-    {"repeater under regen", BASE "[dtmf]\nregen_code = 69\nrepeater_code = 690\n", "dtmf.repeater_code: '690' starts with dtmf.regen_code '69'"},
+    {"prefix under regen",   BASE "[dtmf]\nregen_code = 69\ncontrol_op_prefix = 690\n",
+                            "dtmf.control_op_prefix + 00: '69000' starts with dtmf.regen_code '69'"},
+    {"user code under prefix", BASE "[dtmf]\ntime_code = 1239\n",
+                            "dtmf.time_code: '1239' starts with dtmf.control_op_prefix '123'"},
+    {"prefix uses D",        BASE "[dtmf]\ncontrol_op_prefix = 1D\n", "dtmf.control_op_prefix + 00: '1D00' can only use"},
+    {"user code above prefix", BASE "[dtmf]\ncontrol_op_prefix = 391\n", NULL},
     {"code under default regen", BASE "[dtmf]\ntime_code = 315\n", "dtmf.time_code: '315' starts with dtmf.regen_code '31'"},
     {"regen level range",    BASE "[dtmf]\nregen_level = 1.5\n", "regen_level"},
-    {"repeater code",        BASE "[dtmf]\nrepeater_code = 11\n", NULL},
+    {"control op prefix",    BASE "[dtmf]\ncontrol_op_prefix = 8642\n", NULL},
+    {"control op tier off",  BASE "[dtmf]\ncontrol_op_prefix =\n", NULL},
     {"dtmf codes can be off", BASE "[dtmf]\ntime_code =\nlink_on_code =\nlink_off_code =\n", NULL},
     {"ct dangling",         BASE "[events]\nct_link_off_message = nope\n", "events.ct_link_off_message: no message named 'nope'"},
 
@@ -140,7 +184,22 @@ static const test_case_t CASES[] = {
     {"schedule bad time",   BASE "[schedule]\na = wed 25:00-26:00 ct_link_on_message=\n", "schedule.a: '25:00-26:00' is not a valid time window"},
     {"schedule empty window", BASE "[schedule]\na = wed 07:00-07:00 ct_link_on_message=\n", "starts and ends at the same time"},
     {"schedule no settings", BASE "[schedule]\na = wed 07:00-08:00\n", "schedule.a: changes nothing"},
+    {"dtmf part",           BASE "[messages]\na = dtmf: 123*#abcd\nb = dtmf: 12:50/25 _500 34@0.5 56:80/80@1\n", NULL},
+    {"dtmf bad key",        BASE "[messages]\na = dtmf: 12E\n", "messages.a: bad dtmf '12E'"},
+    {"dtmf bad timing",     BASE "[messages]\na = dtmf: 12:/50\n", "messages.a: bad dtmf '12:/50'"},
+    {"dtmf level too high", BASE "[messages]\na = dtmf: 12@3\n", "messages.a: bad dtmf '12@3'"},
+    {"dtmf empty",          BASE "[messages]\na = dtmf:\n", "messages.a: dtmf needs at least one key"},
     {"schedule too short",  BASE "[schedule]\na = wed\n", "schedule.a: expected DAYS HH:MM-HH:MM"},
+    {"field window",        BASE "[external]\nsite = 60\n[messages]\nalarm = voice: ALARM\n"
+                            "[schedule]\na = {site.alarm} announce=alarm\n", NULL},
+    {"field and time window", BASE "[external]\nsite = 60\n[schedule]\na = daily 07:00-22:00 {site.alarm} hang=1\n", NULL},
+    {"time window announce", BASE "[messages]\nhi = voice: HELLO\n[schedule]\na = daily 08:00-08:01 announce=hi\n", NULL},
+    {"window field undeclared", BASE "[schedule]\na = {site.alarm} hang=1\n", "schedule.a: '{site.alarm}' names no producer"},
+    {"announce no message", BASE "[external]\nsite = 60\n[schedule]\na = {site.alarm} announce=nope\n",
+                            "schedule.a: no message named 'nope'"},
+    {"announce empty",      BASE "[external]\nsite = 60\n[schedule]\na = {site.alarm} announce=\n",
+                            "schedule.a: announce= needs a message name"},
+    {"window with nothing", BASE "[schedule]\na = hang=1\n", "schedule.a: expected DAYS HH:MM-HH:MM, {producer.field} or both"},
     {"schedule a timer",    BASE "[schedule]\na = wed 07:00-08:00 hang=3 timeout=600 timers.ct_delay=0\n", NULL},
     {"schedule audio",      BASE "[schedule]\na = wed 07:00-08:00 morse_wpm=15 morse_pitch=600 master_gain=0.8\n", NULL},
     {"schedule dtmf",       BASE "[schedule]\na = wed 07:00-08:00 link_on_code= interdigit_ms=6000\n", NULL},
@@ -183,7 +242,7 @@ static const test_case_t CASES[] = {
     {"type without a colon", BASE "[messages]\na = voice REPEATER\n", "line 4: messages.a: 'voice' needs a colon after it, e.g. voice: ..."},
     {"tone without a colon", BASE "[messages]\na = tone 660:50\n", "'tone' needs a colon after it"},
     {"later part without a colon", BASE "[messages]\na = cw: ID | voice REPEATER\n", "'voice' needs a colon after it"},
-    {"no type at all",      BASE "[messages]\na = REPEATER\n", "expected cw:, voice:, or tone: before 'REPEATER'"},
+    {"no type at all",      BASE "[messages]\na = REPEATER\n", "expected cw:, voice:, tone: or dtmf: before 'REPEATER'"},
     {"space before the colon is fine", BASE "[messages]\na = voice : REPEATER\n", NULL},
     {"message has no content", BASE "[messages]\na =\n", "messages.a: has no content"},
     {"empty part",          BASE "[messages]\na = cw: ID |\n", "empty part"},
@@ -254,6 +313,18 @@ static int load_text(const char *text)
 }
 
 static int s_fail;
+
+/* The samples in a run of clips, back to back. */
+static size_t clips_n(vocab_cache_t *vc, const char *words)
+{
+    char copy[256], *save = NULL;
+    size_t total = 0, n;
+    snprintf(copy, sizeof(copy), "%s", words);
+    for (char *w = strtok_r(copy, " ", &save); w; w = strtok_r(NULL, " ", &save))
+        if (vocab_get(vc, w, &n))
+            total += n;
+    return total;
+}
 
 static void check(const char *name, int ok)
 {
@@ -359,14 +430,14 @@ int main(void)
         bool active[CFG_MAX_SCHEDULE];
         struct tm t = {.tm_wday = 3, .tm_hour = 19, .tm_min = 30};
         load_text(BASE "[schedule]\nnet = wed 19:00-20:00 timeout=600 hang=1.5 morse_wpm=15 link_on_code=\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("numbers and codes apply while the window is open",
               run.timers.timeout == 600.0 && run.timers.hang == 1.5 && run.audio.morse_wpm == 15
               && run.dtmf.link_on_code[0] == 0);
         check("the file's own settings are untouched",
               s_cfg.timers.timeout == 180.0 && s_cfg.audio.morse_wpm == 20 && strcmp(s_cfg.dtmf.link_on_code, "72") == 0);
         t.tm_hour = 20;
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("and end with it", run.timers.timeout == 180.0 && run.timers.hang == s_cfg.timers.hang);
     }
 
@@ -510,48 +581,48 @@ int main(void)
         static config_t run;
         bool active[CFG_MAX_SCHEDULE];
 
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("before the window, the config's events apply",
               !active[0] && run.events.n_tail_messages == 0 && strcmp(run.events.ct_link_on_message, "m") == 0);
 
         t.tm_hour = 7; t.tm_min = 0;
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("the start minute is inside", active[0] && strcmp(run.events.tail_messages[0], "n") == 0
               && strcmp(run.events.ct_link_on_message, "n") == 0);
 
         t.tm_hour = 19; t.tm_min = 10;
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("where windows overlap, the later entry wins",
               active[0] && active[2] && strcmp(run.events.ct_link_on_message, "q") == 0 && strcmp(run.events.tail_messages[0], "n") == 0);
 
         t.tm_min = 25;
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("the end minute is outside", !active[0] && run.events.n_tail_messages == 0);
 
         t.tm_wday = THU; t.tm_hour = 12; t.tm_min = 0;
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("other days are untouched", !active[0] && !active[1] && strcmp(run.events.ct_link_on_message, "m") == 0);
 
         t.tm_wday = FRI; t.tm_hour = 23;
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("overnight: open late on its start day", active[1]);
         check("a list setting replaces the rotation",
               run.events.n_mandatory_ids == 2 && strcmp(run.events.mandatory_ids[1], "q") == 0);
 
         t.tm_wday = SAT; t.tm_hour = 1; t.tm_min = 59;
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("overnight: still open early the next day", active[1]);
         t.tm_hour = 2; t.tm_min = 0;
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("overnight: closed at the end", !active[1] && run.events.n_mandatory_ids == 1);
 
         t.tm_wday = FRI; t.tm_hour = 1;
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("overnight: not open early on its own start day", !active[1]);
 
         t.tm_wday = SUN; t.tm_hour = 1;
         load_text(BASE "[messages]\nm = cw: A\n[schedule]\nx = sat 23:00-01:30 tail_messages=m\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("overnight wraps Saturday into Sunday", active[0]);
         (void)MON; (void)TUE;
     }
@@ -564,57 +635,57 @@ int main(void)
         #define M "[messages]\na = cw: A\nb = cw: B\nc = cw: C\nd = cw: D\ne = cw: E\nf = cw: F\ng = cw: G\nh = cw: H\ni = cw: I\n"
 
         load_text(BASE M "[events]\ntail_messages = a\n[schedule]\nx = wed 00:00-23:59 tail_messages+=b\ny = wed 00:00-23:59 tail_messages+=c\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("+= builds on [events] and on earlier windows",
               run.events.n_tail_messages == 3 && strcmp(run.events.tail_messages[0], "a") == 0 && strcmp(run.events.tail_messages[1], "b") == 0 && strcmp(run.events.tail_messages[2], "c") == 0);
         check("the config's own list is untouched", s_cfg.events.n_tail_messages == 1);
 
         load_text(BASE M "[schedule]\nx = wed 00:00-23:59 tail_messages+=b\ny = 2nd-wed 00:00-23:59 tail_messages+=c\n");
         t.tm_year = 2026 - 1900; t.tm_mon = 10; t.tm_mday = 11;
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("your Wednesday case: the 2nd Wednesday gets both", run.events.n_tail_messages == 2);
         t.tm_mday = 4;
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("any other Wednesday gets the weekly one", run.events.n_tail_messages == 1 && strcmp(run.events.tail_messages[0], "b") == 0);
 
         load_text(BASE M "[events]\ntail_messages = a\n[schedule]\nx = wed 00:00-23:59 tail_messages+=a\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("+= doesn't add a name already there", run.events.n_tail_messages == 1);
 
         load_text(BASE M "[events]\ntail_messages = a,b,c\n[schedule]\nx = wed 00:00-23:59 tail_messages-=b\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("-= removes a name and keeps the order",
               run.events.n_tail_messages == 2 && strcmp(run.events.tail_messages[0], "a") == 0 && strcmp(run.events.tail_messages[1], "c") == 0);
 
         load_text(BASE M "[events]\ntail_messages = a,b\n[schedule]\nx = wed 00:00-23:59 tail_messages-=c\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("-= of a name not in the list changes nothing", run.events.n_tail_messages == 2);
 
         load_text(BASE M "[events]\ntail_messages = a,b\n[schedule]\nx = wed 00:00-23:59 tail_messages-=a,b\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("-= can empty an ordinary list", run.events.n_tail_messages == 0);
 
         load_text(BASE M "[events]\nmandatory_ids = a,b\n[schedule]\nx = wed 00:00-23:59 mandatory_ids-=a\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("-= takes one ID out of the rotation",
               run.events.n_mandatory_ids == 1 && strcmp(run.events.mandatory_ids[0], "b") == 0);
 
         load_text(BASE M "[events]\nmandatory_ids = a,b\n[schedule]\nx = wed 00:00-23:59 mandatory_ids-=a,b\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("-= can't remove the last mandatory ID",
               run.events.n_mandatory_ids == 1 && strcmp(run.events.mandatory_ids[0], "b") == 0);
 
         load_text(BASE M "[events]\ntail_messages = a,b,c,d,e,f,g,h\n[schedule]\nx = wed 00:00-23:59 tail_messages+=i\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("+= stops at the list's limit", run.events.n_tail_messages == 8 && strcmp(run.events.tail_messages[7], "h") == 0);
 
         load_text(BASE M "[events]\ntail_messages = a\n[schedule]\nx = wed 00:00-23:59 tail_messages+=b\ny = wed 00:00-23:59 tail_messages=c\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("a later = replaces what += built", run.events.n_tail_messages == 1 && strcmp(run.events.tail_messages[0], "c") == 0);
 
         t.tm_wday = 4;
         load_text(BASE M "[events]\ntail_messages = a\n[schedule]\nx = wed 00:00-23:59 tail_messages+=b\n");
-        schedule_evaluate(&s_cfg, &t, &run, active);
+        schedule_evaluate(&s_cfg, &t, NULL, &run, active);
         check("a closed window changes nothing", run.events.n_tail_messages == 1);
         #undef M
     }
@@ -646,7 +717,7 @@ int main(void)
             gmtime_r(&tn, &next);
             d.tm_hour = 20;
             d.tm_min = 0;
-            schedule_evaluate(&s_cfg, &d, &run, active);
+            schedule_evaluate(&s_cfg, &d, NULL, &run, active);
             for (int i = NTH; i <= LEAP; i++)
                 hits[i] += active[i];
             if (active[NTH] != (d.tm_wday == 2 && d.tm_mday >= 8 && d.tm_mday <= 14))
@@ -655,11 +726,11 @@ int main(void)
                 bad_last++;
             /* 01:00 on the 1st belongs to the night before; 01:00 on any other day doesn't. */
             d.tm_hour = 1;
-            schedule_evaluate(&s_cfg, &d, &run, active);
+            schedule_evaluate(&s_cfg, &d, NULL, &run, active);
             if (active[LATE] != (d.tm_mday == 1))
                 bad_late++;
             d.tm_hour = 2;
-            schedule_evaluate(&s_cfg, &d, &run, active);
+            schedule_evaluate(&s_cfg, &d, NULL, &run, active);
             if (active[LATE])
                 bad_late++;
         }
@@ -768,6 +839,136 @@ int main(void)
             unlink(path);
         }
         rmdir(dir);
+    }
+
+    printf("[12] producer variables\n");
+    {
+        char dir[] = "/tmp/usrp_rc_ext_test_XXXXXX";
+        if (!mkdtemp(dir))
+            return 1;
+        char sub[128], fa[160], fb[160], conf[1024];
+        snprintf(sub, sizeof(sub), "%s/wx", dir);
+        mkdir(sub, 0755);
+        snprintf(fa, sizeof(fa), "%s/a", sub);
+        snprintf(fb, sizeof(fb), "%s/b", sub);
+
+        vocab_cache_t *vc;
+        const char *clip_dirs[] = { "vocab_8k" };
+        vocab_cache_create(&vc, clip_dirs, 1);
+        size_t temp_n = 0, neg_n = 0;
+        vocab_get(vc, "TEMPERATURE", &temp_n);
+        vocab_get(vc, "NEGATIVE", &neg_n);
+
+        snprintf(conf, sizeof(conf), BASE "[external]\ndir = %s\nwx = 60 wxna\nquiet = 60\n"
+                 "[dtmf]\nread_17 = both\nread_18 = framed\nread_19 = id\nread_20 = none\n"
+                 "[messages]\nwxna = voice: NEGATIVE\nboth = voice: {wx.a} {wx.b}\n"
+                 "framed = voice: TEMPERATURE {wx.a} _100\nnone = voice: {quiet.a}\n"
+                 "temp = voice: {wx.a}\nid = voice: TEMPERATURE {msg:temp}\n"
+                 "unused = cw: A\n", dir);
+        int rc = load_text(conf);
+        check("loads", rc == 0 && message_validate(&s_cfg, vc) == 0);
+        config_prune_messages(&s_cfg);
+        check("a read slot, a fallback and a referenced message are kept", config_find_message(&s_cfg, "both")
+              && config_find_message(&s_cfg, "wxna") && config_find_message(&s_cfg, "temp")
+              && !config_find_message(&s_cfg, "unused"));
+
+        #define LEN(name) message_render(&s_cfg, vc, name, -1.0).n
+        struct timeval old[2] = {{.tv_sec = time(NULL) - 120}, {.tv_sec = time(NULL) - 120}};
+
+        write_file(fa, "TEMPERATURE\n");
+        write_file(fb, "TEMPERATURE\n");
+        check("fresh words play", LEN("both") == 2 * temp_n);
+        check("the message's own words play around them", LEN("framed") == 2 * temp_n + 800);
+        check("{msg:} plays the message it names in place", LEN("id") == 2 * temp_n);
+
+        write_file(fa, "TEMPERATURE _100\n");
+        check("_NNN in a file is a gap", LEN("temp") == temp_n + 800);
+
+        write_file(fa, "-3.05\n");
+        check("a number is said: MINUS THREE POINT ZERO FIVE",
+              LEN("temp") == clips_n(vc, "MINUS THREE POINT ZERO FIVE"));
+        write_file(fa, "+1230\n");
+        check("... ONE THOUSAND TWO HUNDRED THIRTY", LEN("temp") == clips_n(vc, "ONE THOUSAND TWO HUNDRED THIRTY"));
+        write_file(fa, "TEMPERATURE 007 DEGREES\n");
+        check("... among words, with leading zeros dropped",
+              LEN("temp") == clips_n(vc, "TEMPERATURE SEVEN DEGREES"));
+        write_file(fa, "100000\n");
+        check("over 99,999 drops the variable to its fallback", LEN("temp") == neg_n);
+        write_file(fa, "3.\n");
+        check("'3.' isn't a number, or a clip: the fallback", LEN("temp") == neg_n);
+
+        write_file(fa, "TEMPERATURE NOSUCHCLIP\n");
+        check("a word that isn't a clip plays the fallback", LEN("temp") == neg_n);
+        check("... in place, each time, around the message's own words",
+              LEN("both") == neg_n + temp_n && LEN("framed") == temp_n + neg_n + 800);
+        write_file(fa, "");
+        check("a fresh empty file is silent: nothing to report", LEN("temp") == 0);
+
+        write_file(fa, "TEMPERATURE\n");
+        utimes(fb, old);
+        check("a stale file plays the fallback", LEN("both") == temp_n + neg_n);
+        utimes(fa, old);
+        check("... for every variable that is stale", LEN("both") == 2 * neg_n);
+
+        unlink(fa);
+        unlink(fb);
+        check("a missing file plays the fallback", LEN("both") == 2 * neg_n);
+        check("no fallback: silent", LEN("none") == 0);
+        check("a referenced message with nothing to say leaves the rest",
+              message_render(&s_cfg, vc, "id", -1.0).n == temp_n + neg_n);
+
+        snprintf(conf, sizeof(conf), BASE "[external]\ndir = %s\nwx = 60\n"
+                 "[schedule]\nalert = {wx.a} hang=2\nday = daily 07:00-22:00 {wx.a} hang=3\n", dir);
+        check("a window with a field loads", load_text(conf) == 0);
+        {
+            static config_t run;
+            bool on[CFG_MAX_SCHEDULE], active[CFG_MAX_SCHEDULE];
+            struct tm noon = {.tm_hour = 12, .tm_mday = 14, .tm_mon = 10, .tm_year = 126, .tm_wday = 6};
+            struct tm night = noon;
+            night.tm_hour = 23;
+
+            write_file(fa, "TORNADO WARNING\n");
+            on[0] = message_field_current(&s_cfg, vc, "wx.a");
+            on[1] = on[0];
+            check("a field with current words is on", on[0]);
+            schedule_evaluate(&s_cfg, &noon, on, &run, active);
+            check("... and opens its windows", active[0] && active[1] && run.timers.hang == 3);
+            schedule_evaluate(&s_cfg, &night, on, &run, active);
+            check("a field and a time: both must be true", active[0] && !active[1] && run.timers.hang == 2);
+
+            write_file(fa, "");
+            check("an empty field is off", !message_field_current(&s_cfg, vc, "wx.a"));
+            utimes(fa, old);
+            check("a stale field is off", !message_field_current(&s_cfg, vc, "wx.a"));
+            schedule_evaluate(&s_cfg, &noon, NULL, &run, active);
+            check("with the field off, both are closed", !active[0] && !active[1]);
+        }
+
+        char big[1100];
+        memset(big, 'A', sizeof(big) - 1);
+        big[sizeof(big) - 1] = 0;
+        write_file(fa, big);
+        check("a file over 1024 bytes is dropped", !message_field_current(&s_cfg, vc, "wx.a"));
+        unlink(fa);
+
+        vocab_cache_destroy(vc);
+        rmdir(sub);
+        rmdir(dir);
+    }
+
+    printf("[13] dtmf parts\n");
+    {
+        load_text(BASE "[dtmf]\nregen_tone_ms = 100\nregen_gap_ms = 60\n[messages]\n"
+                  "a = dtmf: 12\nb = dtmf: 12:50/25\nc = dtmf: 1 _500 2\nd = dtmf: 1:50/0 2:50/0\n");
+        const config_elem_t *e = element("a", 0);
+        check("keys are one part", e && e->type == ELEM_DTMF && strcmp(e->cw_text, "12") == 0);
+        #define DLEN(name) message_render(&s_cfg, NULL, name, -1.0).n
+        check("the regen timing by default, each key with its off time", DLEN("a") == 2 * (100 + 60) * 8);
+        check(":ON/OFF sets the timing", DLEN("b") == 2 * (50 + 25) * 8);
+        check("_MS is a pause between groups", DLEN("c") == (2 * (100 + 60) + 500) * 8);
+        check("groups in a row keep their spacing", DLEN("d") == 2 * 50 * 8);
+        check("lowercase keys are read as uppercase",
+              load_text(BASE "[messages]\na = dtmf: abcd\n") == 0 && strcmp(element("a", 0)->cw_text, "ABCD") == 0);
     }
 
     if (s_fail) {

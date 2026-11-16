@@ -22,6 +22,7 @@ typedef enum {
     ELEM_CW,
     ELEM_VOICE,
     ELEM_TONE,
+    ELEM_DTMF,   /* a group of keys: cw_text holds them, ms and off_ms the timing */
 } elem_type_t;
 
 /* One word in a voice element's space-separated clip list: either a real
@@ -40,13 +41,18 @@ typedef enum {
     VOICE_VAR_KEYUPS_WEEK,   /* {keyups_week}: ... in the last 7 days */
     VOICE_VAR_MINUTES_DAY,   /* {minutes_day}: minutes of traffic in the last 24 hours */
     VOICE_VAR_MINUTES_WEEK,  /* {minutes_week}: ... in the last 7 days */
+    VOICE_VAR_EXTERNAL,   /* {producer.field}: a file an external producer writes;
+                           * the word's clip holds "producer.field" */
+    VOICE_VAR_MESSAGE,    /* {msg:name}: another message, played in its place;
+                           * the word's clip holds the name */
 } voice_var_t;
 
 typedef struct {
     bool        is_gap;
     int         gap_ms;             /* valid when is_gap; -1 = use configured default */
     voice_var_t var;                /* filled in when the message plays */
-    char        clip[CFG_NAME_STR]; /* valid when !is_gap and no var */
+    char        clip[CFG_NAME_STR]; /* !is_gap: the clip; with VOICE_VAR_EXTERNAL,
+                                     * "producer.field"; with VOICE_VAR_MESSAGE, the name */
 } config_voice_word_t;
 
 typedef struct {
@@ -57,11 +63,12 @@ typedef struct {
      * `voice: THISIS _ W ONE` in the config splits into 4 words here. */
     config_voice_word_t voice_words[CFG_MAX_VOICE_WORDS];
     int      n_voice_words;
-    /* tone */
+    /* tone, and dtmf */
     double   freq1;
     double   freq2;
-    int      ms;
-    double   amp;   /* < 0 = use cfg->audio.tone_level */
+    int      ms;      /* dtmf: each key's on time; < 0 = dtmf.regen_tone_ms */
+    int      off_ms;  /* dtmf: the silence after each key; < 0 = dtmf.regen_gap_ms */
+    double   amp;     /* < 0 = use cfg->audio.tone_level */
 } config_elem_t;
 
 typedef struct {
@@ -124,6 +131,10 @@ typedef struct {
 
 /* Enough for ACC's longest command prefix (7 digits). */
 #define CFG_DTMF_PREFIX_STR 8
+/* A whole control op code: the prefix + a fixed number of up to 3 keys. */
+#define CFG_DTMF_CODE_STR (CFG_DTMF_PREFIX_STR + 3)
+/* read_00 to read_99: the read prefix takes exactly two keys. */
+#define CFG_READ_SLOTS 100
 
 typedef struct {
     bool enabled;
@@ -144,8 +155,10 @@ typedef struct {
     char link_on_code[CFG_DTMF_PREFIX_STR];
     char link_off_code[CFG_DTMF_PREFIX_STR];
     char link_status_code[CFG_DTMF_PREFIX_STR];
-    char repeater_code[CFG_DTMF_PREFIX_STR];     /* + 0 = down, + 1 = up; empty by default */
+    char control_op_prefix[CFG_DTMF_PREFIX_STR]; /* + a fixed control op code; empty = tier off */
     char regen_code[CFG_DTMF_PREFIX_STR];        /* + keys to send */
+    char read_prefix[CFG_DTMF_PREFIX_STR];       /* + two keys: play read_messages[NN] */
+    char read_messages[CFG_READ_SLOTS][CFG_NAME_STR];   /* read_NN; empty = no message */
     int    regen_tone_ms;
     int    regen_gap_ms;
     int    regen_lead_ms;   /* silence after keying the link, before the first tone */
@@ -160,30 +173,42 @@ typedef enum {
     COMMAND_LINK_ON,
     COMMAND_LINK_OFF,
     COMMAND_LINK_STATUS,
-    COMMAND_REPEATER,   /* digits: "0" = down, "1" = up */
+    COMMAND_REPEATER_UP,
+    COMMAND_REPEATER_DOWN,
+    COMMAND_FORCE_ID,   /* digits: "0" initial, "1" impolite, "2" anxious, "3" mandatory */
     COMMAND_NO_LINK,    /* a link command on a repeater with no link */
     COMMAND_REGEN,      /* send `digits` as fresh DTMF, here and over the link */
     COMMAND_ECHO,       /* record the next local transmission and play it back */
+    COMMAND_READ,       /* play the message dtmf.read_messages[digits] */
 } command_type_t;
 
 typedef enum {
     CODE_WHOLE,     /* the code alone */
-    CODE_UP_DOWN,   /* the code + 0 or 1 */
     CODE_CAPTURE,   /* the code + every key after it, # and D included, to the unkey */
+    CODE_KEYS,      /* the code + exactly `nkeys` keys 0-9 */
 } code_kind_t;
 
 /* Every DTMF code, in matching order: whole codes win over the code + argument forms.
- * --check validates them and command.c matches against them, both from this list. */
+ * --check validates them and command.c matches against them, both from this list.
+ *
+ * A user code is its own setting. A control op code is fixed: the operator's
+ * control_op_prefix + `op_code`, published in the manual and never remapped. */
 typedef struct {
-    const char    *key;      /* in [dtmf] */
-    size_t         offset;   /* in config_dtmf_t */
+    const char    *key;      /* in [dtmf], for messages */
+    size_t         offset;   /* in config_dtmf_t: the code, or for control op the prefix */
+    const char    *op_code;  /* NULL = a user code */
     code_kind_t    kind;
+    int            nkeys;    /* CODE_KEYS only */
     command_type_t type;
     const char    *name;     /* for the log */
 } config_dtmf_code_t;
 
 extern const config_dtmf_code_t CONFIG_DTMF_CODES[];
 extern const size_t CONFIG_NDTMF_CODES;
+
+/* The whole code for CONFIG_DTMF_CODES[i]: the setting, or the prefix + op_code. An
+ * empty string means the command is off. `buf` holds a control op code. */
+const char *config_dtmf_code(const config_dtmf_t *d, size_t i, char buf[CFG_DTMF_CODE_STR]);
 
 typedef struct {
     char startup_message[CFG_NAME_STR];
@@ -223,6 +248,10 @@ typedef struct {
     char file[256];   /* where repeater down survives a restart; empty = not kept */
 } config_state_t;
 
+typedef struct {
+    char socket[108];   /* the control terminal's Unix socket (sun_path size); empty = off */
+} config_crx_t;
+
 #define CFG_MAX_SCHEDULE      32
 #define CFG_MAX_SCHEDULE_SETS 16
 #define CFG_MAX_DAY_RULES     8
@@ -260,13 +289,33 @@ typedef struct {
     unsigned          days;        /* bit 0 = Sunday, as struct tm's tm_wday */
     config_day_rule_t rules[CFG_MAX_DAY_RULES];
     int               nrules;
+    bool              timed;       /* has days and a time window */
     int               start_min;   /* minutes past midnight */
     int               end_min;     /* exclusive; below start_min = runs past midnight */
+    char              field[CFG_NAME_STR];     /* "producer.field": open only while it has
+                                                * current words; empty = no condition */
+    char              announce[CFG_NAME_STR];  /* message to play as the window opens */
     config_override_t sets[CFG_MAX_SCHEDULE_SETS];
     int               nsets;
 } config_schedule_t;
 
 #define CFG_CALLSIGN_STR 16
+
+/* [external]: programs outside usrp-rc that write words to files, spoken as
+ * {producer.field}. usrp-rc only reads the files. */
+#define CFG_MAX_PRODUCERS 16
+
+typedef struct {
+    char name[CFG_NAME_STR];
+    int  lifetime_s;               /* a file older than this is stale */
+    char fallback[CFG_NAME_STR];   /* plays for each variable with no words; empty = none */
+} config_producer_t;
+
+typedef struct {
+    char              dir[256];    /* each producer writes dir/<producer>/<field> */
+    config_producer_t producers[CFG_MAX_PRODUCERS];
+    int               nproducers;
+} config_external_t;
 
 typedef struct {
     char             callsign[CFG_CALLSIGN_STR];  /* letters and digits; {call} in messages */
@@ -278,7 +327,9 @@ typedef struct {
     config_dtmf_t    dtmf;
     config_stats_t   stats;
     config_state_t   state;
+    config_crx_t     crx;
     config_log_t     log;
+    config_external_t external;
 
     config_message_t *messages;   /* everything defined, until config_prune_messages() */
     int               nmessages;
@@ -309,3 +360,6 @@ void config_apply_override(config_t *cfg, const config_override_t *o);
 
 /* Look up a message by name; returns NULL if not found or name is empty. */
 const config_message_t *config_find_message(const config_t *cfg, const char *name);
+
+/* The producer a {producer.field} word names, by the part before the dot; NULL if none. */
+const config_producer_t *config_find_producer(const config_t *cfg, const char *var);

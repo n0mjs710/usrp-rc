@@ -1,0 +1,244 @@
+#!/usr/bin/env python3
+"""NWS alert producer for usrp-rc.
+
+Gets the active National Weather Service alerts for a list of county and zone codes
+from api.weather.gov, and writes one file, <dir>/<name>/alerts, with one phrase for
+each active alert: the event words, then the area label, for example
+"TORNADO WARNING D G". The file is empty when no alert on the event list is active.
+
+The producer keeps each alert it has seen until that alert ends, in a cache file
+next to the alerts file. When the fetch fails, it writes the alerts from the cache
+that have not ended. With none, it writes nothing, and the file goes stale.
+
+Only the Python standard library is used.
+"""
+
+import argparse
+import json
+import os
+import sys
+import tempfile
+import time
+import urllib.parse
+import urllib.request
+import wave
+from datetime import datetime
+
+API = "https://api.weather.gov/alerts/active?status=actual&message_type=alert,update&zone={zones}"
+USER_AGENT = "usrp-rc-nws/0.1"
+# Where an installed usrp-rc keeps its clips, site clips first.
+VOCAB_DIRS = ["/usr/local/share/usrp-rc/user_8k", "/usr/local/share/usrp-rc/vocab_8k"]
+FIELD = "alerts"
+CACHE = ".cache.json"
+MAX_WORDS = 32          # the most words usrp-rc reads from one field
+
+# Spoken in this sequence. Each one has words in the stock vocabulary.
+EVENTS = [
+    "Tornado Warning=TORNADO WARNING",
+    "Severe Thunderstorm Warning=SEVERE THUNDERSTORM WARNING",
+    "Tornado Watch=TORNADO WATCH",
+    "Severe Thunderstorm Watch=SEVERE THUNDERSTORM WATCH",
+]
+
+
+def pairs(items, what):
+    """["Name=WORDS", ...] -> [(name, [WORDS])], in the given sequence."""
+    out = []
+    for item in items:
+        name, eq, words = item.partition("=")
+        if not eq or not name.strip() or not words.split():
+            raise ValueError(f"{what} '{item}': expected NAME=WORDS")
+        out.append((name.strip(), words.upper().split()))
+    return out
+
+
+def areas(items):
+    """["D G=KSC045,KSZ040", ...] -> [([D, G], {KSC045, KSZ040})]."""
+    out = []
+    for item in items:
+        words, eq, codes = item.partition("=")
+        codes = {c.strip().upper() for c in codes.split(",") if c.strip()}
+        if not eq or not words.split() or not codes:
+            raise ValueError(f"--area '{item}': expected WORDS=CODE,CODE")
+        out.append((words.upper().split(), codes))
+    return out
+
+
+def parse_time(s):
+    return datetime.fromisoformat(s).timestamp()
+
+
+def matches(features, events, labels):
+    """The active alerts on the event list, as [(event, label words, end time)].
+    An alert that covers several labels gives one entry for each label."""
+    found = []
+    for f in features:
+        p = f.get("properties", {})
+        if p.get("event") not in events:
+            continue
+        ugc = set(p.get("geocode", {}).get("UGC", []))
+        end = p.get("ends") or p.get("expires")
+        if not end:
+            continue
+        for words, codes in labels:
+            if ugc & codes:
+                found.append((p["event"], " ".join(words), parse_time(end)))
+    return found
+
+
+def phrases(found, events, labels, now):
+    """One phrase for each event and label, in the sequence of the event list, then of
+    the area list. An event that is active twice for one label is said once."""
+    active = {(e, l) for e, l, end in found if end > now}
+    out = []
+    for event, event_words in events.items():
+        for words, _ in labels:
+            if (event, " ".join(words)) in active:
+                out.append(event_words + words)
+    return out
+
+
+def fit(said, limit):
+    """The phrases that fit in limit words, pauses included. usrp-rc drops a field with
+    more words than its limit, so the phrases at the end of the list are left out."""
+    out, n = [], -1
+    for words in said:
+        n += len(words) + 1
+        if n > limit:
+            break
+        out.append(words)
+    return out
+
+
+# ---------------------------------------------------------------- output
+
+def write_file(path, text, mtime):
+    """Through a temp file and rename, so a reader never sees half a file."""
+    d = os.path.dirname(path)
+    os.makedirs(d, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=d, prefix="." + os.path.basename(path) + ".")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        os.chmod(tmp, 0o644)
+        os.utime(tmp, (mtime, mtime))
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
+
+
+def load_cache(path):
+    try:
+        with open(path) as f:
+            return [tuple(x) for x in json.load(f)]
+    except (OSError, ValueError):
+        return []
+
+
+def vocab_index(dirs):
+    """Clip name -> path. Earlier directories win, as in usrp-rc (user_8k first)."""
+    index = {}
+    for d in reversed(dirs):
+        if os.path.isdir(d):
+            for fn in os.listdir(d):
+                if fn.lower().endswith(".wav"):
+                    index[fn[:-4].upper()] = os.path.join(d, fn)
+    return index
+
+
+def write_wav(words, index, path):
+    with wave.open(path, "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(8000)
+        for w in words:
+            if w == "_":
+                out.writeframes(b"\0\0" * 8 * 300)
+            elif w in index:
+                with wave.open(index[w], "rb") as clip:
+                    out.writeframes(clip.readframes(clip.getnframes()))
+
+
+def fetch(codes, timeout):
+    url = API.format(zones=urllib.parse.quote(",".join(sorted(codes)), safe=","))
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT,
+                                               "Accept": "application/geo+json"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.load(resp).get("features", [])
+
+
+def main():
+    p = argparse.ArgumentParser(description="NWS alert producer for usrp-rc.")
+    p.add_argument("--area", action="append", required=True, metavar="WORDS=CODES",
+                   help="label words and the county/zone codes they cover, "
+                        "e.g. 'D G=KSC045,KSZ040'; repeatable, spoken in this sequence")
+    p.add_argument("--event", action="append", metavar="EVENT=WORDS",
+                   help="an NWS event name and its words, e.g. 'Tornado Warning=TORNADO WARNING'; "
+                        "repeatable, spoken in this sequence (default: tornado and severe "
+                        "thunderstorm warnings and watches)")
+    p.add_argument("--dir", default="/run/usrp-rc/ext", help="producer directory (default %(default)s)")
+    p.add_argument("--name", default="nws", help="producer name, the subdirectory (default %(default)s)")
+    p.add_argument("--timeout", type=float, default=20, help="fetch timeout, seconds")
+    p.add_argument("--json", help="read the API response from this file, not the network (testing)")
+    p.add_argument("--print", action="store_true", help="print the phrases; write no files")
+    p.add_argument("--wav", help="also render the phrases to this WAV file")
+    p.add_argument("--vocab", action="append",
+                   help="clip directory, user clips first; repeatable "
+                        "(default: the installed usrp-rc clip directories)")
+    args = p.parse_args()
+
+    try:
+        labels = areas(args.area)
+        events = dict(pairs(args.event or EVENTS, "--event"))
+        index = vocab_index(args.vocab or VOCAB_DIRS)
+    except ValueError as e:
+        p.error(str(e))
+
+    outdir = os.path.join(args.dir, args.name)
+    cache_path = os.path.join(outdir, CACHE)
+    now = time.time()
+    codes = set().union(*(c for _, c in labels))
+    try:
+        if args.json:
+            with open(args.json) as f:
+                features = json.load(f).get("features", [])
+        else:
+            features = fetch(codes, args.timeout)
+        found = matches(features, events, labels)
+        status = "WRITTEN"
+    except Exception as e:
+        found = [x for x in load_cache(cache_path) if x[2] > now]
+        if not found:
+            print(f"nws: FAILED: {e}", file=sys.stderr)
+            return 1
+        status = f"FAILED ({e}), {len(found)} cached alerts WRITTEN"
+
+    said = phrases(found, events, labels, now)
+    kept = fit(said, MAX_WORDS)
+    if len(kept) < len(said):
+        print(f"nws: {len(said) - len(kept)} alerts LEFT OUT: over {MAX_WORDS} words", file=sys.stderr)
+        said = kept
+    for words in said:
+        missing = [w for w in words if w not in index]
+        if missing:
+            print(f"nws: '{' '.join(words)}' has NO CLIP for: {' '.join(missing)}", file=sys.stderr)
+    text = " _ ".join(" ".join(w) for w in said)
+
+    if args.print:
+        print(f"{args.name}.{FIELD}  {text}")
+    else:
+        write_file(os.path.join(outdir, FIELD), text + ("\n" if text else ""), now)
+        if status == "WRITTEN":
+            write_file(cache_path, json.dumps(found), now)
+
+    if args.wav:
+        write_wav(text.split(), index, args.wav)
+
+    print(f"nws: {status if not args.print else 'DECODED'}, {len(said)} active: "
+          f"{text or 'none'}", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

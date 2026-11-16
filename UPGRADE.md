@@ -4,6 +4,71 @@ This document lists the configuration changes necessary for each new version. Af
 each change, examine the configuration with `usrp-rc --check <file>`. `--check` shows
 each out-of-date setting by line number.
 
+## 1.1
+
+These changes apply when you update from 1.0.
+
+### Necessary changes
+
+1. The stock voice clips in `vocab_8k/` are a new curated set. New words with more use
+   on a repeater were added, and many words with little use on a repeater controller,
+   most of them aviation words, were removed. `make install` removes the old clips. Thus,
+   before you install, examine each `voice:` message for clips that are no longer in
+   [MANUAL.md](MANUAL.md#appendix-b-voice-clips) Appendix B. After the installation,
+   `--check` shows each missing clip as `no voice clip named`.
+
+   To keep a removed clip, copy it into `user_8k/` from the 1.0 source. For example,
+   for `ENGINE`:
+
+   ```bash
+   git show v1.0:vocab_8k/ENGINE.wav | sudo tee /usr/local/share/usrp-rc/user_8k/ENGINE.wav >/dev/null
+   ```
+
+2. The repeater command is now a control operator command, and `repeater_code` is
+   removed. `--check` shows `repeater_code` as an unknown setting. Remove it from
+   `[dtmf]`. Repeater down is now the control operator prefix + `01`, and repeater up
+   is the prefix + `00`. These are ACC's codes.
+
+3. The new control operator prefix, `control_op_prefix`, is `123` by default. Each
+   station that reads the manual knows this prefix. Set a different prefix before you
+   start 1.1 on the air. No other `[dtmf]` code can start with the prefix. `--check`
+   shows the conflict.
+
+4. The service file changed: it now makes `/run/usrp-rc` for the control terminal. After
+   `sudo make install`, do `sudo systemctl daemon-reload`, then restart the service.
+   `make install` creates the group `usrp-rc` and adds the user `mmdvm` to it. For each
+   other control operator, do `sudo usermod -aG usrp-rc <user>`.
+
+5. The new read command has the prefix `4` by default. No other `[dtmf]` code can
+   start with `4`. If a code starts with `4`, change that code, or set `read_prefix` to
+   a different prefix or to empty. `--check` shows the conflict.
+
+### New functions
+
+| Function | Setting | MANUAL.md |
+| --- | --- | --- |
+| Read a message by DTMF: `4` + two digits | `[dtmf]` `read_prefix`, `read_00` to `read_99` | 2.9 |
+| Control operator commands behind a prefix | `[dtmf]` `control_op_prefix` | 9.7 |
+| Send an ID of each type by DTMF: prefix + `33` + type | `[dtmf]` `control_op_prefix` | 9.7 |
+| A message inside a message | `{msg:name}` in a `voice:` part | 5.6 |
+| Words from a producer, a separate program, for example a weather report | `[external]`, `{producer.field}` | 5.7, Appendix C |
+| DTMF keys in a message, for example to page a radio | `dtmf:` parts | 5.4 |
+| A schedule window that a producer field opens | `{producer.field}` in a `[schedule]` line | 7.9 |
+| A message that keys the repeater when a window opens | `announce=` in a `[schedule]` line | 7.9 |
+| Control terminal: DTMF entries, the live log and the repeater state, on the host | `usrp-crx`; `[crx]` `socket` | 9.9 |
+
+A sample METAR weather producer is in `producers/metar/`. Its README gives the
+installation.
+
+### Changes in operation
+
+- When the repeater is down or timed out, it accepts all control operator commands.
+  Before, it accepted only the repeater command.
+- The pad test says `STAR` and `POUND` for `*` and `#`. Before, it said `SIERRA` and
+  `P`.
+- A tail message with nothing to say uses its turn in the rotation. Before, the next
+  tail tried the same message again.
+
 ## 1.0 (November 2026)
 
 These changes apply when you update from 1.0b.

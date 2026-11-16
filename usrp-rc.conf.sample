@@ -54,6 +54,9 @@ timeout_message = timeout_warn
 # {call} works in voice and cw. Voice messages can also use these, each as its own
 # word, spoken as of when the message plays: {time}, {ampm}, {greeting}, {day}, {date},
 # {year}, {keyups_day}, {keyups_week}, {minutes_day}, {minutes_week}.
+# {msg:name} plays another message in its place; one level only.
+# {producer.field}, for example {wx.temp}, speaks words that a producer writes:
+# see [external] at the end.
 #
 #     name = voice: THISIS {call} REPEATER     voice clips from vocab_8k/ or user_8k/
 #                                              "_" pauses audio.voice_gap_ms, "_400" pauses 400 ms
@@ -62,6 +65,7 @@ timeout_message = timeout_warn
 #     name = tone: 500+700:100                 two frequencies together
 #     name = tone: 1760:30 _30 1760:30         _MS is silence
 #     name = tone: 1200:60@0.9                 @LEVEL overrides audio.tone_level for one note
+#     name = dtmf: 123# _500 456:80/50         DTMF keys; :ON/OFF ms, default dtmf.regen_ timing
 #     name = voice: THISIS {call} | cw: {call} | joins parts into one message
 #
 # A ready-made tone catalog is always available by name -- see tones.conf, which
@@ -76,7 +80,7 @@ default_cw    = cw: {call}/R
 # value applies the next time that timer starts.
 #
 # Any setting can change, except the ones that only take effect at startup: the top
-# of the file, [log], [mmdvm], [link], [stats], [state], dtmf.enabled,
+# of the file, [log], [mmdvm], [link], [stats], [state], [crx], dtmf.enabled,
 # dtmf.min_tone_ms, the dtmf cover tone and regen_ settings,
 # audio.ste_delay_ms, audio.lead_trim_ms and events.startup_message. Write a setting by its name, or as section.name.
 #
@@ -98,6 +102,12 @@ default_cw    = cw: {call}/R
 #
 #net_reminder = wed 07:00-19:25 tail_messages=net_tonight tail_every=5
 #net_running  = wed 19:30-20:30 timeout=600 hang=1 ct_link_on_message=net_ct ct_link_off_message=net_ct
+#
+# A window can also open while a producer field has current words, alone or with days
+# and times. announce=message plays once as the window opens, keying the transmitter
+# if the repeater is idle. See MANUAL.md 7.9.
+#
+#alarm = {site.alarm} announce=site_alarm
 
 # ── Optional: everything below shows the defaults ─────────────────────────
 #
@@ -155,6 +165,11 @@ default_cw    = cw: {call}/R
 #[state]
 #file = /var/local/usrp-rc/state   # keeps repeater down across a restart; empty = not kept
 
+#[crx]
+# The control terminal, usrp-crx: DTMF entries and the live log for a logged-in
+# operator, members of group usrp-rc (MANUAL.md 9.9). Empty = off.
+#socket = /run/usrp-rc/crx.sock
+
 #[dtmf]
 # Over-the-air DTMF commands from the repeater receiver. Off by default.
 #enabled         = false
@@ -168,9 +183,9 @@ default_cw    = cw: {call}/R
 #cover_tone_off_ms = 900
 #local_cover_tone  = true  # false = silence on the repeater during the mute
 #link_cover_tone   = true  # false = silence on the link during the mute
-# Codes are 2 to 7 keys; the pad test prefix can be 1. The pad test and regen take
-# every key after their code, # and D included, to the unkey, so no other code can
-# start with theirs.
+# Codes are 2 to 7 keys; the pad test and read prefixes can be 1. The pad test and
+# regen take every key after their code, # and D included, to the unkey, and the read
+# prefix takes the two digits after it, so no other code can start with theirs.
 #pad_test_prefix = 5      # pad test: prefix, then keys to read back. Empty = off.
 #time_code       = 39     # speak the time. Empty = off, likewise the codes below.
 #stats_code      = 38     # speak usage over the last 24 hours (events.stats_message)
@@ -178,9 +193,23 @@ default_cw    = cw: {call}/R
 #link_on_code    = 72
 #link_off_code   = 73
 #link_status_code = 70   # says link on or link off, without a change
-#repeater_code   =        # + 0 = repeater down, + 1 = up. Empty = off: anyone could use it
+#control_op_prefix = 123  # control operator commands: prefix + fixed code (MANUAL.md 9.7),
+                          # e.g. 123 01 = repeater down. CHANGE IT: the default is published.
+                          # Empty = off. No other code can start with it.
 #regen_code      = 31     # + keys to send as fresh DTMF, here and over the link if it's on
-#regen_tone_ms   = 100    # regen settings take effect at startup only
+#read_prefix     = 4      # + two digits NN: plays the message named by read_NN
+#read_17         = weather   # read_00 to read_99: 417 plays the message 'weather'
+#regen_tone_ms   = 100    # regen settings take effect at startup only; tone and gap
+                          # are also the default timing of dtmf: message parts
 #regen_gap_ms    = 100
 #regen_lead_ms   = 200    # silence on the link before the first tone
 #regen_level     = 0.5
+
+#[external]
+# Producers: separate programs that write words for messages, for example weather.
+# usrp-rc reads their files when a message plays and never waits for them.
+#dir = /run/usrp-rc/ext   # <dir>/<producer>/<field> is read as {producer.field}
+# One line per producer: name = lifetime_seconds [fallback_message]. The fallback
+# plays in place of each variable with no current data; with none, it is silent.
+# See MANUAL.md Appendix C.
+#wx = 5400 wx_unavailable

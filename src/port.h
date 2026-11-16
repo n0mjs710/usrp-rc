@@ -46,6 +46,11 @@ void port_on_link_keyup(port_t *p, bool active, uint64_t now);
  * its own. Takes ownership of samples. */
 void port_queue_reply(port_t *p, int16_t *samples, size_t n, uint64_t now);
 
+/* Play an ID now, as a reply: '0' initial, '1' impolite (at impolite_morse_level),
+ * '2' anxious, '3' mandatory. A rotating list gives its next entry. The ID counts
+ * as sent once it starts, as an automatic one does. */
+void port_force_id(port_t *p, char type, uint64_t now);
+
 /* Echo test. Arming waits for the next local keyup, which port_take_echo() claims for
  * recording. If the tail ends first, echo_cancel_message plays. Going down clears it. */
 void port_arm_echo(port_t *p);
@@ -76,6 +81,13 @@ void port_set_repeater_down(port_t *p, bool down, int16_t *reply, size_t n, uint
 /* Down at startup, from the saved state: nothing is transmitted. Call before port_start. */
 void port_restore_repeater_down(port_t *p);
 bool port_repeater_down(const port_t *p);
+
+/* For the control terminal's status line. A receiver is active whether or not it is
+ * repeated. An ID is pending when one is necessary; `due` is when the ID timer
+ * expires (monotonic ms), 0 if it isn't running yet. */
+bool port_rx_local(const port_t *p);
+bool port_rx_link(const port_t *p);
+bool port_id_pending(const port_t *p, uint64_t *due);
 
 /* The local receiver is timed out: its audio goes nowhere, but DTMF commands
  * ending in D are still accepted. */

@@ -4,10 +4,14 @@
 #include "sbuf.h"
 #include "log.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 static const char *const F_NUMBERS[] = {
     "F_OH", "F_ONE", "F_TWO", "F_THREE", "F_FOUR", "F_FIVE", "F_SIX", "F_SEVEN", "F_EIGHT", "F_NINE",
@@ -131,6 +135,8 @@ int message_var_clips(voice_var_t var, const struct tm *when, const message_stat
     case VOICE_VAR_MINUTES_WEEK:
         n = number_clips(stats->minutes_week, out);
         break;
+    case VOICE_VAR_EXTERNAL:   /* read from its file when it plays: see ext_read() */
+    case VOICE_VAR_MESSAGE:    /* the message it names: see render_into() */
     case VOICE_VAR_NONE:
         break;
     }
@@ -170,10 +176,17 @@ int message_has_voice(const config_t *cfg, const char *name)
     return 0;
 }
 
+/* PLAY is any message on the air, CHECK the length check at load, which leaves
+ * producer variables out: their files are data, not configuration. */
+typedef enum { RENDER_PLAY, RENDER_CHECK } render_mode_t;
+
+static rendered_audio_t render(const config_t *cfg, vocab_cache_t *vocab, const char *name,
+                               double morse_level_override, render_mode_t mode);
+
 static int check_length(const config_t *cfg, vocab_cache_t *vocab, const config_message_t *m,
                         const char *where)
 {
-    rendered_audio_t r = message_render(cfg, vocab, m->name, -1.0);
+    rendered_audio_t r = render(cfg, vocab, m->name, -1.0, RENDER_CHECK);
     int bad = r.n > (size_t)MESSAGE_MAX_SECONDS * 8000;
     if (bad)
         LOGE("config: line %d: messages.%s: %zu s long%s%s, the limit is %d s\n",
@@ -201,7 +214,10 @@ int message_validate(const config_t *cfg, vocab_cache_t *vocab)
             } else if (e->type == ELEM_VOICE) {
                 for (int w = 0; w < e->n_voice_words; w++) {
                     size_t n;
-                    if (e->voice_words[w].var != VOICE_VAR_NONE) {
+                    if (e->voice_words[w].var == VOICE_VAR_EXTERNAL
+                        || e->voice_words[w].var == VOICE_VAR_MESSAGE) {
+                        continue;   /* a producer checks its own words; config checks references */
+                    } else if (e->voice_words[w].var != VOICE_VAR_NONE) {
                         errors += validate_var(m, e->voice_words[w].var, vocab);
                     } else if (!e->voice_words[w].is_gap && !vocab_get(vocab, e->voice_words[w].clip, &n)) {
                         LOGE("config: line %d: messages.%s: no voice clip named '%s'\n",
@@ -266,24 +282,201 @@ rendered_audio_t message_render_clips(const config_t *cfg, vocab_cache_t *vocab,
     return result;
 }
 
-rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
-                                const char *name, double morse_level_override)
+/* ── external producers ────────────────────────────────────────────────
+ * {producer.field} is the file <external.dir>/<producer>/<field>: clip names, numbers
+ * and _NNN gaps. Fresh means its mtime is within the producer's lifetime; a fresh empty
+ * file has nothing to report. A word that isn't a clip or a number drops the whole
+ * variable: skipping just that word could change what it means. A stale, missing or
+ * dropped variable plays the producer's fallback, if it has one, every time; usrp-rc
+ * sets no policy beyond that. */
+
+typedef enum { EXT_FRESH, EXT_STALE, EXT_MISSING, EXT_DROPPED } ext_state_t;
+
+#define EXT_MAX_BYTES 1024
+
+typedef struct {
+    ext_state_t state;
+    int         n;
+    struct {
+        int  gap_ms;                /* < -1 = a clip; -1 = the default gap; else ms */
+        char clip[CFG_NAME_STR];
+    } w[CFG_MAX_VOICE_WORDS];
+    char why[96];
+} ext_words_t;
+
+static void ext_path(const config_t *cfg, const char *var, char *buf, size_t bufsz)
 {
-    rendered_audio_t result = {0};
-    const config_message_t *m = config_find_message(cfg, name);
-    if (!m) {
-        LOGE("message: '%s' not found\n", name ? name : "(null)");
-        return result;
-    }
-    if (m->nelements == 0) {
-        LOGE("message: '%s' has no elements\n", name);
-        return result;
-    }
+    const char *dot = strchr(var, '.');
+    snprintf(buf, bufsz, "%s/%.*s/%s", cfg->external.dir, (int)(dot - var), var, dot + 1);
+}
 
-    double morse_level = (morse_level_override >= 0.0)
-                        ? morse_level_override : cfg->audio.morse_level;
+/* Each variable's last state, so a change is logged once, not every time it plays. */
+static struct {
+    char        var[CFG_NAME_STR];
+    ext_state_t state;
+    char        why[96];
+} s_ext_seen[64];
+static int s_ext_nseen;
 
-    sbuf_t buf = {0};
+static void ext_log(const char *var, const ext_words_t *x)
+{
+    int i = 0;
+    while (i < s_ext_nseen && strcmp(s_ext_seen[i].var, var) != 0)
+        i++;
+    if (i < s_ext_nseen && s_ext_seen[i].state == x->state
+        && (x->state != EXT_DROPPED || strcmp(s_ext_seen[i].why, x->why) == 0))
+        return;
+    if (i == s_ext_nseen && s_ext_nseen < (int)(sizeof(s_ext_seen) / sizeof(s_ext_seen[0])))
+        s_ext_nseen++;
+    if (i < s_ext_nseen) {
+        snprintf(s_ext_seen[i].var, sizeof(s_ext_seen[i].var), "%s", var);
+        s_ext_seen[i].state = x->state;
+        snprintf(s_ext_seen[i].why, sizeof(s_ext_seen[i].why), "%s", x->why);
+    }
+    switch (x->state) {
+    case EXT_FRESH:   LOGI("external: {%s} FRESH\n", var); break;
+    case EXT_STALE:   LOGW("external: {%s} STALE, %s\n", var, x->why); break;
+    case EXT_MISSING: LOGW("external: {%s} MISSING, %s\n", var, x->why); break;
+    case EXT_DROPPED: LOGW("external: {%s} DROPPED, %s\n", var, x->why); break;
+    }
+}
+
+/* A number in a producer file: an optional sign, digits, and optionally a point and
+ * more digits; "-3.5" is MINUS THREE POINT FIVE. The whole part goes up to 99,999.
+ * Returns the clips put in out, 0 if tok is a number too big or too long to say, or
+ * -1 if tok isn't a number. */
+static int ext_number(const char *tok, const char **out, int room)
+{
+    const char *p = tok + (tok[0] == '-' || tok[0] == '+');
+    size_t whole = strspn(p, "0123456789");
+    const char *frac = p + whole;
+    if (whole == 0 || (*frac && (frac[0] != '.' || !frac[1] || frac[1 + strspn(frac + 1, "0123456789")])))
+        return -1;
+    long v = 0;
+    for (size_t i = 0; i < whole; i++)
+        if ((v = v * 10 + (p[i] - '0')) > 99999)
+            return 0;
+    const char *num[MESSAGE_VAR_MAX_CLIPS];
+    int nn = number_clips(v, num);
+    if ((tok[0] == '-') + nn + (int)strlen(frac) > room)   /* frac is POINT and its digits */
+        return 0;
+    int k = 0;
+    if (tok[0] == '-')
+        out[k++] = "MINUS";
+    for (int i = 0; i < nn; i++)
+        out[k++] = num[i];
+    if (*frac) {
+        out[k++] = "POINT";
+        for (const char *d = frac + 1; *d; d++)
+            out[k++] = NUMBERS[*d - '0'];
+    }
+    return k;
+}
+
+static ext_state_t ext_read(const config_t *cfg, vocab_cache_t *vocab, const char *var,
+                            const config_producer_t *p, ext_words_t *x)
+{
+    char path[512];
+    ext_path(cfg, var, path, sizeof(path));
+    x->n = 0;
+    x->why[0] = '\0';
+
+    struct stat st;
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0 || fstat(fd, &st) != 0) {
+        x->state = EXT_MISSING;
+        snprintf(x->why, sizeof(x->why), "%s", strerror(errno));
+    } else if (time(NULL) - st.st_mtime >= p->lifetime_s) {
+        x->state = EXT_STALE;
+        snprintf(x->why, sizeof(x->why), "%ld s old, lifetime %d s", (long)(time(NULL) - st.st_mtime),
+                 p->lifetime_s);
+    } else {
+        char text[EXT_MAX_BYTES + 1];
+        ssize_t got = read(fd, text, sizeof(text));
+        x->state = EXT_FRESH;
+        if (got < 0) {
+            x->state = EXT_DROPPED;
+            snprintf(x->why, sizeof(x->why), "can't read: %s", strerror(errno));
+        } else if (got > EXT_MAX_BYTES) {
+            x->state = EXT_DROPPED;
+            snprintf(x->why, sizeof(x->why), "over %d bytes", EXT_MAX_BYTES);
+        } else {
+            text[got] = '\0';
+            char *save = NULL;
+            for (char *tok = strtok_r(text, " \t\r\n", &save); tok && x->state == EXT_FRESH;
+                 tok = strtok_r(NULL, " \t\r\n", &save)) {
+                size_t len;
+                const char *num[CFG_MAX_VOICE_WORDS];
+                int k;
+                if (x->n == CFG_MAX_VOICE_WORDS) {
+                    x->state = EXT_DROPPED;
+                    snprintf(x->why, sizeof(x->why), "more than %d words", CFG_MAX_VOICE_WORDS);
+                } else if (tok[0] == '_' && strspn(tok + 1, "0123456789") == strlen(tok + 1)
+                           && strlen(tok) <= 6) {
+                    x->w[x->n++].gap_ms = tok[1] ? atoi(tok + 1) : -1;
+                } else if ((k = ext_number(tok, num, CFG_MAX_VOICE_WORDS - x->n)) >= 0) {
+                    if (k == 0) {
+                        x->state = EXT_DROPPED;
+                        snprintf(x->why, sizeof(x->why), "can't say '%.40s': over 99,999, or too many words", tok);
+                    }
+                    for (int i = 0; i < k; i++) {
+                        x->w[x->n].gap_ms = -2;
+                        strcpy(x->w[x->n++].clip, num[i]);
+                    }
+                } else if (strlen(tok) >= CFG_NAME_STR || !vocab_get(vocab, tok, &len)) {
+                    x->state = EXT_DROPPED;
+                    snprintf(x->why, sizeof(x->why), "no clip '%.40s'", tok);
+                } else {
+                    x->w[x->n].gap_ms = -2;
+                    strcpy(x->w[x->n++].clip, tok);
+                }
+            }
+        }
+    }
+    if (fd >= 0)
+        close(fd);
+    ext_log(var, x);
+    return x->state;
+}
+
+bool message_field_current(const config_t *cfg, vocab_cache_t *vocab, const char *var)
+{
+    const config_producer_t *p = config_find_producer(cfg, var);
+    ext_words_t x;
+    return p && ext_read(cfg, vocab, var, p, &x) == EXT_FRESH && x.n > 0;
+}
+
+static void render_into(const config_t *cfg, vocab_cache_t *vocab, const config_message_t *m,
+                        double morse_level, render_mode_t mode, sbuf_t *buf);
+
+static void render_external(const config_t *cfg, vocab_cache_t *vocab, const char *var,
+                            double morse_level, sbuf_t *buf)
+{
+    const config_producer_t *p = config_find_producer(cfg, var);
+    if (!p)
+        return;
+    ext_words_t x;
+    if (ext_read(cfg, vocab, var, p, &x) == EXT_FRESH) {
+        for (int i = 0; i < x.n; i++) {
+            if (x.w[i].gap_ms >= -1) {
+                int ms = x.w[i].gap_ms >= 0 ? x.w[i].gap_ms : cfg->audio.voice_gap_ms;
+                sbuf_append_silence(buf, (size_t)((double)ms / 1000.0 * TONE_SAMPLE_RATE));
+            } else {
+                append_clip(cfg, vocab, x.w[i].clip, buf);
+            }
+        }
+        return;
+    }
+    /* config.c makes sure a fallback holds no variables of its own. */
+    const config_message_t *fm = p->fallback[0] ? config_find_message(cfg, p->fallback) : NULL;
+    if (fm)
+        render_into(cfg, vocab, fm, morse_level, RENDER_PLAY, buf);
+}
+
+static void render_into(const config_t *cfg, vocab_cache_t *vocab, const config_message_t *m,
+                        double morse_level, render_mode_t mode, sbuf_t *buf)
+{
+    const char *name = m->name;
 
     for (int i = 0; i < m->nelements; i++) {
         const config_elem_t *e = &m->elements[i];
@@ -299,7 +492,7 @@ rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
                                             (double)cfg->audio.morse_pitch,
                                             morse_level, &n);
             if (samples) {
-                sbuf_append(&buf, samples, n);
+                sbuf_append(buf, samples, n);
                 free(samples);
             }
             break;
@@ -313,7 +506,19 @@ rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
                 const config_voice_word_t *word = &e->voice_words[w];
                 if (word->is_gap) {
                     int ms = word->gap_ms >= 0 ? word->gap_ms : cfg->audio.voice_gap_ms;
-                    sbuf_append_silence(&buf, (size_t)((double)ms / 1000.0 * TONE_SAMPLE_RATE));
+                    sbuf_append_silence(buf, (size_t)((double)ms / 1000.0 * TONE_SAMPLE_RATE));
+                    continue;
+                }
+                if (word->var == VOICE_VAR_EXTERNAL) {
+                    if (mode != RENDER_CHECK)
+                        render_external(cfg, vocab, word->clip, morse_level, buf);
+                    continue;
+                }
+                if (word->var == VOICE_VAR_MESSAGE) {
+                    /* config.c allows one level, so this goes no deeper */
+                    const config_message_t *ref = config_find_message(cfg, word->clip);
+                    if (ref)
+                        render_into(cfg, vocab, ref, morse_level, mode, buf);
                     continue;
                 }
                 if (word->var != VOICE_VAR_NONE) {
@@ -326,10 +531,10 @@ rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
                     const char *clips[MESSAGE_VAR_MAX_CLIPS];
                     int n = message_var_clips(word->var, &when, &stats, clips);
                     for (int c = 0; c < n; c++)
-                        append_clip(cfg, vocab, clips[c], &buf);
+                        append_clip(cfg, vocab, clips[c], buf);
                     continue;
                 }
-                append_clip(cfg, vocab, word->clip, &buf);
+                append_clip(cfg, vocab, word->clip, buf);
             }
             break;
         }
@@ -338,17 +543,56 @@ rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
             double amp = e->amp >= 0.0 ? e->amp : cfg->audio.tone_level;
             int16_t *samples = tone_render(e->freq1, e->freq2, e->ms, amp, &n);
             if (samples) {
-                sbuf_append(&buf, samples, n);
+                sbuf_append(buf, samples, n);
+                free(samples);
+            }
+            break;
+        }
+        case ELEM_DTMF: {
+            /* The regen generator. Each key is followed by its off time, the last one too,
+             * so groups in a row keep their spacing. */
+            size_t n;
+            int on  = e->ms >= 0 ? e->ms : cfg->dtmf.regen_tone_ms;
+            int off = e->off_ms >= 0 ? e->off_ms : cfg->dtmf.regen_gap_ms;
+            double amp = e->amp >= 0.0 ? e->amp : cfg->audio.tone_level;
+            int16_t *samples = tone_render_dtmf(e->cw_text, 0, on, off, off, amp, &n);
+            if (samples) {
+                sbuf_append(buf, samples, n);
                 free(samples);
             }
             break;
         }
         }
     }
+}
 
+static rendered_audio_t render(const config_t *cfg, vocab_cache_t *vocab, const char *name,
+                               double morse_level_override, render_mode_t mode)
+{
+    rendered_audio_t result = {0};
+    const config_message_t *m = config_find_message(cfg, name);
+    if (!m) {
+        LOGE("message: '%s' not found\n", name ? name : "(null)");
+        return result;
+    }
+    if (m->nelements == 0) {
+        LOGE("message: '%s' has no elements\n", name);
+        return result;
+    }
+
+    double morse_level = (morse_level_override >= 0.0)
+                        ? morse_level_override : cfg->audio.morse_level;
+    sbuf_t buf = {0};
+    render_into(cfg, vocab, m, morse_level, mode, &buf);
     sbuf_scale(&buf, cfg->audio.master_gain);
 
     result.samples = buf.data;
     result.n       = buf.len;
     return result;
+}
+
+rendered_audio_t message_render(const config_t *cfg, vocab_cache_t *vocab,
+                                const char *name, double morse_level_override)
+{
+    return render(cfg, vocab, name, morse_level_override, RENDER_PLAY);
 }

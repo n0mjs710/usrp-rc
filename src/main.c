@@ -9,6 +9,7 @@
 #include "ste.h"
 #include "port.h"
 #include "command.h"
+#include "crx.h"
 #include "schedule.h"
 #include "stats.h"
 #include "tone.h"
@@ -65,6 +66,7 @@ typedef struct {
     port_t         *port;
     ste_t          *ste;
     command_session_t *cmd;   /* NULL = dtmf.enabled is false */
+    crx_t          *crx;      /* the control terminal; NULL = none */
     jitter_buffer_t *jb;
     opus_codec_t   *opus;   /* NULL in PCM mode */
 
@@ -77,6 +79,7 @@ typedef struct {
 
     config_t        base;     /* as loaded; cfg is this with any open schedule window applied */
     bool     schedule_active[CFG_MAX_SCHEDULE];
+    bool     started;           /* the port has started: a window can announce */
     uint64_t schedule_deadline;
 
     bool prev_mmdvm_keyup;
@@ -382,16 +385,21 @@ static void link_rx_end(app_t *a, uint64_t now, const char *why)
     port_on_link_keyup(a->port, false, now);
 }
 
+/* Nothing more to or from the link: the link turned off, or the repeater down. */
+static void link_cut(app_t *a)
+{
+    regen_stop(a, "cut short");
+    link_rx_end(a, monotonic_ms(), NULL);
+}
+
 static void set_link(app_t *a, bool up)
 {
     if (a->link_up != up)
         LOGI("link: turned %s by command\n", up ? "on" : "off");
     a->link_up = up;
     port_set_link_up(a->port, up);
-    if (!up) {
-        regen_stop(a, "cut short");
-        link_rx_end(a, monotonic_ms(), NULL);
-    }
+    if (!up)
+        link_cut(a);
     update_link_tx(a);
 }
 
@@ -454,6 +462,10 @@ static void run_command(app_t *a, const command_t *c)
     case COMMAND_TIME:
         reply_with_message(a, a->cfg.events.time_message);
         break;
+    case COMMAND_READ:
+        /* command.c only accepts an index that names a message. */
+        reply_with_message(a, a->cfg.dtmf.read_messages[atoi(c->digits) % CFG_READ_SLOTS]);
+        break;
     case COMMAND_STATS:
         reply_with_message(a, a->cfg.events.stats_message);
         break;
@@ -495,17 +507,19 @@ static void run_command(app_t *a, const command_t *c)
         port_queue_reply(a->port, t, n, monotonic_ms());
         break;
     }
-    case COMMAND_REPEATER: {
-        bool down = c->digits[0] == '0';
+    case COMMAND_FORCE_ID:
+        port_force_id(a->port, c->digits[0], monotonic_ms());
+        break;
+    case COMMAND_REPEATER_UP:
+    case COMMAND_REPEATER_DOWN: {
+        bool down = c->type == COMMAND_REPEATER_DOWN;
         const char *name = down ? a->cfg.events.repeater_down_message : a->cfg.events.repeater_up_message;
         rendered_audio_t r = {0};
         if (name[0])
             r = message_render(&a->cfg, a->vocab, name, -1.0);
         port_set_repeater_down(a->port, down, r.samples, r.n, monotonic_ms());
-        if (down) {
-            regen_stop(a, "cut short");
-            link_rx_end(a, monotonic_ms(), NULL);
-        }
+        if (down)
+            link_cut(a);
         update_link_tx(a);
         save_repeater_state(a, down);
         break;
@@ -514,25 +528,58 @@ static void run_command(app_t *a, const command_t *c)
 }
 
 /* The one rule for when a command may run. Nothing does during an echo test recording.
- * Timed out or down, only repeater up/down does: the control operator's way back. */
-static bool command_allowed(const app_t *a, const command_t *c)
+ * Timed out or down, only control op commands do, as in ACC: down stops the repeating,
+ * not the controller. */
+static bool command_allowed(const app_t *a, const command_t *c, const char *who)
 {
     const char *why = NULL;
     if (a->echo_recording)
         why = "echo test recording";
-    else if (c->type != COMMAND_REPEATER && port_repeater_down(a->port))
+    else if (!c->control_op && port_repeater_down(a->port))
         why = "repeater down";
-    else if (c->type != COMMAND_REPEATER && port_local_timed_out(a->port))
+    else if (!c->control_op && port_local_timed_out(a->port))
         why = "timed out";
     if (why)
-        LOGI("dtmf: command dropped, %s\n", why);
+        LOGI("%s: command dropped, %s\n", who, why);
     return !why;
 }
 
 static void run_or_drop_command(app_t *a, const command_t *c)
 {
-    if (command_allowed(a, c))
+    if (command_allowed(a, c, "dtmf"))
         run_command(a, c);
+}
+
+/* An entry at the control terminal: the same rule, the same commands. */
+static bool crx_run(void *arg, const command_t *c, const char *who)
+{
+    app_t *a = arg;
+    if (!command_allowed(a, c, who))
+        return false;
+    run_command(a, c);
+    return true;
+}
+
+/* For the terminal's status line: see crx.h. */
+static void crx_update_status(app_t *a)
+{
+    uint64_t due;
+    char id[24];
+    if (!port_id_pending(a->port, &due))
+        snprintf(id, sizeof(id), "-");
+    else
+        snprintf(id, sizeof(id), "%llu", (unsigned long long)due);   /* 0 = not timed yet */
+    bool local = port_rx_local(a->port), link = port_rx_link(a->port);
+
+    char st[256];
+    snprintf(st, sizeof(st), "call=%s rep=%s link=%s tx=%s rx=%s id=%s",
+             a->cfg.callsign[0] ? a->cfg.callsign : "-",
+             port_repeater_down(a->port) ? "DOWN" : port_local_timed_out(a->port) ? "TIMEOUT" : "UP",
+             !a->cfg.link.enabled ? "none" : a->link_up ? "ON" : "OFF",
+             port_ptt(a->port) ? "ON" : "OFF",
+             local && link ? "both" : local ? "local" : link ? "link" : "none",
+             id);
+    crx_status(a->crx, st);
 }
 
 static void mmdvm_unkey_edge(app_t *a, uint64_t now)
@@ -548,7 +595,7 @@ static void mmdvm_unkey_edge(app_t *a, uint64_t now)
     if (a->cmd && port_local_timed_out(a->port))
         command_session_end_of_tx_discard(a->cmd, "timed out, a command must end with D");
     else if (a->cmd)
-        have = command_session_end_of_tx(a->cmd, &c) && command_allowed(a, &c);
+        have = command_session_end_of_tx(a->cmd, &c) && command_allowed(a, &c, "dtmf");
 
     int16_t *echo = NULL;
     size_t echo_len = a->echo_len;
@@ -795,11 +842,19 @@ static void schedule_update(app_t *a, uint64_t now)
     struct tm when;
     localtime_r(&t, &when);
 
-    bool active[CFG_MAX_SCHEDULE];
-    schedule_evaluate(&a->base, &when, &a->cfg, active);
+    bool field_on[CFG_MAX_SCHEDULE] = {0}, active[CFG_MAX_SCHEDULE];
+    for (int i = 0; i < a->base.nschedule; i++)
+        if (a->base.schedule[i].field[0])
+            field_on[i] = message_field_current(&a->base, a->vocab, a->base.schedule[i].field);
+    schedule_evaluate(&a->base, &when, field_on, &a->cfg, active);
     for (int i = 0; i < a->base.nschedule; i++) {
+        const char *announce = a->base.schedule[i].announce;
         if (active[i] != a->schedule_active[i])
-            LOGI("schedule: '%s' %s\n", a->base.schedule[i].name, active[i] ? "started" : "ended");
+            LOGI("schedule: '%s' %s%s%s\n", a->base.schedule[i].name, active[i] ? "started" : "ended",
+                 active[i] && announce[0] ? ", ANNOUNCE " : "", active[i] ? announce : "");
+        /* Before the port starts, main() announces once it has. */
+        if (active[i] && !a->schedule_active[i] && a->started)
+            reply_with_message(a, announce);
         a->schedule_active[i] = active[i];
     }
     a->schedule_deadline = now + (uint64_t)(60 - when.tm_sec) * 1000;
@@ -1029,11 +1084,20 @@ int main(int argc, char *argv[])
         epoll_ctl(a->epfd, EPOLL_CTL_ADD, a->link_sock, &ev);
     }
 
+    if (crx_create(&a->crx, &a->cfg, a->epfd, crx_run, a) != 0) {
+        LOGE("usrp-rc: failed to init the control terminal\n");
+        return 1;
+    }
+
     /* Ahead of the startup message, so it already sees any open window. */
     if (a->base.nschedule > 0)
         schedule_update(a, monotonic_ms());
 
     port_start(a->port, monotonic_ms());
+    a->started = true;
+    for (int i = 0; i < a->base.nschedule; i++)
+        if (a->schedule_active[i])
+            reply_with_message(a, a->base.schedule[i].announce);
 
     printf("usrp-rc %s: ready\n", USRP_RC_VERSION);
 
@@ -1057,11 +1121,16 @@ int main(int argc, char *argv[])
                 handle_mmdvm(a);
             else if (events[i].data.fd == a->link_sock)
                 handle_link(a);
+            else if (a->crx)
+                crx_handle(a->crx, events[i].data.fd);
         }
         check_all_timers(a, monotonic_ms());
+        if (a->crx && crx_connected(a->crx))
+            crx_update_status(a);
     }
 
     printf("usrp-rc: stopping\n");
+    crx_destroy(a->crx);
     regen_stop(a, "cut short");
     a->link_up = false;   /* don't leave the peer keyed */
     update_link_tx(a);
