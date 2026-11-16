@@ -9,8 +9,8 @@
  * happens to the audio while they're being entered.
  *
  * Commands follow the ACC three-tier structure: user commands, control operator
- * commands behind a prefix, and programming commands behind an unlock. Only the
- * user tier has commands so far (see command.c).
+ * commands behind a prefix, and programming commands behind an unlock. The
+ * programming tier has no commands (see command.c).
  *
  * Everything is clocked by the audio frames passed in, one per 20 ms of
  * received audio, so nothing here needs a timer of its own. */
@@ -19,6 +19,7 @@
 
 typedef struct {
     command_type_t type;
+    bool           control_op;   /* entered behind dtmf.control_op_prefix */
     char           digits[COMMAND_MAX_DIGITS + 1];
 } command_t;
 

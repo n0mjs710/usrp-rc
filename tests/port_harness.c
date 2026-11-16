@@ -1522,6 +1522,45 @@ static bool scenario_timeout_over_impolite_id(config_t *base, vocab_cache_t *voc
     return ok;
 }
 
+static bool scenario_forced_id(config_t *base, vocab_cache_t *vocab)
+{
+    printf("\n[25] a forced ID takes the next in rotation and counts as the station's ID\n");
+    bool ok = true;
+    config_t cfg = *base;
+    strcpy(cfg.events.initial_ids[1], "id_voice");
+    cfg.events.n_initial_ids = 2;
+    port_t *p;
+    char *log;
+
+    RUN_CAPTURED(&cfg, {
+        prime(p);                                    /* initial ID 1/2 */
+        key_local(p, true); wait_ms(p, 150);         /* this keyup owes an ID */
+        port_force_id(p, '0', g_now);
+        key_local(p, false);
+        wait_until_idle(p, 8000);
+        wait_ms(p, 6000);                            /* past id_interval */
+    });
+    CHECK(strstr(log, "id: initial  'id_voice'  (2/2)") != NULL, "force 0 plays the next initial ID");
+    CHECK(strstr(log, "id: FORCED  'id_voice'") != NULL, "... as a forced ID");
+    CHECK(count_occurrences(log, "id: mandatory") == 0, "it paid the ID owed: the timer has nothing to play");
+    CHECK(count_occurrences(log, "cor: kerchunk") == 0, "not treated as a kerchunk");
+    free(log);
+
+    cap_start();
+    port_set_repeater_down(p, true, NULL, 0, g_now);
+    wait_until_idle(p, 8000);
+    port_force_id(p, '3', g_now);
+    CHECK(port_ptt(p), "down, a forced ID still keys up: down stops repeating, not the controller");
+    wait_until_idle(p, 8000);
+    log = cap_stop();
+    CHECK(strstr(log, "id: FORCED  'id_cw'") != NULL, "force 3 plays the mandatory ID");
+    free(log);
+    port_destroy(p);
+
+    printf(ok ? "[25] PASS\n" : "[25] FAIL\n");
+    return ok;
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -1565,6 +1604,7 @@ int main(void)
         scenario_echo,
         scenario_kerchunk_over_id,
         scenario_timeout_over_impolite_id,
+        scenario_forced_id,
     };
     int n = (int)(sizeof(scenarios) / sizeof(scenarios[0]));
 

@@ -99,6 +99,7 @@ struct port {
     /* command reply waiting for the tail; malloc'd, NULL = none */
     int16_t     *reply;
     size_t       reply_len;
+    id_kind_t    reply_id;   /* a forced ID: it counts as sent once it starts */
 
     /* The echo test is waiting for a local keyup to record, until the tail ends. */
     bool         echo_armed;
@@ -269,6 +270,7 @@ static void reply_discard(port_t *p)
     free(p->reply);
     p->reply     = NULL;
     p->reply_len = 0;
+    p->reply_id  = ID_NONE;
 }
 
 /* ct_delay and the hang are silences of their own: they serve as the gap. */
@@ -292,12 +294,31 @@ static void schedule_id(port_t *p, uint64_t now)
 
 /* An ID counts as sent once it starts: nothing is owed, and the timer restarts. It
  * stays an ID in the buffer until it drains, should anyone key over it. */
-static void queue_id(port_t *p, const char *name, uint64_t now)
+static void id_sent(port_t *p, id_kind_t kind, uint64_t now)
 {
     p->id_owed = false;
     schedule_id(p, now);
-    p->ctrl.id = message_has_voice(p->cfg, name) ? ID_VOICE : ID_CW;
+    p->ctrl.id = kind;
+}
+
+static id_kind_t id_kind(const port_t *p, const char *name)
+{
+    return message_has_voice(p->cfg, name) ? ID_VOICE : ID_CW;
+}
+
+static void queue_id(port_t *p, const char *name, uint64_t now)
+{
+    id_sent(p, id_kind(p, name), now);
     queue_message(p, name, -1.0);
+}
+
+/* The waiting reply starts now. */
+static void reply_play(port_t *p, uint64_t now)
+{
+    ctrl_buf_queue(p, p->reply, p->reply_len);
+    if (p->reply_id != ID_NONE)
+        id_sent(p, p->reply_id, now);
+    reply_discard(p);
 }
 
 /* ── transitions ────────────────────────────────────────────────────────── */
@@ -544,8 +565,7 @@ static void on_ct_delay(port_t *p, uint64_t now)
     }
 
     if (p->reply) {
-        ctrl_buf_queue(p, p->reply, p->reply_len);
-        reply_discard(p);
+        reply_play(p, now);
         p->ctrl.on_drain = message_then_ct;
         return;
     }
@@ -821,24 +841,46 @@ bool port_take_echo(port_t *p)
     return armed;
 }
 
-void port_queue_reply(port_t *p, int16_t *samples, size_t n, uint64_t now)
+static void queue_reply(port_t *p, int16_t *samples, size_t n, id_kind_t id, uint64_t now)
 {
     reply_discard(p);
     if (!samples || n == 0) {
         free(samples);
         return;
     }
-    if (p->state != PORT_IDLE) {
-        p->reply     = samples;
-        p->reply_len = n;
+    p->reply     = samples;
+    p->reply_len = n;
+    p->reply_id  = id;
+    if (p->state != PORT_IDLE)
         return;
-    }
     /* No tail to wait for: it is a transmission of its own. */
     if (p->id_deadline == 0)
         schedule_id(p, now);
-    ctrl_buf_queue(p, samples, n);
-    free(samples);
+    reply_play(p, now);
     update_ptt(p);
+}
+
+void port_queue_reply(port_t *p, int16_t *samples, size_t n, uint64_t now)
+{
+    queue_reply(p, samples, n, ID_NONE, now);
+}
+
+void port_force_id(port_t *p, char type, uint64_t now)
+{
+    const config_events_t *ev = p->ev;
+    const char *name = NULL;
+    double level = -1.0;
+    switch (type) {
+    case '0': name = initial_id_next(p); break;
+    case '1': name = ev->impolite_id; level = p->cfg->audio.impolite_morse_level; break;
+    case '2': name = ev->anxious_id; break;
+    case '3': name = mandatory_id_next(p); break;
+    }
+    if (!name || !name[0])
+        return;
+    LOGI("id: FORCED  '%s'\n", name);
+    rendered_audio_t r = message_render(p->cfg, p->vocab, name, level);
+    queue_reply(p, r.samples, r.n, id_kind(p, name), now);
 }
 
 /* ── repeater down / up ────────────────────────────────────────────────── */

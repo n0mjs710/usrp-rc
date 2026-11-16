@@ -153,9 +153,9 @@ If the repeater has no link, `70`, `72` and `73` reply "No link service".
 
 An entry that does not agree with a command has no effect. No error sound plays.
 
-When the repeater has timed out a local transmission, or is down, it accepts only the
-repeater command. Timed out, the command must end with `D`: an unkey does not enter it.
-See [6.3](#63-time-out) and [9.7](#97-repeater-down-and-up).
+When the repeater has timed out a local transmission, or is down, it accepts only control
+operator commands. Timed out, the command must end with `D`: an unkey does not enter it.
+See [6.3](#63-time-out) and [9.7](#97-control-operator-commands).
 
 ### 2.5 Pad test
 
@@ -214,7 +214,7 @@ Use this command to hear how your signal sounds through the repeater.
 | Courtesy tone | The transmission has ended. The next station can transmit. Different tones can show local traffic, link traffic and link off. |
 | Cover tone: a beep, one time each second | A station enters a DTMF command. |
 | Short falling tones | The time-out timer stopped a long transmission. Unkey to reset the timer. |
-| "Repeater down" or "Repeater up" with no repeated audio | The repeater is timed out or down, and a station entered the repeater command. |
+| "Repeater down" or "Repeater up" with no repeated audio | The repeater is timed out or down, and a control operator entered repeater down or up. |
 
 ### 2.9 Read a message
 
@@ -614,6 +614,9 @@ nothing.
 
 A setting with a list rotates through the list. Each ID is the next name in the list.
 
+A control operator can also send an ID of each type by DTMF. See
+[9.7](#97-control-operator-commands).
+
 #### ID rules
 
 1. A transmission makes an ID necessary.
@@ -723,7 +726,7 @@ During a local time-out, the repeater continues to decode DTMF from the receiver
 
 - A command must end with `D`. The carrier of a timed-out station does not drop, thus
   an unkey cannot enter the command. An entry without `D` is discarded at the unkey.
-- All commands are available.
+- Only control operator commands are available. See [9.7](#97-control-operator-commands).
 - The repeater keys the transmitter for the reply. It does not repeat the receiver audio.
 
 > **CAUTION:** With `link_timeout = 0`, a link that stays keyed holds the transmitter on
@@ -1019,7 +1022,8 @@ nws   = daily 07:00-22:00 {nws.alert} announce=wx_alert tail_messages+=wx_alert
 - To hear the link state without a change, use the link-status command, `70`.
 - To show the link state with each courtesy tone, set different messages in
   `ct_link_on_message` and `ct_link_off_message`. See [6.2](#62-courtesy-tones).
-- At this time, each station can use `72` and `73`. A control operator level is planned.
+- Each station can use `72` and `73`. A control operator command to lock out the link
+  commands is planned.
 - At this time, `codec = opus` operates only with other tools from the same author.
 
 ### 8.2 Traffic priority
@@ -1071,6 +1075,8 @@ stats_code   =
   no other code can start with one of them. With the defaults, no code can start with
   `5` or `31`. `--check` shows each code that does.
 - The read prefix takes the two digits after it. No other code can start with it.
+- No code can start with the control operator prefix. See
+  [9.7](#97-control-operator-commands).
 
 > **Note:** DTMF gives no security. A station that monitors the repeater can hear a code
 > and use it. Select the enabled commands with this risk in mind.
@@ -1078,9 +1084,13 @@ stats_code   =
 ### 9.3 Command levels
 
 The commands follow the ACC model: user commands, control operator commands and
-programming commands. At this time, only user commands are available. The configuration
-file replaces DTMF programming. The programming level stays in the design for possible
-future use.
+programming commands.
+
+| Level | Codes | Section |
+| --- | --- | --- |
+| User | Each code is a setting. Each station can use them. | [2.1](#21-dtmf-commands) |
+| Control operator | Fixed codes behind a prefix that the operator sets | [9.7](#97-control-operator-commands) |
+| Programming | None. The configuration file replaces DTMF programming. The level stays in the design for possible future use. | |
 
 ### 9.4 Muting
 
@@ -1124,42 +1134,73 @@ dtmf: '38': ACCEPTED command = usage
 | `ERROR` | The entry is complete, but no command can execute. | `'99': ERROR no command matched` |
 | | A link command on a repeater with no link. The reply is "No link service". | `'70': ERROR command = link status, no link service` |
 | | A read number with no message. No reply plays. | `'417': ERROR no message 17` |
+| | A forced ID of a type that is not set. No ID plays. | `'123330': ERROR no initial ID 0` |
 | `ABANDONED` | The entry stopped before it was complete. | `'12#': ABANDONED user terminated` |
 
 An `ABANDONED` line also names the timer that expired, if a timer expired. At
 `log.level = debug`, the log also shows each digit and each tone that was too short.
 
-### 9.7 Repeater down and up
+### 9.7 Control operator commands
 
-The repeater command takes the repeater out of service and puts it back. Enter the code,
-then `0` or `1`:
+Control operator commands are not for general use. Each command is the control operator
+prefix, then a fixed 2-digit code, then the parameters, if the command has them. The
+codes are fixed and published in this manual. Only the prefix protects them.
 
-| Entry | Result | Reply |
+The prefix is `control_op_prefix`. The default is `123`, the factory prefix of ACC
+controllers. Thus, the commands operate on a new installation without more setup.
+
+> **CAUTION:** Each station that reads this manual knows the default prefix. Change
+> `control_op_prefix` before the repeater goes on the air. An empty prefix disables all
+> control operator commands.
+
+| Entry (default prefix) | Command | Reply |
 | --- | --- | --- |
-| Code + `0` | Repeater down | "Repeater down", then an ID |
-| Code + `1` | Repeater up | "Repeater up" |
+| `123` `00` | Repeater up | "Repeater up" |
+| `123` `01` | Repeater down | "Repeater down", then an ID |
+| `123` `33` `0` | Send the initial ID | The ID |
+| `123` `33` `1` | Send the impolite ID | The ID |
+| `123` `33` `2` | Send the anxious ID | The ID |
+| `123` `33` `3` | Send the mandatory ID | The ID |
 
-`repeater_code` is empty by default. Thus, the command is off until the operator sets a
-code.
+The codes `00`, `01` and `33` are ACC codes. Where ACC has a code for the same function,
+`usrp-rc` uses that code.
 
-> **CAUTION:** At this time, each station can use each command. A station that hears the
-> code can take the repeater out of service. Set a code only if this risk is acceptable.
-> A control operator level is planned.
+- After the prefix, a code can use the same digits as a user code. No user code can start
+  with the prefix. `--check` shows each user code that does.
+- Control operator commands operate when the repeater is down, and during a local
+  time-out. Down stops the repeated audio, not the controller: the replies and the IDs
+  key the transmitter.
+
+#### Send an ID
+
+The ID plays after the unkey, as a command reply. It is a usual ID:
+
+- An ID from a list (`initial_ids`, `mandatory_ids`) is the next ID in the list. The
+  rotation moves to the ID after it.
+- The ID satisfies the ID requirement and starts the ID timer again. See
+  [6.1](#61-identification).
+- The impolite ID plays at `audio.impolite_morse_level`. It plays in the tail, not
+  mixed with a conversation.
+- If `initial_ids` or `anxious_id` is empty, that command does nothing. If
+  `mandatory_ids` is empty, the impolite ID plays in its place.
+- The ID does not go to the link.
+
+#### Repeater down and up
 
 When the repeater is down:
 
 - No audio goes through the repeater: no local repeat, no local audio to the link, and
   no link audio to the transmitter.
-- The repeater continues to decode DTMF from the receiver, but accepts only the repeater
-  command.
-- No courtesy tones, tail messages, IDs or time-outs occur.
+- The repeater continues to decode DTMF from the receiver, but accepts only control
+  operator commands.
+- No courtesy tones, tail messages, automatic IDs or time-outs occur.
 - The down state stays after a restart. It is kept in `[state] file`. The startup message
   does not play.
 
 The reply "Repeater down" is a transmission. Thus, the repeater sends a mandatory ID
 immediately after it. No other ID is then necessary while the repeater is down.
 
-If a station enters code + `1` with `D` and stays keyed, the repeater repeats that
+If a station enters repeater up with `D` and stays keyed, the repeater repeats that
 station immediately. The reply plays in its tail.
 
 ### 9.8 DTMF regen
@@ -1321,7 +1362,7 @@ Levels above 1.0 are permitted, but they can cause clipping.
 | `link_on_code` | `72` | 2-7 keys | Link-on command. Empty is off. |
 | `link_off_code` | `73` | 2-7 keys | Link-off command. Empty is off. |
 | `link_status_code` | `70` | 2-7 keys | Link-status command. Empty is off. |
-| `repeater_code` | Empty | 2-7 keys | Repeater command: code + `0` is down, code + `1` is up. Empty is off. See [9.7](#97-repeater-down-and-up). |
+| `control_op_prefix` | `123` | 1-7 keys | Control operator prefix. Empty disables all control operator commands. See [9.7](#97-control-operator-commands). |
 | `read_prefix` | `4` | 1-7 keys | Read prefix: prefix + 2 digits. Empty is off. See [2.9](#29-read-a-message). |
 | `read_00` to `read_99` | Empty | Message name | The message for read number 00 to 99 |
 | `regen_code` | `31` | 2-7 keys | DTMF regen: code + keys to send. Empty is off. See [9.8](#98-dtmf-regen). |

@@ -24,7 +24,17 @@ These changes apply when you update from 1.0.
    git show v1.0:vocab_8k/ENGINE.wav | sudo tee /usr/local/share/usrp-rc/user_8k/ENGINE.wav >/dev/null
    ```
 
-2. The new read command has the prefix `4` by default. No other `[dtmf]` code can
+2. The repeater command is now a control operator command, and `repeater_code` is
+   removed. `--check` shows `repeater_code` as an unknown setting. Remove it from
+   `[dtmf]`. Repeater down is now the control operator prefix + `01`, and repeater up
+   is the prefix + `00`. These are ACC's codes.
+
+3. The new control operator prefix, `control_op_prefix`, is `123` by default. Each
+   station that reads the manual knows this prefix. Set a different prefix before you
+   start 1.1 on the air. No other `[dtmf]` code can start with the prefix. `--check`
+   shows the conflict.
+
+4. The new read command has the prefix `4` by default. No other `[dtmf]` code can
    start with `4`. If a code starts with `4`, change that code, or set `read_prefix` to
    a different prefix or to empty. `--check` shows the conflict.
 
@@ -33,6 +43,8 @@ These changes apply when you update from 1.0.
 | Function | Setting | MANUAL.md |
 | --- | --- | --- |
 | Read a message by DTMF: `4` + two digits | `[dtmf]` `read_prefix`, `read_00` to `read_99` | 2.9 |
+| Control operator commands behind a prefix | `[dtmf]` `control_op_prefix` | 9.7 |
+| Send an ID of each type by DTMF: prefix + `33` + type | `[dtmf]` `control_op_prefix` | 9.7 |
 | A message inside a message | `{msg:name}` in a `voice:` part | 5.6 |
 | Words from a producer, a separate program, for example a weather report | `[external]`, `{producer.field}` | 5.7, Appendix C |
 | DTMF keys in a message, for example to page a radio | `dtmf:` parts | 5.4 |
@@ -44,6 +56,8 @@ installation.
 
 ### Changes in operation
 
+- When the repeater is down or timed out, it accepts all control operator commands.
+  Before, it accepted only the repeater command.
 - The pad test says `STAR` and `POUND` for `*` and `#`. Before, it said `SIERRA` and
   `P`.
 - A tail message with nothing to say uses its turn in the rotation. Before, the next

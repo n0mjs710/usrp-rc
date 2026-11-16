@@ -505,8 +505,12 @@ static void run_command(app_t *a, const command_t *c)
         port_queue_reply(a->port, t, n, monotonic_ms());
         break;
     }
-    case COMMAND_REPEATER: {
-        bool down = c->digits[0] == '0';
+    case COMMAND_FORCE_ID:
+        port_force_id(a->port, c->digits[0], monotonic_ms());
+        break;
+    case COMMAND_REPEATER_UP:
+    case COMMAND_REPEATER_DOWN: {
+        bool down = c->type == COMMAND_REPEATER_DOWN;
         const char *name = down ? a->cfg.events.repeater_down_message : a->cfg.events.repeater_up_message;
         rendered_audio_t r = {0};
         if (name[0])
@@ -522,15 +526,16 @@ static void run_command(app_t *a, const command_t *c)
 }
 
 /* The one rule for when a command may run. Nothing does during an echo test recording.
- * Timed out or down, only repeater up/down does: the control operator's way back. */
+ * Timed out or down, only control op commands do, as in ACC: down stops the repeating,
+ * not the controller. */
 static bool command_allowed(const app_t *a, const command_t *c)
 {
     const char *why = NULL;
     if (a->echo_recording)
         why = "echo test recording";
-    else if (c->type != COMMAND_REPEATER && port_repeater_down(a->port))
+    else if (!c->control_op && port_repeater_down(a->port))
         why = "repeater down";
-    else if (c->type != COMMAND_REPEATER && port_local_timed_out(a->port))
+    else if (!c->control_op && port_local_timed_out(a->port))
         why = "timed out";
     if (why)
         LOGI("dtmf: command dropped, %s\n", why);

@@ -338,18 +338,54 @@ static void test_commands(void)
         check("an empty code turns its command off", !command_session_end_of_tx(r.s, &c));
         strcpy(s_cfg.dtmf.time_code, "39");
 
-        press_all(&r, "110");
-        check("no repeater code by default", !command_session_end_of_tx(r.s, &c));
-        strcpy(s_cfg.dtmf.repeater_code, "11");
-        press_all(&r, "110");
-        check("repeater code + 0 is down", command_session_end_of_tx(r.s, &c) && c.type == COMMAND_REPEATER && c.digits[0] == '0');
-        press_all(&r, "111");
-        check("repeater code + 1 is up", command_session_end_of_tx(r.s, &c) && c.type == COMMAND_REPEATER && c.digits[0] == '1');
-        press_all(&r, "112");
-        check("any other argument does nothing", !command_session_end_of_tx(r.s, &c));
-        press_all(&r, "11");
-        check("the code alone does nothing", !command_session_end_of_tx(r.s, &c));
-        strcpy(s_cfg.dtmf.repeater_code, "");
+        strcpy(s_cfg.dtmf.control_op_prefix, "123");
+        press_all(&r, "12300");
+        check("control op 00 is repeater up", command_session_end_of_tx(r.s, &c)
+              && c.type == COMMAND_REPEATER_UP && c.control_op);
+        press_all(&r, "12301");
+        check("control op 01 is repeater down", command_session_end_of_tx(r.s, &c)
+              && c.type == COMMAND_REPEATER_DOWN && c.control_op);
+        press_all(&r, "39");
+        check("a user command isn't control op", command_session_end_of_tx(r.s, &c) && !c.control_op);
+        press_all(&r, "123");
+        check("the prefix alone does nothing", !command_session_end_of_tx(r.s, &c));
+        press_all(&r, "1230");
+        check("half a control op code does nothing", !command_session_end_of_tx(r.s, &c));
+        strcpy(s_cfg.dtmf.control_op_prefix, "8642");
+        press_all(&r, "864201");
+        check("the prefix can be changed", command_session_end_of_tx(r.s, &c) && c.type == COMMAND_REPEATER_DOWN);
+        press_all(&r, "12301");
+        check("... and the old one stops working", !command_session_end_of_tx(r.s, &c));
+        strcpy(s_cfg.dtmf.control_op_prefix, "");
+        press_all(&r, "01");
+        check("an empty prefix turns the tier off", !command_session_end_of_tx(r.s, &c));
+        strcpy(s_cfg.dtmf.control_op_prefix, "123");
+
+        strcpy(s_cfg.events.impolite_id, "imp");
+        press_all(&r, "123331");
+        check("force ID 33 + 1 is the impolite ID", command_session_end_of_tx(r.s, &c)
+              && c.type == COMMAND_FORCE_ID && c.control_op && strcmp(c.digits, "1") == 0);
+        press_all(&r, "123333");
+        check("... + 3 mandatory, which impolite_id covers", command_session_end_of_tx(r.s, &c)
+              && c.type == COMMAND_FORCE_ID && strcmp(c.digits, "3") == 0);
+        press_all(&r, "123330");
+        check("no initial ID set: + 0 does nothing", !command_session_end_of_tx(r.s, &c));
+        press_all(&r, "123332");
+        check("no anxious ID set: + 2 does nothing", !command_session_end_of_tx(r.s, &c));
+        s_cfg.events.n_initial_ids = 1;
+        strcpy(s_cfg.events.anxious_id, "anx");
+        press_all(&r, "123330");
+        check("+ 0 is the initial ID", command_session_end_of_tx(r.s, &c) && c.digits[0] == '0');
+        press_all(&r, "123332");
+        check("+ 2 is the anxious ID", command_session_end_of_tx(r.s, &c) && c.digits[0] == '2');
+        s_cfg.events.n_initial_ids = 0;
+        strcpy(s_cfg.events.anxious_id, "");
+        press_all(&r, "123334");
+        check("+ 4 is no ID type", !command_session_end_of_tx(r.s, &c));
+        press_all(&r, "12333");
+        check("33 alone does nothing", !command_session_end_of_tx(r.s, &c));
+        press_all(&r, "1233311");
+        check("33 takes one key only", !command_session_end_of_tx(r.s, &c));
 
         press_all(&r, "31*1234");
         check("regen is 31 by default",

@@ -131,6 +131,8 @@ typedef struct {
 
 /* Enough for ACC's longest command prefix (7 digits). */
 #define CFG_DTMF_PREFIX_STR 8
+/* A whole control op code: the prefix + a fixed number of up to 3 keys. */
+#define CFG_DTMF_CODE_STR (CFG_DTMF_PREFIX_STR + 3)
 /* read_00 to read_99: the read prefix takes exactly two keys. */
 #define CFG_READ_SLOTS 100
 
@@ -153,7 +155,7 @@ typedef struct {
     char link_on_code[CFG_DTMF_PREFIX_STR];
     char link_off_code[CFG_DTMF_PREFIX_STR];
     char link_status_code[CFG_DTMF_PREFIX_STR];
-    char repeater_code[CFG_DTMF_PREFIX_STR];     /* + 0 = down, + 1 = up; empty by default */
+    char control_op_prefix[CFG_DTMF_PREFIX_STR]; /* + a fixed control op code; empty = tier off */
     char regen_code[CFG_DTMF_PREFIX_STR];        /* + keys to send */
     char read_prefix[CFG_DTMF_PREFIX_STR];       /* + two keys: play read_messages[NN] */
     char read_messages[CFG_READ_SLOTS][CFG_NAME_STR];   /* read_NN; empty = no message */
@@ -171,7 +173,9 @@ typedef enum {
     COMMAND_LINK_ON,
     COMMAND_LINK_OFF,
     COMMAND_LINK_STATUS,
-    COMMAND_REPEATER,   /* digits: "0" = down, "1" = up */
+    COMMAND_REPEATER_UP,
+    COMMAND_REPEATER_DOWN,
+    COMMAND_FORCE_ID,   /* digits: "0" initial, "1" impolite, "2" anxious, "3" mandatory */
     COMMAND_NO_LINK,    /* a link command on a repeater with no link */
     COMMAND_REGEN,      /* send `digits` as fresh DTMF, here and over the link */
     COMMAND_ECHO,       /* record the next local transmission and play it back */
@@ -180,23 +184,31 @@ typedef enum {
 
 typedef enum {
     CODE_WHOLE,     /* the code alone */
-    CODE_UP_DOWN,   /* the code + 0 or 1 */
     CODE_CAPTURE,   /* the code + every key after it, # and D included, to the unkey */
-    CODE_INDEX,     /* the code + exactly two keys 0-9 */
+    CODE_KEYS,      /* the code + exactly `nkeys` keys 0-9 */
 } code_kind_t;
 
 /* Every DTMF code, in matching order: whole codes win over the code + argument forms.
- * --check validates them and command.c matches against them, both from this list. */
+ * --check validates them and command.c matches against them, both from this list.
+ *
+ * A user code is its own setting. A control op code is fixed: the operator's
+ * control_op_prefix + `op_code`, published in the manual and never remapped. */
 typedef struct {
-    const char    *key;      /* in [dtmf] */
-    size_t         offset;   /* in config_dtmf_t */
+    const char    *key;      /* in [dtmf], for messages */
+    size_t         offset;   /* in config_dtmf_t: the code, or for control op the prefix */
+    const char    *op_code;  /* NULL = a user code */
     code_kind_t    kind;
+    int            nkeys;    /* CODE_KEYS only */
     command_type_t type;
     const char    *name;     /* for the log */
 } config_dtmf_code_t;
 
 extern const config_dtmf_code_t CONFIG_DTMF_CODES[];
 extern const size_t CONFIG_NDTMF_CODES;
+
+/* The whole code for CONFIG_DTMF_CODES[i]: the setting, or the prefix + op_code. An
+ * empty string means the command is off. `buf` holds a control op code. */
+const char *config_dtmf_code(const config_dtmf_t *d, size_t i, char buf[CFG_DTMF_CODE_STR]);
 
 typedef struct {
     char startup_message[CFG_NAME_STR];

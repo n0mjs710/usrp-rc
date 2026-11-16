@@ -188,7 +188,9 @@ default_cw    = cw: {call}/R
 #link_on_code    = 72
 #link_off_code   = 73
 #link_status_code = 70   # says link on or link off, without a change
-#repeater_code   =        # + 0 = repeater down, + 1 = up. Empty = off: anyone could use it
+#control_op_prefix = 123  # control operator commands: prefix + fixed code (MANUAL.md 9.7),
+                          # e.g. 123 01 = repeater down. CHANGE IT: the default is published.
+                          # Empty = off. No other code can start with it.
 #regen_code      = 31     # + keys to send as fresh DTMF, here and over the link if it's on
 #read_prefix     = 4      # + two digits NN: plays the message named by read_NN
 #read_17         = weather   # read_00 to read_99: 417 plays the message 'weather'

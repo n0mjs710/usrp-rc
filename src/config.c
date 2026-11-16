@@ -82,6 +82,8 @@ void config_defaults(config_t *cfg)
     strncpy(cfg->dtmf.link_off_code, "73", sizeof(cfg->dtmf.link_off_code) - 1);
     strncpy(cfg->dtmf.link_status_code, "70", sizeof(cfg->dtmf.link_status_code) - 1);
     strncpy(cfg->dtmf.read_prefix, "4", sizeof(cfg->dtmf.read_prefix) - 1);
+    /* ACC's factory prefix: known, so a new repeater works at once; the owner changes it. */
+    strncpy(cfg->dtmf.control_op_prefix, "123", sizeof(cfg->dtmf.control_op_prefix) - 1);
     strncpy(cfg->external.dir, "/run/usrp-rc/ext", sizeof(cfg->external.dir) - 1);
 
     strncpy(cfg->events.time_message, "time_readback", sizeof(cfg->events.time_message) - 1);
@@ -206,7 +208,7 @@ static const field_t FIELDS[] = {
     STR("dtmf",  "link_on_code",  dtmf.link_on_code),
     STR("dtmf",  "link_off_code", dtmf.link_off_code),
     STR("dtmf",  "link_status_code", dtmf.link_status_code),
-    STR("dtmf",  "repeater_code", dtmf.repeater_code),
+    STR("dtmf",  "control_op_prefix", dtmf.control_op_prefix),
     STR("dtmf",  "regen_code",    dtmf.regen_code),
     STR("dtmf",  "read_prefix",   dtmf.read_prefix),
     INT("dtmf",  "regen_tone_ms", dtmf.regen_tone_ms, 40, 1000),
@@ -1867,19 +1869,39 @@ static void check_schedule_lists(const config_t *cfg)
  * schedule window, whose settings are checked as they'd be while it's open. */
 static const char *s_where;
 
+#define USER(key, kind, n, type, name) {#key, offsetof(config_dtmf_t, key), NULL, kind, n, type, name}
+/* Control op numbers are ACC's where the function matches. */
+#define CTRL(code, kind, n, type, name) \
+    {"control_op_prefix + " code, offsetof(config_dtmf_t, control_op_prefix), code, kind, n, type, name}
 const config_dtmf_code_t CONFIG_DTMF_CODES[] = {
-    {"time_code",        offsetof(config_dtmf_t, time_code),        CODE_WHOLE,   COMMAND_TIME,        "time"},
-    {"stats_code",       offsetof(config_dtmf_t, stats_code),       CODE_WHOLE,   COMMAND_STATS,       "usage"},
-    {"echo_code",        offsetof(config_dtmf_t, echo_code),        CODE_WHOLE,   COMMAND_ECHO,        "echo test"},
-    {"link_on_code",     offsetof(config_dtmf_t, link_on_code),     CODE_WHOLE,   COMMAND_LINK_ON,     "link on"},
-    {"link_off_code",    offsetof(config_dtmf_t, link_off_code),    CODE_WHOLE,   COMMAND_LINK_OFF,    "link off"},
-    {"link_status_code", offsetof(config_dtmf_t, link_status_code), CODE_WHOLE,   COMMAND_LINK_STATUS, "link status"},
-    {"repeater_code",    offsetof(config_dtmf_t, repeater_code),    CODE_UP_DOWN, COMMAND_REPEATER,    "repeater"},
-    {"regen_code",       offsetof(config_dtmf_t, regen_code),       CODE_CAPTURE, COMMAND_REGEN,       "regen"},
-    {"pad_test_prefix",  offsetof(config_dtmf_t, pad_test_prefix),  CODE_CAPTURE, COMMAND_PAD_TEST,    "DTMF test +"},
-    {"read_prefix",      offsetof(config_dtmf_t, read_prefix),      CODE_INDEX,   COMMAND_READ,        "read"},
+    USER(time_code,        CODE_WHOLE,   0, COMMAND_TIME,          "time"),
+    USER(stats_code,       CODE_WHOLE,   0, COMMAND_STATS,         "usage"),
+    USER(echo_code,        CODE_WHOLE,   0, COMMAND_ECHO,          "echo test"),
+    USER(link_on_code,     CODE_WHOLE,   0, COMMAND_LINK_ON,       "link on"),
+    USER(link_off_code,    CODE_WHOLE,   0, COMMAND_LINK_OFF,      "link off"),
+    USER(link_status_code, CODE_WHOLE,   0, COMMAND_LINK_STATUS,   "link status"),
+    CTRL("00",             CODE_WHOLE,   0, COMMAND_REPEATER_UP,   "repeater up"),
+    CTRL("01",             CODE_WHOLE,   0, COMMAND_REPEATER_DOWN, "repeater down"),
+    USER(regen_code,       CODE_CAPTURE, 0, COMMAND_REGEN,         "regen"),
+    USER(pad_test_prefix,  CODE_CAPTURE, 0, COMMAND_PAD_TEST,      "DTMF test +"),
+    USER(read_prefix,      CODE_KEYS,    2, COMMAND_READ,          "read"),
+    CTRL("33",             CODE_KEYS,    1, COMMAND_FORCE_ID,      "force ID"),
 };
+#undef USER
+#undef CTRL
 const size_t CONFIG_NDTMF_CODES = sizeof(CONFIG_DTMF_CODES) / sizeof(CONFIG_DTMF_CODES[0]);
+
+const char *config_dtmf_code(const config_dtmf_t *d, size_t i, char buf[CFG_DTMF_CODE_STR])
+{
+    const config_dtmf_code_t *c = &CONFIG_DTMF_CODES[i];
+    const char *setting = (const char *)d + c->offset;
+    if (!c->op_code)
+        return setting;
+    if (!setting[0])
+        return "";
+    snprintf(buf, CFG_DTMF_CODE_STR, "%s%s", setting, c->op_code);
+    return buf;
+}
 
 #define WHERE_FMT "%s%s"
 #define WHERE_ARGS s_where ? s_where : "", s_where ? ": " : ""
@@ -1891,7 +1913,12 @@ static void check_consistency(const config_t *cfg)
 
     const config_dtmf_code_t *CODES = CONFIG_DTMF_CODES;
     const size_t NCODES = CONFIG_NDTMF_CODES;
-#define CODE(i) ((const char *)&cfg->dtmf + CODES[i].offset)
+    char codes[NCODES][CFG_DTMF_CODE_STR];
+    for (size_t i = 0; i < NCODES; i++) {
+        char buf[CFG_DTMF_CODE_STR];
+        snprintf(codes[i], sizeof(codes[i]), "%s", config_dtmf_code(&cfg->dtmf, i, buf));
+    }
+#define CODE(i) (codes[i])
     for (size_t i = 0; i < NCODES; i++) {
         const char *code = CODE(i);
         /* # and D are the cancel and enter keys, so a code could never be typed. */
@@ -1910,27 +1937,24 @@ static void check_consistency(const config_t *cfg)
         const char *own = CODE(i);
         if (!own[0])
             continue;
-        /* A capture code takes every key after it, and the read prefix the two after it,
+        /* A capture code takes every key after it, and a code + keys the keys after it,
          * so no other code can start with one. */
-        if (CODES[i].kind == CODE_CAPTURE || CODES[i].kind == CODE_INDEX) {
+        if (CODES[i].kind != CODE_WHOLE) {
             for (size_t j = 0; j < NCODES; j++)
                 if (j != i && strcmp(CODE(j), own) != 0 && strncmp(CODE(j), own, strlen(own)) == 0)
                     cfg_err(WHERE_FMT "dtmf.%s: '%s' starts with dtmf.%s '%s', which takes %s after it\n",
                             WHERE_ARGS, CODES[j].key, CODE(j), CODES[i].key, own,
-                            CODES[i].kind == CODE_CAPTURE ? "every key" : "the two keys");
-        }
-        /* An up/down command is its code plus 0 or 1, so those can't be other codes. */
-        if (CODES[i].kind == CODE_UP_DOWN) {
-            for (int arg = 0; arg < 2; arg++) {
-                char full[CFG_DTMF_PREFIX_STR + 2];
-                snprintf(full, sizeof(full), "%s%d", own, arg);
-                for (size_t j = 0; j < NCODES; j++)
-                    if (j != i && strcmp(full, CODE(j)) == 0)
-                        cfg_err(WHERE_FMT "dtmf.%s: '%s' is already used by dtmf.%s\n", WHERE_ARGS,
-                                CODES[i].key, full, CODES[j].key);
-            }
+                            CODES[i].kind == CODE_CAPTURE ? "every key"
+                            : CODES[i].nkeys == 1 ? "the key" : "the two keys");
         }
     }
+    /* The prefix sets aside everything after it for control op codes, today's and
+     * those to come, so no user code may start with it. */
+    const char *prefix = cfg->dtmf.control_op_prefix;
+    for (size_t i = 0; prefix[0] && i < NCODES; i++)
+        if (!CODES[i].op_code && strncmp(CODE(i), prefix, strlen(prefix)) == 0)
+            cfg_err(WHERE_FMT "dtmf.%s: '%s' starts with dtmf.control_op_prefix '%s'\n",
+                    WHERE_ARGS, CODES[i].key, CODE(i), prefix);
 #undef CODE
     if (cfg->dtmf.mute_hang_ms >= cfg->dtmf.interdigit_ms)
         cfg_err(WHERE_FMT "dtmf.mute_hang_ms (%d) must be less than dtmf.interdigit_ms (%d)\n", WHERE_ARGS,

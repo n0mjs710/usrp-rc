@@ -46,16 +46,18 @@ static void clear_digits(command_session_t *s)
  *
  *   Programming: a stub for now. The config file is the programming interface;
  *                a DTMF unlock would go here if a use for one turns up.
- *   Control op:  no commands yet. They'll sit behind a definable prefix.
- *   User:        all of these. The repeater code is empty by default, as anyone could
- *                use it until the control operator tier exists.
+ *   Control op:  fixed codes behind dtmf.control_op_prefix. Both tiers share the one
+ *                table: a control op entry's code is the prefix + its number.
+ *   User:        each code is its own setting.
  */
 #define CODES  CONFIG_DTMF_CODES
 #define NCODES CONFIG_NDTMF_CODES
 
+/* Valid until the next call. */
 static const char *code_of(const command_session_t *s, size_t i)
 {
-    return (const char *)&s->cfg->dtmf + CODES[i].offset;
+    static char buf[CFG_DTMF_CODE_STR];
+    return config_dtmf_code(&s->cfg->dtmf, i, buf);
 }
 
 static bool is_link_command(command_type_t t)
@@ -75,17 +77,32 @@ static bool matches(const command_session_t *s, size_t i, bool whole)
         return !whole;
     switch (CODES[i].kind) {
     case CODE_WHOLE:   return n == len;
-    case CODE_UP_DOWN:
-        if (n == len)
-            return !whole;
-        return n == len + 1 && (s->digits[len] == '0' || s->digits[len] == '1');
     case CODE_CAPTURE: return n > len || !whole;
-    case CODE_INDEX:
-        if (n > len + 2 || strspn(s->digits + len, "0123456789") != n - len)
+    case CODE_KEYS: {
+        size_t want = len + (size_t)CODES[i].nkeys;
+        if (n > want || strspn(s->digits + len, "0123456789") != n - len)
             return false;
-        return n == len + 2 || !whole;
+        return n == want || !whole;
+    }
     }
     return false;
+}
+
+/* Why the keys after a code + keys can't run, or NULL if they can. */
+static const char *bad_keys(const command_session_t *s, command_type_t type, const char *arg)
+{
+    const config_events_t *ev = &s->cfg->events;
+    if (type == COMMAND_READ)
+        return s->cfg->dtmf.read_messages[atoi(arg)][0] ? NULL : "no message";
+    if (type != COMMAND_FORCE_ID)
+        return NULL;
+    switch (*arg) {
+    case '0': return ev->n_initial_ids ? NULL : "no initial ID";
+    case '1': return NULL;   /* impolite_id is required */
+    case '2': return ev->anxious_id[0] ? NULL : "no anxious ID";
+    case '3': return NULL;   /* with no mandatory ID, impolite_id stands in */
+    default:  return "no ID type";
+    }
 }
 
 static bool evaluate(command_session_t *s, command_t *out)
@@ -103,15 +120,15 @@ static bool evaluate(command_session_t *s, command_t *out)
             continue;
         const char *arg = s->digits + strlen(code_of(s, i));
         out->type = CODES[i].type;
+        out->control_op = CODES[i].op_code != NULL;
         snprintf(out->digits, sizeof(out->digits), "%s", arg);
         if (is_link_command(out->type) && !s->cfg->link.enabled) {
             LOGI("dtmf: '%s': ERROR command = %s, no link service\n", s->digits, CODES[i].name);
             out->type = COMMAND_NO_LINK;
-        } else if (CODES[i].kind == CODE_UP_DOWN) {
-            LOGI("dtmf: '%s': ACCEPTED command = %s %s\n", s->digits, CODES[i].name, *arg == '1' ? "up" : "down");
-        } else if (CODES[i].kind == CODE_INDEX) {
-            if (!s->cfg->dtmf.read_messages[atoi(arg)][0]) {
-                LOGI("dtmf: '%s': ERROR no message %s\n", s->digits, arg);
+        } else if (CODES[i].kind == CODE_KEYS) {
+            const char *why = bad_keys(s, out->type, arg);
+            if (why) {
+                LOGI("dtmf: '%s': ERROR %s %s\n", s->digits, why, arg);
                 clear_digits(s);
                 return false;
             }
