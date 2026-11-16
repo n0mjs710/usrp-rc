@@ -538,7 +538,7 @@ wx_unavailable = voice: WEATHER NOT AVAILABLE
 
 For the producer interface, and for how to write messages for a producer, see
 [Appendix C](#appendix-c-producer-interface). For the settings, see
-[11.11](#1111-external).
+[11.12](#1112-external).
 
 ### 5.8 Site voice clips
 
@@ -1054,7 +1054,9 @@ Local traffic has priority over link traffic.
 ### 9.1 Function
 
 `usrp-rc` decodes DTMF from the repeater receiver only. It does not decode tones from the
-link. For command entry, see [section 2](#2-over-the-air-operation).
+link. For command entry, see [section 2](#2-over-the-air-operation). The control terminal
+is a second receiver, on the computer that runs `usrp-rc`. See
+[9.9](#99-control-terminal).
 
 ```ini
 [dtmf]
@@ -1233,6 +1235,95 @@ regen_code =
   end. Link off, repeater down or a stop of `usrp-rc` stops the tones. The log then shows
   `link: DTMF cut short`.
 
+### 9.9 Control terminal
+
+The control terminal, `usrp-crx`, is a control receiver on the computer that runs
+`usrp-rc`. An operator who is logged in enters DTMF keys, and the repeater operates as if
+the keys came from a receiver. The terminal also shows the log as it occurs, and the state
+of the repeater. Thus, the operator can follow the repeater without a radio.
+
+```text
+14:06:02 crx (cort): '12301': ACCEPTED command = repeater down
+14:06:02 port: repeater DOWN
+14:06:02 ptt: ON   reason=controller
+──────────────────────────────────────────────────────────────────────────────
+ W0XYZ  DOWN   link OFF   TX ON   RX —   no ID pending
+──────────────────────────────────────────────────────────────────────────────
+crx> 123 00
+```
+
+#### Entries
+
+- Each line is one entry, as one transmission. Enter is the unkey.
+- The keys and the codes are the same as on the air. All commands operate: user
+  commands and control operator commands. The control operator prefix is necessary.
+- `#` cancels and `D` executes, as on the air.
+- Spaces are permitted for clarity, for example `123 33 1`. Lowercase `a` to `d` are
+  the same as `A` to `D`.
+- The terminal has no time limits between keys. The timers for DTMF from a receiver do
+  not apply.
+- The same rules apply as for a receiver. For example, when the repeater is down, only
+  control operator commands operate.
+
+| Key | Function |
+| --- | --- |
+| `0`-`9`, `*`, `#`, `A`-`D`, space | Entry. Other keys sound the bell. |
+| Enter | Sends the entry |
+| Backspace | Deletes the last key |
+| Up, Down | Earlier entries. They are kept in `~/.usrp-crx_history`. |
+| Ctrl+U | Clears the entry |
+| Ctrl+L | Draws the screen again |
+| Ctrl+C, Ctrl+D | Exit |
+
+#### Display
+
+- The log area shows the log at the `info` level, with the time. At connection, it
+  shows the last 25 lines first. `debug` lines do not go to the terminal.
+- The lines of an entry at the terminal start with `crx (user):`. Lines from the
+  receiver start with `dtmf:`.
+- The status line shows the callsign, the repeater state (`UP`, `DOWN` or `TIMED OUT`),
+  the link state, the transmitter, the active receiver and the ID timer. `DOWN` and
+  `TIMED OUT` show in reverse video. The link state does not show if no link is set.
+- `ID pending 6:58` shows that an ID is necessary, and the time to the ID timer expiry.
+  `no ID pending` shows that no ID is necessary.
+
+#### One entry from a script
+
+```bash
+usrp-crx 123 01
+```
+
+The program sends the entry, shows the log lines that the entry caused, and stops.
+
+| Exit status | Meaning |
+| --- | --- |
+| 0 | A command operated. |
+| 1 | No command operated: an error, or the command was dropped. |
+| 2 | No connection to `usrp-rc` |
+
+Put `#` and `*` in quotes, for example `usrp-crx '5#'`. The shell gives a special
+meaning to them.
+
+#### Access
+
+- Members of the group `usrp-rc` can use the terminal. `make install` creates the group
+  and adds the user `mmdvm`, if it exists. To add a different user:
+
+  ```bash
+  sudo usermod -aG usrp-rc <user>
+  ```
+
+  The change applies at the next login. Without the group, only `root` can use the
+  terminal.
+- The terminal is available only on the computer that runs `usrp-rc`. For remote
+  access, log in with SSH.
+- Two connections are permitted: for example, a session and one entry from a script. A
+  third connection closes the oldest. That terminal shows `taken over`. Push Enter there
+  to connect again. Thus, a session that a bad network connection left open cannot lock
+  out the operator.
+- If `usrp-rc` stops, the terminal connects again every 2 seconds.
+- If the terminal cannot be made, `usrp-rc` operates without it and logs a warning.
+
 ---
 
 ## 10. Usage statistics
@@ -1393,7 +1484,13 @@ Levels above 1.0 are permitted, but they can cause clipping.
 | --- | --- | --- |
 | `file` | `/var/local/usrp-rc/state` | Keeps the repeater down state after a restart. Empty does not keep it. |
 
-### 11.10 `[events]`
+### 11.10 `[crx]`
+
+| Setting | Default | Function |
+| --- | --- | --- |
+| `socket` | `/run/usrp-rc/crx.sock` | Socket of the control terminal. Empty disables the terminal. See [9.9](#99-control-terminal). |
+
+### 11.11 `[events]`
 
 All `[events]` settings are message names. Empty plays nothing. No event uses another
 event's message in its place.
@@ -1423,7 +1520,7 @@ event's message in its place.
 
 A list holds a maximum of 8 names.
 
-### 11.11 `[external]`
+### 11.12 `[external]`
 
 | Setting | Default | Function |
 | --- | --- | --- |
@@ -1434,7 +1531,7 @@ A producer name has letters, digits and `_`. A fallback message cannot contain `
 or producer variables. See [5.7](#57-producer-variables) and
 [Appendix C](#appendix-c-producer-interface).
 
-### 11.12 `[messages]` and `[schedule]`
+### 11.13 `[messages]` and `[schedule]`
 
 See [section 5](#5-messages) and [section 7](#7-schedule).
 

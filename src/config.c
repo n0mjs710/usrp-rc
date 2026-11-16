@@ -92,6 +92,7 @@ void config_defaults(config_t *cfg)
     strncpy(cfg->events.echo_cancel_message, "echo_cancel_reply", sizeof(cfg->events.echo_cancel_message) - 1);
     strncpy(cfg->stats.file, "/var/local/usrp-rc/stats", sizeof(cfg->stats.file) - 1);
     strncpy(cfg->state.file, "/var/local/usrp-rc/state", sizeof(cfg->state.file) - 1);
+    strncpy(cfg->crx.socket, "/run/usrp-rc/crx.sock", sizeof(cfg->crx.socket) - 1);
     strncpy(cfg->events.link_on_message, "link_on_reply", sizeof(cfg->events.link_on_message) - 1);
     strncpy(cfg->events.link_off_message, "link_off_reply", sizeof(cfg->events.link_off_message) - 1);
     strncpy(cfg->events.link_none_message, "link_none_reply", sizeof(cfg->events.link_none_message) - 1);
@@ -218,6 +219,7 @@ static const field_t FIELDS[] = {
 
     STR("stats", "file", stats.file),
     STR("state", "file", state.file),
+    STR("crx",   "socket", crx.socket),
 
     STR("events", "startup_message",        events.startup_message),
     NAMES("initial_ids",   events.initial_ids,   events.n_initial_ids),
@@ -247,7 +249,8 @@ static const field_t FIELDS[] = {
 #define EXTERNAL_SECTION "external"
 
 static const char *const SECTIONS[] = {
-    "log", "mmdvm", "link", "audio", "timers", "dtmf", "stats", "state", "events", MESSAGES_SECTION, SCHEDULE_SECTION,
+    "log", "mmdvm", "link", "audio", "timers", "dtmf", "stats", "state", "crx", "events", MESSAGES_SECTION,
+    SCHEDULE_SECTION,
     EXTERNAL_SECTION, NULL,
 };
 
@@ -1434,7 +1437,7 @@ static bool parse_window(const char *text, int *start, int *end)
 /* Why a setting can't go in a schedule window, or NULL if it can. */
 static const char *not_schedulable(const field_t *f)
 {
-    static const char *const STARTUP_SECTIONS[] = {"", "log", "mmdvm", "link", "stats", "state", NULL};
+    static const char *const STARTUP_SECTIONS[] = {"", "log", "mmdvm", "link", "stats", "state", "crx", NULL};
     static const char *const STARTUP_KEYS[] = {
         "dtmf.enabled", "dtmf.min_tone_ms", "dtmf.cover_tone_hz", "dtmf.cover_tone_on_ms",
         "dtmf.cover_tone_off_ms", "dtmf.local_cover_tone", "dtmf.link_cover_tone",

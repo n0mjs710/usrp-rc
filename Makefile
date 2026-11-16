@@ -31,6 +31,7 @@ SRCS = src/main.c \
        src/port.c \
        src/dtmf.c \
        src/command.c \
+       src/crx.c \
        src/schedule.c \
        src/stats.c \
        src/log.c
@@ -38,6 +39,7 @@ SRCS = src/main.c \
 OBJS     = $(patsubst %.c,$(BUILDDIR)/%.o,$(SRCS))
 DEPFILES = $(OBJS:.o=.d)
 TARGET   = $(BUILDDIR)/usrp-rc
+CRX      = $(BUILDDIR)/usrp-crx
 
 # tests/port_harness.c drives src/port.c's state machine directly with a
 # fake clock (see the file for why) -- it needs everything port.c pulls
@@ -60,10 +62,14 @@ VOCAB_SRC ?= /home/cort/rc/vocab_pcm
 
 .PHONY: all clean install uninstall vocab check
 
-all: $(TARGET)
+all: $(TARGET) $(CRX)
 
 $(TARGET): $(OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+
+# The control terminal client: libc only, nothing of the daemon's.
+$(CRX): $(BUILDDIR)/src/crx_client.o
+	$(CC) $(LDFLAGS) -o $@ $^
 
 $(BUILDDIR)/src/%.o: src/%.c
 	@mkdir -p $(@D)
@@ -125,8 +131,9 @@ vocab:
 clean:
 	rm -rf $(BUILDDIR)
 
-install: $(TARGET)
+install: $(TARGET) $(CRX)
 	install -Dm755 $(TARGET)                  $(DESTDIR)$(BINDIR)/usrp-rc
+	install -Dm755 $(CRX)                     $(DESTDIR)$(BINDIR)/usrp-crx
 	install -Dm644 usrp-rc.conf.sample         $(DESTDIR)$(SYSCONFDIR)/usrp-rc/usrp-rc.conf.sample
 	install -Dm644 tones.conf                  $(DESTDIR)$(DATADIR)/tones.conf
 	install -Dm644 systemd/usrp-rc.service     $(DESTDIR)$(UNITDIR)/usrp-rc.service
@@ -136,6 +143,14 @@ install: $(TARGET)
 	@rm -f $(DESTDIR)$(DATADIR)/vocab_8k/*.wav
 	install -m644 vocab_8k/*.wav $(DESTDIR)$(DATADIR)/vocab_8k/
 	install -Dm644 user_8k/README.md          $(DESTDIR)$(DATADIR)/user_8k/README.md
+	@# Members of this group may use the control terminal, usrp-crx. The MMDVM suite
+	@# runs as user mmdvm, the usual operator account on such a host, so it joins.
+	@if [ -z "$(DESTDIR)" ] && ! getent group usrp-rc >/dev/null; then \
+		groupadd --system usrp-rc && echo "usrp-rc: created group usrp-rc for usrp-crx"; \
+	fi
+	@if [ -z "$(DESTDIR)" ] && id -u mmdvm >/dev/null 2>&1 && ! id -nG mmdvm | grep -qw usrp-rc; then \
+		usermod -aG usrp-rc mmdvm && echo "usrp-rc: added user mmdvm to group usrp-rc"; \
+	fi
 	@if [ -z "$(DESTDIR)" ]; then \
 		if [ ! -f $(SYSCONFDIR)/usrp-rc/usrp-rc.conf ]; then \
 			cp $(SYSCONFDIR)/usrp-rc/usrp-rc.conf.sample $(SYSCONFDIR)/usrp-rc/usrp-rc.conf; \
@@ -147,6 +162,7 @@ install: $(TARGET)
 
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/usrp-rc
+	rm -f $(DESTDIR)$(BINDIR)/usrp-crx
 	rm -f $(DESTDIR)$(UNITDIR)/usrp-rc.service
 	rm -rf $(DESTDIR)$(DATADIR)/vocab_8k
 	rm -f $(DESTDIR)$(DATADIR)/tones.conf

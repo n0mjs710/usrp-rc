@@ -34,7 +34,12 @@ These changes apply when you update from 1.0.
    start 1.1 on the air. No other `[dtmf]` code can start with the prefix. `--check`
    shows the conflict.
 
-4. The new read command has the prefix `4` by default. No other `[dtmf]` code can
+4. The service file changed: it now makes `/run/usrp-rc` for the control terminal. After
+   `sudo make install`, do `sudo systemctl daemon-reload`, then restart the service.
+   `make install` creates the group `usrp-rc` and adds the user `mmdvm` to it. For each
+   other control operator, do `sudo usermod -aG usrp-rc <user>`.
+
+5. The new read command has the prefix `4` by default. No other `[dtmf]` code can
    start with `4`. If a code starts with `4`, change that code, or set `read_prefix` to
    a different prefix or to empty. `--check` shows the conflict.
 
@@ -50,6 +55,7 @@ These changes apply when you update from 1.0.
 | DTMF keys in a message, for example to page a radio | `dtmf:` parts | 5.4 |
 | A schedule window that a producer field opens | `{producer.field}` in a `[schedule]` line | 7.9 |
 | A message that keys the repeater when a window opens | `announce=` in a `[schedule]` line | 7.9 |
+| Control terminal: DTMF entries, the live log and the repeater state, on the host | `usrp-crx`; `[crx]` `socket` | 9.9 |
 
 A sample METAR weather producer is in `producers/metar/`. Its README gives the
 installation.

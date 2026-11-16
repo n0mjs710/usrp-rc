@@ -26,6 +26,14 @@ typedef struct {
 typedef struct command_session command_session_t;
 
 int  command_session_create(command_session_t **out, const config_t *cfg);
+
+/* A session fed keys instead of audio: the control terminal, a receiver like any
+ * other. `label` starts its log lines in place of "dtmf". */
+int  command_session_create_keys(command_session_t **out, const config_t *cfg, const char *label);
+
+/* One key. True, with `out` set, if it was D and entered a command. End the entry
+ * with command_session_end_of_tx(), as at an unkey. */
+bool command_session_key(command_session_t *s, char key, command_t *out);
 void command_session_destroy(command_session_t *s);
 
 /* Feed one 160-sample frame of received audio, before any delay or muting.

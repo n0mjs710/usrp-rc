@@ -9,6 +9,7 @@
 #include "ste.h"
 #include "port.h"
 #include "command.h"
+#include "crx.h"
 #include "schedule.h"
 #include "stats.h"
 #include "tone.h"
@@ -65,6 +66,7 @@ typedef struct {
     port_t         *port;
     ste_t          *ste;
     command_session_t *cmd;   /* NULL = dtmf.enabled is false */
+    crx_t          *crx;      /* the control terminal; NULL = none */
     jitter_buffer_t *jb;
     opus_codec_t   *opus;   /* NULL in PCM mode */
 
@@ -528,7 +530,7 @@ static void run_command(app_t *a, const command_t *c)
 /* The one rule for when a command may run. Nothing does during an echo test recording.
  * Timed out or down, only control op commands do, as in ACC: down stops the repeating,
  * not the controller. */
-static bool command_allowed(const app_t *a, const command_t *c)
+static bool command_allowed(const app_t *a, const command_t *c, const char *who)
 {
     const char *why = NULL;
     if (a->echo_recording)
@@ -538,14 +540,46 @@ static bool command_allowed(const app_t *a, const command_t *c)
     else if (!c->control_op && port_local_timed_out(a->port))
         why = "timed out";
     if (why)
-        LOGI("dtmf: command dropped, %s\n", why);
+        LOGI("%s: command dropped, %s\n", who, why);
     return !why;
 }
 
 static void run_or_drop_command(app_t *a, const command_t *c)
 {
-    if (command_allowed(a, c))
+    if (command_allowed(a, c, "dtmf"))
         run_command(a, c);
+}
+
+/* An entry at the control terminal: the same rule, the same commands. */
+static bool crx_run(void *arg, const command_t *c, const char *who)
+{
+    app_t *a = arg;
+    if (!command_allowed(a, c, who))
+        return false;
+    run_command(a, c);
+    return true;
+}
+
+/* For the terminal's status line: see crx.h. */
+static void crx_update_status(app_t *a)
+{
+    uint64_t due;
+    char id[24];
+    if (!port_id_pending(a->port, &due))
+        snprintf(id, sizeof(id), "-");
+    else
+        snprintf(id, sizeof(id), "%llu", (unsigned long long)due);   /* 0 = not timed yet */
+    bool local = port_rx_local(a->port), link = port_rx_link(a->port);
+
+    char st[256];
+    snprintf(st, sizeof(st), "call=%s rep=%s link=%s tx=%s rx=%s id=%s",
+             a->cfg.callsign[0] ? a->cfg.callsign : "-",
+             port_repeater_down(a->port) ? "DOWN" : port_local_timed_out(a->port) ? "TIMEOUT" : "UP",
+             !a->cfg.link.enabled ? "none" : a->link_up ? "ON" : "OFF",
+             port_ptt(a->port) ? "ON" : "OFF",
+             local && link ? "both" : local ? "local" : link ? "link" : "none",
+             id);
+    crx_status(a->crx, st);
 }
 
 static void mmdvm_unkey_edge(app_t *a, uint64_t now)
@@ -561,7 +595,7 @@ static void mmdvm_unkey_edge(app_t *a, uint64_t now)
     if (a->cmd && port_local_timed_out(a->port))
         command_session_end_of_tx_discard(a->cmd, "timed out, a command must end with D");
     else if (a->cmd)
-        have = command_session_end_of_tx(a->cmd, &c) && command_allowed(a, &c);
+        have = command_session_end_of_tx(a->cmd, &c) && command_allowed(a, &c, "dtmf");
 
     int16_t *echo = NULL;
     size_t echo_len = a->echo_len;
@@ -1050,6 +1084,11 @@ int main(int argc, char *argv[])
         epoll_ctl(a->epfd, EPOLL_CTL_ADD, a->link_sock, &ev);
     }
 
+    if (crx_create(&a->crx, &a->cfg, a->epfd, crx_run, a) != 0) {
+        LOGE("usrp-rc: failed to init the control terminal\n");
+        return 1;
+    }
+
     /* Ahead of the startup message, so it already sees any open window. */
     if (a->base.nschedule > 0)
         schedule_update(a, monotonic_ms());
@@ -1082,11 +1121,16 @@ int main(int argc, char *argv[])
                 handle_mmdvm(a);
             else if (events[i].data.fd == a->link_sock)
                 handle_link(a);
+            else if (a->crx)
+                crx_handle(a->crx, events[i].data.fd);
         }
         check_all_timers(a, monotonic_ms());
+        if (a->crx && crx_connected(a->crx))
+            crx_update_status(a);
     }
 
     printf("usrp-rc: stopping\n");
+    crx_destroy(a->crx);
     regen_stop(a, "cut short");
     a->link_up = false;   /* don't leave the peer keyed */
     update_link_tx(a);

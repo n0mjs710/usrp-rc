@@ -1013,6 +1013,15 @@ bool port_local_timed_out(const port_t *p)
     return p->local_timed_out;
 }
 
+bool port_rx_local(const port_t *p) { return p->mmdvm_active; }
+bool port_rx_link(const port_t *p)  { return p->link_active; }
+
+bool port_id_pending(const port_t *p, uint64_t *due)
+{
+    *due = p->id_deadline;
+    return p->id_owed;
+}
+
 void port_ctrl_pull(port_t *p, int16_t out[160], uint64_t now)
 {
     ctrl_buf_pull_frame(p, out, now);

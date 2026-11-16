@@ -248,6 +248,10 @@ typedef struct {
     char file[256];   /* where repeater down survives a restart; empty = not kept */
 } config_state_t;
 
+typedef struct {
+    char socket[108];   /* the control terminal's Unix socket (sun_path size); empty = off */
+} config_crx_t;
+
 #define CFG_MAX_SCHEDULE      32
 #define CFG_MAX_SCHEDULE_SETS 16
 #define CFG_MAX_DAY_RULES     8
@@ -323,6 +327,7 @@ typedef struct {
     config_dtmf_t    dtmf;
     config_stats_t   stats;
     config_state_t   state;
+    config_crx_t     crx;
     config_log_t     log;
     config_external_t external;
 

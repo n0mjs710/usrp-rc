@@ -21,6 +21,11 @@ ProtectHome=yes
 # Usage statistics survive restarts here. The dash keeps the repeater on the air if
 # the directory is ever missing; the figures just won't save.
 ReadWritePaths=-/var/local/usrp-rc
+# The control terminal's socket, /run/usrp-rc/crx.sock. Kept at a stop: producers put
+# their files under the same directory.
+RuntimeDirectory=usrp-rc
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
 PrivateTmp=yes
 
 [Install]

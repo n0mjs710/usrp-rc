@@ -80,7 +80,7 @@ default_cw    = cw: {call}/R
 # value applies the next time that timer starts.
 #
 # Any setting can change, except the ones that only take effect at startup: the top
-# of the file, [log], [mmdvm], [link], [stats], [state], dtmf.enabled,
+# of the file, [log], [mmdvm], [link], [stats], [state], [crx], dtmf.enabled,
 # dtmf.min_tone_ms, the dtmf cover tone and regen_ settings,
 # audio.ste_delay_ms, audio.lead_trim_ms and events.startup_message. Write a setting by its name, or as section.name.
 #
@@ -164,6 +164,11 @@ default_cw    = cw: {call}/R
 
 #[state]
 #file = /var/local/usrp-rc/state   # keeps repeater down across a restart; empty = not kept
+
+#[crx]
+# The control terminal, usrp-crx: DTMF entries and the live log for a logged-in
+# operator, members of group usrp-rc (MANUAL.md 9.9). Empty = off.
+#socket = /run/usrp-rc/crx.sock
 
 #[dtmf]
 # Over-the-air DTMF commands from the repeater receiver. Off by default.

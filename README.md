@@ -173,11 +173,22 @@ frame timing.
    sudo systemctl daemon-reload
    ```
 
+4. `make install` creates the group `usrp-rc`, whose members can use the control
+   terminal, `usrp-crx`. If the user `mmdvm` exists, `make install` adds it to the group.
+   For each other control operator:
+
+   ```bash
+   sudo usermod -aG usrp-rc <user>
+   ```
+
+   A group change applies at the next login.
+
 ### Installed files
 
 | Path | Contents |
 | --- | --- |
 | `/usr/local/bin/usrp-rc` | Program |
+| `/usr/local/bin/usrp-crx` | Control terminal. See [MANUAL.md](MANUAL.md#99-control-terminal) 9.9. |
 | `/etc/usrp-rc/usrp-rc.conf` | Configuration |
 | `/etc/usrp-rc/usrp-rc.conf.sample` | Sample configuration, with all settings and their defaults |
 | `/usr/local/share/usrp-rc/tones.conf` | Tone catalog |
@@ -185,6 +196,7 @@ frame timing.
 | `/usr/local/share/usrp-rc/user_8k/` | Site voice clips |
 | `/usr/local/lib/systemd/system/usrp-rc.service` | systemd service |
 | `/var/local/usrp-rc/` | Usage statistics and the repeater down state |
+| `/run/usrp-rc/crx.sock` | Socket of the control terminal, while `usrp-rc` operates |
 
 > **Note:** `make install` does not replace a configuration file that exists. If no
 > configuration exists, it copies the sample to `usrp-rc.conf`.
@@ -321,6 +333,8 @@ configuration has errors.
 | Stop the service | `sudo systemctl stop usrp-rc` |
 | Restart the service | `sudo systemctl restart usrp-rc` |
 | Monitor the log | `journalctl -u usrp-rc -f` |
+| Control terminal: DTMF entries, the log and the repeater state | `usrp-crx` (group `usrp-rc`) |
+| One DTMF entry, for example repeater down | `usrp-crx 123 01` |
 
 At startup, the log shows the number of messages defined and the number in use.
 

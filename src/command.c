@@ -14,7 +14,8 @@
 
 struct command_session {
     const config_t *cfg;
-    dtmf_decoder_t *decoder;
+    dtmf_decoder_t *decoder;   /* NULL for a session that gets keys, not audio */
+    char label[48];            /* starts each log line: which receiver */
 
     int  now_ms;            /* time into this transmission */
 
@@ -110,7 +111,7 @@ static bool evaluate(command_session_t *s, command_t *out)
     if (s->ndigits == 0)
         return false;
     if (s->overflowed) {
-        LOGI("dtmf: '%s...': ABANDONED more than %d digits\n", s->digits, COMMAND_MAX_DIGITS);
+        LOGI("%s: '%s...': ABANDONED more than %d digits\n", s->label, s->digits, COMMAND_MAX_DIGITS);
         clear_digits(s);
         return false;
     }
@@ -123,26 +124,26 @@ static bool evaluate(command_session_t *s, command_t *out)
         out->control_op = CODES[i].op_code != NULL;
         snprintf(out->digits, sizeof(out->digits), "%s", arg);
         if (is_link_command(out->type) && !s->cfg->link.enabled) {
-            LOGI("dtmf: '%s': ERROR command = %s, no link service\n", s->digits, CODES[i].name);
+            LOGI("%s: '%s': ERROR command = %s, no link service\n", s->label, s->digits, CODES[i].name);
             out->type = COMMAND_NO_LINK;
         } else if (CODES[i].kind == CODE_KEYS) {
             const char *why = bad_keys(s, out->type, arg);
             if (why) {
-                LOGI("dtmf: '%s': ERROR %s %s\n", s->digits, why, arg);
+                LOGI("%s: '%s': ERROR %s %s\n", s->label, s->digits, why, arg);
                 clear_digits(s);
                 return false;
             }
-            LOGI("dtmf: '%s': ACCEPTED command = %s %s\n", s->digits, CODES[i].name, arg);
+            LOGI("%s: '%s': ACCEPTED command = %s %s\n", s->label, s->digits, CODES[i].name, arg);
         } else if (CODES[i].kind == CODE_CAPTURE) {
-            LOGI("dtmf: '%s': ACCEPTED command = %s %s\n", s->digits, CODES[i].name, arg);
+            LOGI("%s: '%s': ACCEPTED command = %s %s\n", s->label, s->digits, CODES[i].name, arg);
         } else {
-            LOGI("dtmf: '%s': ACCEPTED command = %s\n", s->digits, CODES[i].name);
+            LOGI("%s: '%s': ACCEPTED command = %s\n", s->label, s->digits, CODES[i].name);
         }
         clear_digits(s);
         return true;
     }
 
-    LOGI("dtmf: '%s': ERROR no command matched\n", s->digits);
+    LOGI("%s: '%s': ERROR no command matched\n", s->label, s->digits);
     clear_digits(s);
     return false;
 }
@@ -168,14 +169,14 @@ static bool at_capture_code(const command_session_t *s)
 static void on_digit(command_session_t *s, char digit, bool *terminated)
 {
     if (s->ndigits > 0 && s->now_ms - s->last_digit_ms > s->cfg->dtmf.interdigit_ms) {
-        LOGI("dtmf: '%s': ABANDONED inter-digit timer exceeded\n", s->digits);
+        LOGI("%s: '%s': ABANDONED inter-digit timer exceeded\n", s->label, s->digits);
         clear_digits(s);
     }
 
     if (!s->capturing && digit == '#') {
         /* ACC's cancel: forget everything entered so far this transmission. */
         if (s->ndigits > 0)
-            LOGI("dtmf: '%s#': ABANDONED user terminated\n", s->digits);
+            LOGI("%s: '%s#': ABANDONED user terminated\n", s->label, s->digits);
         clear_digits(s);
         return;
     }
@@ -186,7 +187,7 @@ static void on_digit(command_session_t *s, char digit, bool *terminated)
     }
 
     if (s->ndigits == 0)
-        LOGI("dtmf: sequence started with '%c'\n", digit);
+        LOGI("%s: sequence started with '%c'\n", s->label, digit);
 
     s->last_digit_ms = s->now_ms;
     if (s->ndigits < COMMAND_MAX_DIGITS) {
@@ -198,11 +199,11 @@ static void on_digit(command_session_t *s, char digit, bool *terminated)
 
     if (!s->capturing && !s->overflowed && at_capture_code(s)) {
         s->capturing = true;
-        LOGD("dtmf: '%s': every key to the unkey counts\n", s->digits);
+        LOGD("%s: '%s': every key to the unkey counts\n", s->label, s->digits);
     }
 
     if (!s->overflowed && !live(s)) {
-        LOGI("dtmf: '%s': ABANDONED no command starts this way\n", s->digits);
+        LOGI("%s: '%s': ABANDONED no command starts this way\n", s->label, s->digits);
         clear_digits(s);
     }
 }
@@ -217,7 +218,7 @@ bool command_session_frame(command_session_t *s, const int16_t frame[160], comma
 
     for (int i = 0; i < n; i++) {
         if (events[i].type == DTMF_TONE_ON) {
-            LOGD("dtmf: digit '%c'\n", events[i].digit);
+            LOGD("%s: digit '%c'\n", s->label, events[i].digit);
             if (!s->muted) {
                 s->muted = true;
                 s->cover_pos = 0;
@@ -226,7 +227,7 @@ bool command_session_frame(command_session_t *s, const int16_t frame[160], comma
             s->tone_rejected = false;
             on_digit(s, events[i].digit, &terminated);
         } else {
-            LOGD("dtmf: digit '%c' released after %d ms\n", events[i].digit, events[i].ms);
+            LOGD("%s: digit '%c' released after %d ms\n", s->label, events[i].digit, events[i].ms);
             s->tone_rejected = false;
         }
     }
@@ -236,7 +237,7 @@ bool command_session_frame(command_session_t *s, const int16_t frame[160], comma
         s->last_tone_ms = s->now_ms;
 
     if (held > s->cfg->dtmf.max_tone_ms && !s->tone_rejected) {
-        LOGI("dtmf: '%s': ABANDONED tone timer exceeded\n", s->digits);
+        LOGI("%s: '%s': ABANDONED tone timer exceeded\n", s->label, s->digits);
         s->tone_rejected = true;
         clear_digits(s);
     }
@@ -251,7 +252,8 @@ bool command_session_frame(command_session_t *s, const int16_t frame[160], comma
 
 static void reset_for_next_tx(command_session_t *s)
 {
-    dtmf_decoder_reset(s->decoder);
+    if (s->decoder)
+        dtmf_decoder_reset(s->decoder);
     clear_digits(s);
     s->now_ms = 0;
     s->last_digit_ms = 0;
@@ -269,7 +271,7 @@ bool command_session_end_of_tx(command_session_t *s, command_t *out)
         if (s->now_ms - s->last_digit_ms > s->cfg->dtmf.end_of_tx_ms) {
             /* ACC's defense against voice falsing: a real command ends with the
              * transmission, it isn't followed by a speech. */
-            LOGI("dtmf: '%s': ABANDONED end-of-transmission timer exceeded\n", s->digits);
+            LOGI("%s: '%s': ABANDONED end-of-transmission timer exceeded\n", s->label, s->digits);
             clear_digits(s);
         } else {
             have = evaluate(s, out);
@@ -282,7 +284,7 @@ bool command_session_end_of_tx(command_session_t *s, command_t *out)
 void command_session_end_of_tx_discard(command_session_t *s, const char *why)
 {
     if (s->ndigits > 0)
-        LOGI("dtmf: '%s': ABANDONED %s\n", s->digits, why);
+        LOGI("%s: '%s': ABANDONED %s\n", s->label, s->digits, why);
     clear_digits(s);
     reset_for_next_tx(s);
 }
@@ -340,6 +342,7 @@ int command_session_create(command_session_t **out, const config_t *cfg)
     if (!s)
         return -1;
     s->cfg = cfg;
+    snprintf(s->label, sizeof(s->label), "dtmf");
 
     if (dtmf_decoder_create(&s->decoder, cfg->dtmf.min_tone_ms) != 0) {
         free(s);
@@ -351,12 +354,32 @@ int command_session_create(command_session_t **out, const config_t *cfg)
     return 0;
 }
 
+int command_session_create_keys(command_session_t **out, const config_t *cfg, const char *label)
+{
+    command_session_t *s = calloc(1, sizeof(*s));
+    if (!s)
+        return -1;
+    s->cfg = cfg;
+    snprintf(s->label, sizeof(s->label), "%s", label);
+    *out = s;
+    return 0;
+}
+
+/* No clock runs: a typed entry has no tones to time and no voice to false on. */
+bool command_session_key(command_session_t *s, char key, command_t *out)
+{
+    bool terminated = false;
+    on_digit(s, key, &terminated);
+    return terminated && evaluate(s, out);
+}
+
 
 void command_session_destroy(command_session_t *s)
 {
     if (!s)
         return;
-    dtmf_decoder_destroy(s->decoder);
+    if (s->decoder)
+        dtmf_decoder_destroy(s->decoder);
     free(s->cover);
     free(s);
 }
