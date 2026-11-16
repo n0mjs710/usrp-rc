@@ -91,6 +91,7 @@ typedef struct {
     bool     local_to_link;   /* this local transmission goes to the link, as decided at its keyup */
     bool     link_keyed;      /* we have the link keyed: see update_link_tx() */
     bool     link_up;         /* off by DTMF command: no audio to or from the link */
+    uint64_t link_off_deadline;   /* link.auto_off_min; 0 = not running */
 
     int16_t *regen;           /* DTMF regen on its way to the link; NULL = none */
     size_t   regen_len;
@@ -198,10 +199,13 @@ static void flush_opus_uplink(app_t *a)
     a->opus_accum_n = 0;
 }
 
+static void link_traffic(app_t *a);
+
 static void send_link_voice(app_t *a, const int16_t frame[160])
 {
     if (a->link_sock < 0)
         return;
+    link_traffic(a);
     if (a->cfg.link.codec == LINK_CODEC_PCM) {
         uint8_t buf[USRP_PKT_LEN];
         usrp_build_voice(buf, a->link_tx_seq++, 1, frame);
@@ -392,11 +396,28 @@ static void link_cut(app_t *a)
     link_rx_end(a, monotonic_ms(), NULL);
 }
 
-static void set_link(app_t *a, bool up)
+/* link.auto_off_min starts again: each time the link turns on, and in idle mode at
+ * each frame of traffic, so it can't run out during a transmission. */
+static void link_auto_off_restart(app_t *a, uint64_t now)
+{
+    a->link_off_deadline = a->link_up && a->cfg.link.auto_off_min > 0
+        ? now + (uint64_t)a->cfg.link.auto_off_min * 60000u : 0;
+}
+
+static void link_traffic(app_t *a)
+{
+    if (a->link_off_deadline && a->cfg.link.auto_off_mode == LINK_AUTO_OFF_IDLE)
+        link_auto_off_restart(a, monotonic_ms());
+}
+
+/* `why` completes "link: turned on ...". Turning it on when it is already on still
+ * restarts the auto-off timer. */
+static void set_link(app_t *a, bool up, const char *why)
 {
     if (a->link_up != up)
-        LOGI("link: turned %s by command\n", up ? "on" : "off");
+        LOGI("link: turned %s %s\n", up ? "ON" : "OFF", why);
     a->link_up = up;
+    link_auto_off_restart(a, monotonic_ms());
     port_set_link_up(a->port, up);
     if (!up)
         link_cut(a);
@@ -470,11 +491,11 @@ static void run_command(app_t *a, const command_t *c)
         reply_with_message(a, a->cfg.events.stats_message);
         break;
     case COMMAND_LINK_ON:
-        set_link(a, true);
+        set_link(a, true, "by command");
         reply_with_message(a, a->cfg.events.link_on_message);
         break;
     case COMMAND_LINK_OFF:
-        set_link(a, false);
+        set_link(a, false, "by command");
         reply_with_message(a, a->cfg.events.link_off_message);
         break;
     case COMMAND_LINK_STATUS:
@@ -791,6 +812,7 @@ static void handle_link(app_t *a)
             continue;
         }
         a->link_watchdog_deadline = now + WATCHDOG_MS;
+        link_traffic(a);
         if (!a->prev_link_keyup) {
             a->prev_link_keyup = true;
             port_on_link_keyup(a->port, true, now);
@@ -886,6 +908,16 @@ static void link_watchdog(app_t *a, uint64_t now)
     link_rx_end(a, now, "watchdog timeout, no unkey received");
 }
 
+static void link_auto_off(app_t *a, uint64_t now)
+{
+    (void)now;
+    char why[64];
+    snprintf(why, sizeof(why), "by auto-off, %d min%s", a->cfg.link.auto_off_min,
+             a->cfg.link.auto_off_mode == LINK_AUTO_OFF_IDLE ? " with no traffic" : "");
+    set_link(a, false, why);
+    reply_with_message(a, a->cfg.events.link_off_message);
+}
+
 /* Every timer: an absolute deadline in app_t (0 = off), fired in this order. The schedule
  * goes first, as everything after it reads the settings, and the port's timers ahead of
  * the pacing tick that plays what they queue. */
@@ -900,6 +932,7 @@ static const struct {
     {offsetof(app_t, regen_deadline),          regen_tick},
     {offsetof(app_t, mmdvm_watchdog_deadline), mmdvm_watchdog},
     {offsetof(app_t, link_watchdog_deadline),  link_watchdog},
+    {offsetof(app_t, link_off_deadline),       link_auto_off},
 };
 #define NTIMERS (sizeof(TIMERS) / sizeof(TIMERS[0]))
 
@@ -1021,6 +1054,7 @@ int main(int argc, char *argv[])
     message_set_stats_source(stats_for_messages, a);
 
     a->link_up = a->cfg.link.enabled && a->cfg.link.start_on;
+    link_auto_off_restart(a, monotonic_ms());
     port_set_link_up(a->port, a->link_up);
     if (load_repeater_down(a))
         port_restore_repeater_down(a->port);

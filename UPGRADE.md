@@ -4,6 +4,21 @@ This document lists the configuration changes necessary for each new version. Af
 each change, examine the configuration with `usrp-rc --check <file>`. `--check` shows
 each out-of-date setting by line number.
 
+## 1.2
+
+These changes apply when you update from 1.1. No configuration change is necessary.
+
+### New functions
+
+| Function | Setting | MANUAL.md |
+| --- | --- | --- |
+| Link auto-off: turn the link off after a time with no traffic, or after a time on | `[link]` `auto_off_min`, `auto_off_mode` | 8.1 |
+
+### Changes in operation
+
+- The log line for a link change shows the state in capitals and the reason, for example
+  `link: turned OFF by command`.
+
 ## 1.1 (November 2026)
 
 These changes apply when you update from 1.0.

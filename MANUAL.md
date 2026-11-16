@@ -1024,6 +1024,27 @@ nws   = daily 07:00-22:00 {nws.alert} announce=wx_alert tail_messages+=wx_alert
   commands is planned.
 - At this time, `codec = opus` operates only with other tools from the same author.
 
+#### Auto-off
+
+The auto-off timer turns the link off after a time. Use it if the link must not stay
+on all day. The timer is off by default.
+
+```ini
+[link]
+auto_off_min  = 120
+auto_off_mode = idle
+```
+
+| `auto_off_mode` | The link turns off |
+| --- | --- |
+| `idle` | `auto_off_min` minutes after the last link traffic, in either direction. The timer starts again with each transmission, so it cannot expire during one. |
+| `absolute` | `auto_off_min` minutes after the link turns on, also during traffic. Use this mode for a link with no carrier detect, for example an HF radio with no COR, where the link is never idle. |
+
+- The timer starts again each time the link turns on: at startup, and with `72`, also
+  when the link is already on.
+- When the timer expires, the repeater plays `link_off_message`, as for `73`. The log
+  shows `link: turned OFF by auto-off`.
+
 ### 8.2 Traffic priority
 
 Local traffic has priority over link traffic.
@@ -1398,6 +1419,8 @@ the ports to agree with `MMDVM-Host.ini`. For the procedure, see
 | --- | --- | --- | --- |
 | `enabled` | `true` | `true`, `false` | The repeater has a link |
 | `start_on` | `true` | `true`, `false` | The link is on at start |
+| `auto_off_min` | `0` | 0-10080 | Turns the link off after this number of minutes. 0 is off. See [8.1](#81-link-state). |
+| `auto_off_mode` | `idle` | `idle`, `absolute` | `idle`: minutes with no link traffic. `absolute`: minutes after the link turns on. |
 | `remote_host` | None | | IPv4 address of the USRP peer, for example `127.0.0.1`. Host names are not accepted. Necessary when `enabled` is true. |
 | `remote_port` | `34001` | | Port of the peer |
 | `local_port` | `34002` | | Port on which `usrp-rc` receives |

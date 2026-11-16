@@ -131,6 +131,7 @@ typedef struct {
 } field_t;
 
 static const char *const CODEC_CHOICES[]  = {"pcm", "opus", NULL};       /* link_codec_t order */
+static const char *const AUTO_OFF_CHOICES[] = {"idle", "absolute", NULL};  /* link_auto_off_mode_t order */
 static const char *const LEVEL_CHOICES[]  = {"error", "warn", "info", "debug", NULL};
 
 #define MEMBER_SIZE(type, m) sizeof(((type *)0)->m)
@@ -165,6 +166,8 @@ static const field_t FIELDS[] = {
     INT("link",  "opus_bitrate",  link.opus_bitrate, 4000, 64000),
     INT("link",  "opus_frame_ms", link.opus_frame_ms, 20, 60),
     BOOL("link", "start_on",      link.start_on),
+    INT("link",  "auto_off_min",  link.auto_off_min, 0, 10080),
+    CHOICE("link", "auto_off_mode", FT_ENUM, link.auto_off_mode, AUTO_OFF_CHOICES),
 
     /* Generous on purpose: these catch typos and nonsense, not unusual sites.
      * Tone and sample scaling clamp to full scale, so >1.0 is legal but clips. */

@@ -83,6 +83,11 @@ typedef enum {
     LINK_CODEC_OPUS = 1,
 } link_codec_t;
 
+typedef enum {
+    LINK_AUTO_OFF_IDLE,       /* auto_off_min with no link traffic */
+    LINK_AUTO_OFF_ABSOLUTE,   /* auto_off_min after the link turns on, traffic or not */
+} link_auto_off_mode_t;
+
 typedef struct {
     char     local_address[64];
     uint16_t local_port;
@@ -100,6 +105,8 @@ typedef struct {
     int          opus_bitrate;
     int          opus_frame_ms;
     bool         start_on;   /* link state at startup; DTMF commands change it after that */
+    int          auto_off_min;   /* turns the link off after this; 0 = never */
+    link_auto_off_mode_t auto_off_mode;
 } config_link_t;
 
 typedef struct {
