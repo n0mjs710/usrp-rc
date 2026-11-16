@@ -29,15 +29,16 @@ For operation and the settings reference, see [MANUAL.md](MANUAL.md).
 
 Version: 1.1. To update from 1.0 or an earlier `main`, see [UPGRADE.md](UPGRADE.md).
 
-> [!WARNING]
-> **MMDVM FM audio quality.** MMDVM and MMDVM-Host releases before November 2026 have
-> defects that decrease the audio quality of FM mode. The symptoms are crackles,
-> distortion and an incorrect frequency response (EQ). The defects are worst on the
-> network and with `[FM] LinkMode=1`, because these two functions use the same code
-> path. The MMDVM-Host fix is merged upstream:
-> [g4klx/MMDVM-Host#902](https://github.com/g4klx/MMDVM-Host/pull/902). The firmware fix
-> is submitted as [g4klx/MMDVM#365](https://github.com/g4klx/MMDVM/pull/365). Until it is
-> merged, use the patched firmware at [github.com/n0mjs710](https://github.com/n0mjs710).
+> [!NOTE]
+> **FM audio quality.** MMDVM firmware and MMDVM-Host from before 13 November 2026 have
+> defects that decrease the audio quality of FM mode: crackles, distortion and an
+> incorrect frequency response (EQ). The fixes are merged upstream. For the full audio
+> quality, both must include them:
+>
+> | Program | Fix | First commit with the fix |
+> | --- | --- | --- |
+> | MMDVM firmware | [g4klx/MMDVM#365](https://github.com/g4klx/MMDVM/pull/365) | `1a3b2ec`, 14 November 2026 |
+> | MMDVM-Host | [g4klx/MMDVM-Host#902](https://github.com/g4klx/MMDVM-Host/pull/902) | `10a6c78`, 13 November 2026 |
 
 ## Contents
 
@@ -147,7 +148,8 @@ frame timing.
 | --- | --- |
 | Computer | The Linux computer that operates MMDVM-Host |
 | Operating system | Linux with systemd |
-| MMDVM-Host | A version with the FM Network protocol (2026 or later) |
+| MMDVM-Host | A version with the FM Network protocol (2026 or later). For the full FM audio quality, commit `10a6c78` or later. |
+| MMDVM firmware | For the full FM audio quality, commit `1a3b2ec` or later |
 | Packages | `build-essential`, `pkg-config`, `libopus-dev` |
 
 ## Installation

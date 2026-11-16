@@ -4,13 +4,11 @@ This manual applies to `usrp-rc` version 1.1. To see the installed version, ente
 `usrp-rc --version`. For installation and MMDVM-Host integration, see
 [README.md](README.md).
 
-> [!WARNING]
-> **MMDVM-Host FM audio quality.** At the date of this document (November 2026),
-> MMDVM-Host has defects that decrease the audio quality of FM mode. The symptoms are
-> crackles, distortion and an incorrect frequency response (EQ). The defects are worst
-> on the network and with `[FM] LinkMode=1`, because these two functions use the same
-> code path. For the best performance, use the patched versions of MMDVM and MMDVM-Host
-> at [github.com/n0mjs710](https://github.com/n0mjs710).
+> [!NOTE]
+> **FM audio quality.** For the full FM audio quality, use MMDVM firmware from commit
+> `1a3b2ec` (14 November 2026) or later, and MMDVM-Host from commit `10a6c78`
+> (13 November 2026) or later. Earlier versions decrease the audio quality. See
+> [README.md](README.md#requirements).
 
 ## Contents
 
