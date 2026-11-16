@@ -79,6 +79,7 @@ typedef struct {
 
     config_t        base;     /* as loaded; cfg is this with any open schedule window applied */
     bool     schedule_active[CFG_MAX_SCHEDULE];
+    schedule_hand_t schedule_hand;   /* windows started or stopped by command */
     bool     started;           /* the port has started: a window can announce */
     uint64_t schedule_deadline;
 
@@ -468,6 +469,23 @@ static bool load_repeater_down(const app_t *a)
     return down;
 }
 
+static void schedule_update(app_t *a, uint64_t now);
+
+/* A start or stop by command holds until the window's schedule next changes. It takes
+ * effect at once, through the same path as a scheduled open or close. */
+static void set_window(app_t *a, int id, bool start)
+{
+    for (int i = 0; i < a->base.nschedule; i++) {
+        if (a->base.schedule[i].id != id)
+            continue;
+        a->schedule_hand.manual[i] = start;
+        if (a->schedule_active[i] == start)
+            LOGI("schedule: '%s' already %s\n", a->base.schedule[i].name, start ? "open" : "closed");
+        schedule_update(a, monotonic_ms());
+        return;
+    }
+}
+
 static void run_command(app_t *a, const command_t *c)
 {
     switch (c->type) {
@@ -530,6 +548,9 @@ static void run_command(app_t *a, const command_t *c)
     }
     case COMMAND_FORCE_ID:
         port_force_id(a->port, c->digits[0], monotonic_ms());
+        break;
+    case COMMAND_WINDOW:
+        set_window(a, (c->digits[0] - '0') * 10 + (c->digits[1] - '0'), c->digits[2] == '1');
         break;
     case COMMAND_REPEATER_UP:
     case COMMAND_REPEATER_DOWN: {
@@ -868,12 +889,13 @@ static void schedule_update(app_t *a, uint64_t now)
     for (int i = 0; i < a->base.nschedule; i++)
         if (a->base.schedule[i].field[0])
             field_on[i] = message_field_current(&a->base, a->vocab, a->base.schedule[i].field);
-    schedule_evaluate(&a->base, &when, field_on, &a->cfg, active);
+    schedule_evaluate(&a->base, &when, field_on, &a->schedule_hand, &a->cfg, active);
     for (int i = 0; i < a->base.nschedule; i++) {
         const config_schedule_t *w = &a->base.schedule[i];
         const char *announce = w->announce;
         if (active[i] != a->schedule_active[i]) {
-            LOGI("schedule: '%s' %s%s%s\n", w->name, active[i] ? "started" : "ended",
+            LOGI("schedule: '%s' %s%s%s%s\n", w->name, active[i] ? "started" : "ended",
+                 a->schedule_hand.manual[i] >= 0 ? " by command" : "",
                  active[i] && announce[0] ? ", ANNOUNCE " : "", active[i] ? announce : "");
             /* At the edges only, so a 72 or 73 in between holds until the next one. The
              * close puts the link back as configured, whatever happened before. */
@@ -1132,6 +1154,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    schedule_hand_init(&a->schedule_hand);
     /* Ahead of the startup message, so it already sees any open window. */
     if (a->base.nschedule > 0)
         schedule_update(a, monotonic_ms());

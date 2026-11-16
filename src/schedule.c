@@ -71,14 +71,30 @@ bool schedule_entry_active(const config_schedule_t *entry, const struct tm *when
         || (now < entry->end_min && day_matches(entry, day_before(today)));
 }
 
+void schedule_hand_init(schedule_hand_t *h)
+{
+    memset(h->manual, -1, sizeof(h->manual));
+    memset(h->scheduled, 0, sizeof(h->scheduled));
+}
+
 void schedule_evaluate(const config_t *base, const struct tm *when, const bool *field_on,
-                       config_t *out, bool active[CFG_MAX_SCHEDULE])
+                       schedule_hand_t *hand, config_t *out, bool active[CFG_MAX_SCHEDULE])
 {
     *out = *base;
     for (int i = 0; i < base->nschedule; i++) {
         const config_schedule_t *e = &base->schedule[i];
-        active[i] = (!e->timed || schedule_entry_active(e, when))
-                 && (!e->field[0] || (field_on && field_on[i]));
+        /* With neither days nor a field, only a command opens it. */
+        bool scheduled = (e->timed || e->field[0])
+                      && (!e->timed || schedule_entry_active(e, when))
+                      && (!e->field[0] || (field_on && field_on[i]));
+        active[i] = scheduled;
+        if (hand) {
+            if (scheduled != hand->scheduled[i])
+                hand->manual[i] = -1;
+            hand->scheduled[i] = scheduled;
+            if (hand->manual[i] >= 0)
+                active[i] = hand->manual[i] == 1;
+        }
         if (!active[i])
             continue;
         for (int j = 0; j < base->schedule[i].nsets; j++)

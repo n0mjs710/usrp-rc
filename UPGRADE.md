@@ -14,6 +14,8 @@ These changes apply when you update from 1.1. No configuration change is necessa
 | --- | --- | --- |
 | Link auto-off: turn the link off after a time with no traffic, or after a time on | `[link]` `auto_off_min`, `auto_off_mode` | 8.1 |
 | A schedule window turns the link on or off | `link=on`, `link=off` in a `[schedule]` line | 7.5 |
+| Start and stop a window by command: prefix + `19` + id + `1` or `0` | `id=NN` in a `[schedule]` line | 7.10 |
+| A window that opens only by command, for example a severe weather net | `id=NN` and no days, times or field | 7.10 |
 
 ### Changes in operation
 

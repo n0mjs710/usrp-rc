@@ -95,6 +95,15 @@ static const char *bad_keys(const command_session_t *s, command_type_t type, con
     const config_events_t *ev = &s->cfg->events;
     if (type == COMMAND_READ)
         return s->cfg->dtmf.read_messages[atoi(arg)][0] ? NULL : "no message";
+    if (type == COMMAND_WINDOW) {
+        if (arg[2] != '0' && arg[2] != '1')
+            return "not start 1 or stop 0:";
+        int id = (arg[0] - '0') * 10 + (arg[1] - '0');
+        for (int i = 0; i < s->cfg->nschedule; i++)
+            if (s->cfg->schedule[i].id == id)
+                return NULL;
+        return "no window for";
+    }
     if (type != COMMAND_FORCE_ID)
         return NULL;
     switch (*arg) {

@@ -816,10 +816,12 @@ net_running  = wed 19:30-20:30 timeout=600 hang=1 ct_link_on_message=net_ct
 ### 7.2 Window format
 
 ```text
-name = [DAYS HH:MM-HH:MM] [{producer.field}] setting=value [setting=value ...]
+name = [DAYS HH:MM-HH:MM] [{producer.field}] [id=NN] setting=value [setting=value ...]
 ```
 
 A window has days and times, a producer field, or both. See [7.9](#79-producer-windows).
+A window with `id=` and neither of them opens only by command. See
+[7.10](#710-start-and-stop-by-command).
 
 | Part | Rule |
 | --- | --- |
@@ -830,6 +832,7 @@ A window has days and times, a producer field, or both. See [7.9](#79-producer-w
 | Settings | See [7.5](#75-settings). An empty value disables an event or a code: `tail_messages=`. Lists use commas with no spaces: `mandatory_ids=id1,id2`. |
 | Overlaps | Windows apply in file sequence. The last line has priority. |
 | `link=on`, `link=off` | Turns the link on or off when the window opens. See [Link on and off](#link-on-and-off). |
+| `id=NN` | Two digits, `00` to `99`. A control operator can start and stop the window by command. Each window has a different id. |
 
 ### 7.3 Days
 
@@ -1016,7 +1019,46 @@ nws   = daily 07:00-22:00 {nws.alert} announce=wx_alert tail_messages+=wx_alert
   start up to 1 minute after the field changes.
 - After a restart, an open window announces again.
 
-### 7.10 Functions not available
+### 7.10 Start and stop by command
+
+A control operator can start and stop a window that has an `id=`. Enter the control
+operator prefix, `19`, the id, and `1` to start or `0` to stop. See
+[9.7](#97-control-operator-commands).
+
+```ini
+[schedule]
+local_net = tue 19:30-20:30 id=02 link=off timeout=600
+wx_net    = id=07 link=off timeout=0 tail_messages=wx_msg announce=wx_net_on
+```
+
+| Entry (default prefix) | Result |
+| --- | --- |
+| `123` `19` `07` `1` | `wx_net` starts. |
+| `123` `19` `07` `0` | `wx_net` stops. |
+
+The last event has priority:
+
+- A start or stop by command holds until the next scheduled start or end of that
+  window. Then the schedule operates again.
+- Example: a control operator starts `local_net` at 19:00. At 19:30, the scheduled
+  start changes nothing. At 20:30, the scheduled end stops the window.
+- Example: a control operator stops `local_net` at 19:45. The window stays stopped. At
+  19:30 the next Tuesday, it starts as scheduled.
+- A window with only `id=` has no schedule. It operates only by command, for example a
+  severe weather net.
+
+When a window starts or stops by command, the same things occur as on a schedule:
+`announce=` plays, `link=` applies, and the settings change. The log shows
+`schedule: 'wx_net' started by command`.
+
+- `usrp-rc` does not keep a start or stop by command after a restart. After a restart,
+  each window operates on its schedule.
+- A start of a window that is open, or a stop of a window that is closed, changes
+  nothing. The log shows `already open` or `already closed`.
+- A window with no days, times, field or `id=` can never open. `--check` shows a
+  warning.
+
+### 7.11 Functions not available
 
 - A window cannot change `[link]` settings. To turn the link on or off, use `link=`. See
   [Link on and off](#link-on-and-off).
@@ -1205,9 +1247,13 @@ controllers. Thus, the commands operate on a new installation without more setup
 | `123` `33` `1` | Send the impolite ID | The ID |
 | `123` `33` `2` | Send the anxious ID | The ID |
 | `123` `33` `3` | Send the mandatory ID | The ID |
+| `123` `19` NN `1` | Start the schedule window with `id=NN` | The window's `announce=`, if set |
+| `123` `19` NN `0` | Stop the schedule window with `id=NN` | None |
 
 The codes `00`, `01` and `33` are ACC codes. Where ACC has a code for the same function,
-`usrp-rc` uses that code.
+`usrp-rc` uses that code. ACC has no code to start a window. `19` is an ACC autopatch
+code, a function that `usrp-rc` does not have. For windows, see
+[7.10](#710-start-and-stop-by-command).
 
 - After the prefix, a code can use the same digits as a user code. No user code can start
   with the prefix. `--check` shows each user code that does.

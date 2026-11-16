@@ -382,6 +382,21 @@ static void test_commands(void)
         strcpy(s_cfg.events.anxious_id, "");
         press_all(&r, "123334");
         check("+ 4 is no ID type", !command_session_end_of_tx(r.s, &c));
+
+        s_cfg.nschedule = 1;
+        s_cfg.schedule[0].id = 7;
+        press_all(&r, "12319071");
+        check("19 + id 07 + 1 starts window 07", command_session_end_of_tx(r.s, &c)
+              && c.type == COMMAND_WINDOW && c.control_op && strcmp(c.digits, "071") == 0);
+        press_all(&r, "12319070");
+        check("... + 0 stops it", command_session_end_of_tx(r.s, &c) && strcmp(c.digits, "070") == 0);
+        press_all(&r, "12319081");
+        check("no window has id 08", !command_session_end_of_tx(r.s, &c));
+        press_all(&r, "12319072");
+        check("the last key is 1 or 0", !command_session_end_of_tx(r.s, &c));
+        press_all(&r, "1231907");
+        check("the id alone does nothing", !command_session_end_of_tx(r.s, &c));
+        s_cfg.nschedule = 0;
         press_all(&r, "12333");
         check("33 alone does nothing", !command_session_end_of_tx(r.s, &c));
         press_all(&r, "1233311");

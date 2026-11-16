@@ -1671,9 +1671,10 @@ static void read_schedule(const entries_t *es, config_t *cfg)
         memset(out, 0, sizeof(*out));
         strcpy(out->name, e->key);
         out->link = -1;
+        out->id = -1;
         bool link_given = false;   /* even a bad one: that error is enough */
 
-        /* [DAYS HH:MM-HH:MM] [{producer.field}] setting=value ... announce=message link=on|off */
+        /* [DAYS HH:MM-HH:MM] [{producer.field}] setting=value ... announce=message link=on|off id=NN */
         char *copy = strdup(e->value);
         char *save = NULL;
         char *tok = strtok_r(copy, " \t", &save);
@@ -1695,8 +1696,6 @@ static void read_schedule(const entries_t *es, config_t *cfg)
             parse_producer_var(tok, path, cfg, out->field);
             tok = strtok_r(NULL, " \t", &save);
         }
-        if (!out->timed && !out->field[0])
-            cfg_err("%s: expected DAYS HH:MM-HH:MM, {producer.field} or both, then setting=value\n", path);
 
         for (; tok; tok = strtok_r(NULL, " \t", &save)) {
             if (strncmp(tok, "announce=", 9) == 0) {
@@ -1704,6 +1703,18 @@ static void read_schedule(const entries_t *es, config_t *cfg)
                     cfg_err("%s: announce= needs a message name\n", path);
                 else
                     strcpy(out->announce, tok + 9);
+                continue;
+            }
+            if (strncmp(tok, "id=", 3) == 0) {
+                const char *v = tok + 3;
+                if (strlen(v) != 2 || !isdigit((unsigned char)v[0]) || !isdigit((unsigned char)v[1])) {
+                    cfg_err("%s: id= needs two digits, 00 to 99\n", path);
+                    continue;
+                }
+                out->id = atoi(v);
+                for (int j = 0; j < cfg->nschedule; j++)
+                    if (cfg->schedule[j].id == out->id)
+                        cfg_err("%s: id=%s is already used by schedule.%s\n", path, v, cfg->schedule[j].name);
                 continue;
             }
             if (strncmp(tok, "link=", 5) == 0) {
@@ -1720,6 +1731,9 @@ static void read_schedule(const entries_t *es, config_t *cfg)
         }
         if (out->nsets == 0 && !out->announce[0] && !link_given)
             cfg_err("%s: changes nothing (add at least one setting=value, announce= or link=)\n", path);
+        /* No days, times or field: only a command opens it, and that needs an id. */
+        if (!out->timed && !out->field[0] && out->id < 0)
+            LOGW("config: %s: no days and times, no {producer.field} and no id=: it never opens\n", path);
 
         cfg->nschedule++;
         free(copy);
@@ -1904,6 +1918,7 @@ const config_dtmf_code_t CONFIG_DTMF_CODES[] = {
     USER(pad_test_prefix,  CODE_CAPTURE, 0, COMMAND_PAD_TEST,      "DTMF test +"),
     USER(read_prefix,      CODE_KEYS,    2, COMMAND_READ,          "read"),
     CTRL("33",             CODE_KEYS,    1, COMMAND_FORCE_ID,      "force ID"),
+    CTRL("19",             CODE_KEYS,    3, COMMAND_WINDOW,        "window"),
 };
 #undef USER
 #undef CTRL

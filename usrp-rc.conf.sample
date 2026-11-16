@@ -116,6 +116,12 @@ default_cw    = cw: {call}/R
 # link.start_on. 72 and 73 still work in between. See MANUAL.md 7.5.
 #
 #local_net = tue 19:30-20:30 link=off timeout=600
+#
+# id=NN lets a control operator start (prefix 19 NN 1) and stop (prefix 19 NN 0) a
+# window. It holds until the window's schedule next changes. A window with id= and no
+# days, times or field opens only by command. See MANUAL.md 7.10.
+#
+#wx_net = id=07 link=off timeout=0 tail_messages=wx_msg
 
 # ── Optional: everything below shows the defaults ─────────────────────────
 #

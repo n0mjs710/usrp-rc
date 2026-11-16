@@ -183,6 +183,7 @@ typedef enum {
     COMMAND_REPEATER_UP,
     COMMAND_REPEATER_DOWN,
     COMMAND_FORCE_ID,   /* digits: "0" initial, "1" impolite, "2" anxious, "3" mandatory */
+    COMMAND_WINDOW,     /* digits: window id NN, then "1" start or "0" stop */
     COMMAND_NO_LINK,    /* a link command on a repeater with no link */
     COMMAND_REGEN,      /* send `digits` as fresh DTMF, here and over the link */
     COMMAND_ECHO,       /* record the next local transmission and play it back */
@@ -304,6 +305,7 @@ typedef struct {
     char              announce[CFG_NAME_STR];  /* message to play as the window opens */
     int               link;        /* link= at the edges: 1 on, 0 off, -1 not set. At the
                                     * close the link goes to link.start_on. */
+    int               id;          /* id=NN: started and stopped by hand; -1 = can't be */
     config_override_t sets[CFG_MAX_SCHEDULE_SETS];
     int               nsets;
 } config_schedule_t;
