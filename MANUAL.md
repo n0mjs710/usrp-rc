@@ -829,6 +829,7 @@ A window has days and times, a producer field, or both. See [7.9](#79-producer-w
 | Midnight | If the end time is before the start time, the window continues past midnight. The window belongs to its start day: `fri 22:00-02:00` is open at 01:00 on Saturday. |
 | Settings | See [7.5](#75-settings). An empty value disables an event or a code: `tail_messages=`. Lists use commas with no spaces: `mandatory_ids=id1,id2`. |
 | Overlaps | Windows apply in file sequence. The last line has priority. |
+| `link=on`, `link=off` | Turns the link on or off when the window opens. See [Link on and off](#link-on-and-off). |
 
 ### 7.3 Days
 
@@ -935,6 +936,26 @@ The other settings take effect only at startup. `--check` rejects them in a wind
 A new value has effect the next time that it is used. A timer that runs when the window
 opens or closes keeps its value. The new value applies when the timer starts again.
 
+#### Link on and off
+
+`link=on` or `link=off` sets the link state when the window opens. When the window
+closes, the link goes back to its configured state, `link.start_on`.
+
+```ini
+[schedule]
+local_net  = tue 19:30-20:30 link=off timeout=600
+linked_net = thu 20:00-21:00 link=on
+```
+
+- The window changes the link only when it opens and when it closes. Between these two
+  times, `72` and `73` operate as usual. The next open or close of the window has
+  priority over them.
+- If `usrp-rc` starts while the window is open, the link goes to the window's state.
+- When the window turns the link on, the auto-off timer starts again. See
+  [8.1](#81-link-state).
+- The window gives no reply. To announce the change, use `announce=`.
+- The log shows `link: turned OFF by schedule 'local_net' start`.
+
 ### 7.6 Timing
 
 - Windows start and stop at the start of each minute.
@@ -997,8 +1018,8 @@ nws   = daily 07:00-22:00 {nws.alert} announce=wx_alert tail_messages+=wx_alert
 
 ### 7.10 Functions not available
 
-- A window cannot change `[link]` settings. Thus, a window cannot turn the link on or
-  off.
+- A window cannot change `[link]` settings. To turn the link on or off, use `link=`. See
+  [Link on and off](#link-on-and-off).
 - A change without an end time is not available.
 - "Last Friday" and one-time dates are not available.
 
@@ -1012,6 +1033,8 @@ nws   = daily 07:00-22:00 {nws.alert} announce=wx_alert tail_messages+=wx_alert
 | --- | --- |
 | `enabled = false` | The repeater has no link. `70`, `72` and `73` reply with `link_none_message`: "No link service". |
 | `start_on = false` | The link is off at start. `72` turns it on. |
+
+A schedule window can also turn the link on or off. See [7.5](#75-settings).
 
 - When the link is off, `usrp-rc` sends nothing to the link. It ignores all audio from
   the link.
@@ -1040,8 +1063,8 @@ auto_off_mode = idle
 | `idle` | `auto_off_min` minutes after the last link traffic, in either direction. The timer starts again with each transmission, so it cannot expire during one. |
 | `absolute` | `auto_off_min` minutes after the link turns on, also during traffic. Use this mode for a link with no carrier detect, for example an HF radio with no COR, where the link is never idle. |
 
-- The timer starts again each time the link turns on: at startup, and with `72`, also
-  when the link is already on.
+- The timer starts again each time the link turns on: at startup, with `72`, and when a
+  window turns it on, also when the link is already on.
 - When the timer expires, the repeater plays `link_off_message`, as for `73`. The log
   shows `link: turned OFF by auto-off`.
 

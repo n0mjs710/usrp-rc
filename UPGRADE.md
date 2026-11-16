@@ -13,6 +13,7 @@ These changes apply when you update from 1.1. No configuration change is necessa
 | Function | Setting | MANUAL.md |
 | --- | --- | --- |
 | Link auto-off: turn the link off after a time with no traffic, or after a time on | `[link]` `auto_off_min`, `auto_off_mode` | 8.1 |
+| A schedule window turns the link on or off | `link=on`, `link=off` in a `[schedule]` line | 7.5 |
 
 ### Changes in operation
 

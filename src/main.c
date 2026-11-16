@@ -870,10 +870,19 @@ static void schedule_update(app_t *a, uint64_t now)
             field_on[i] = message_field_current(&a->base, a->vocab, a->base.schedule[i].field);
     schedule_evaluate(&a->base, &when, field_on, &a->cfg, active);
     for (int i = 0; i < a->base.nschedule; i++) {
-        const char *announce = a->base.schedule[i].announce;
-        if (active[i] != a->schedule_active[i])
-            LOGI("schedule: '%s' %s%s%s\n", a->base.schedule[i].name, active[i] ? "started" : "ended",
+        const config_schedule_t *w = &a->base.schedule[i];
+        const char *announce = w->announce;
+        if (active[i] != a->schedule_active[i]) {
+            LOGI("schedule: '%s' %s%s%s\n", w->name, active[i] ? "started" : "ended",
                  active[i] && announce[0] ? ", ANNOUNCE " : "", active[i] ? announce : "");
+            /* At the edges only, so a 72 or 73 in between holds until the next one. The
+             * close puts the link back as configured, whatever happened before. */
+            if (w->link >= 0 && a->cfg.link.enabled) {
+                char why[CFG_NAME_STR + 32];
+                snprintf(why, sizeof(why), "by schedule '%s' %s", w->name, active[i] ? "start" : "end");
+                set_link(a, active[i] ? w->link == 1 : a->base.link.start_on, why);
+            }
+        }
         /* Before the port starts, main() announces once it has. */
         if (active[i] && !a->schedule_active[i] && a->started)
             reply_with_message(a, announce);

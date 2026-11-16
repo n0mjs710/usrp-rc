@@ -1670,8 +1670,10 @@ static void read_schedule(const entries_t *es, config_t *cfg)
         config_schedule_t *out = &cfg->schedule[cfg->nschedule];
         memset(out, 0, sizeof(*out));
         strcpy(out->name, e->key);
+        out->link = -1;
+        bool link_given = false;   /* even a bad one: that error is enough */
 
-        /* [DAYS HH:MM-HH:MM] [{producer.field}] setting=value ... announce=message */
+        /* [DAYS HH:MM-HH:MM] [{producer.field}] setting=value ... announce=message link=on|off */
         char *copy = strdup(e->value);
         char *save = NULL;
         char *tok = strtok_r(copy, " \t", &save);
@@ -1704,10 +1706,20 @@ static void read_schedule(const entries_t *es, config_t *cfg)
                     strcpy(out->announce, tok + 9);
                 continue;
             }
+            if (strncmp(tok, "link=", 5) == 0) {
+                link_given = true;
+                if (strcmp(tok + 5, "on") == 0 || strcmp(tok + 5, "off") == 0)
+                    out->link = strcmp(tok + 5, "on") == 0;
+                else
+                    cfg_err("%s: link= needs on or off\n", path);
+                if (!cfg->link.enabled)
+                    LOGW("config: %s: link=, but link.enabled is false: it does nothing\n", path);
+                continue;
+            }
             read_override(tok, path, scratch, out);
         }
-        if (out->nsets == 0 && !out->announce[0])
-            cfg_err("%s: changes nothing (add at least one setting=value, or announce=)\n", path);
+        if (out->nsets == 0 && !out->announce[0] && !link_given)
+            cfg_err("%s: changes nothing (add at least one setting=value, announce= or link=)\n", path);
 
         cfg->nschedule++;
         free(copy);

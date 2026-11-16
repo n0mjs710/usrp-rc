@@ -302,6 +302,8 @@ typedef struct {
     char              field[CFG_NAME_STR];     /* "producer.field": open only while it has
                                                 * current words; empty = no condition */
     char              announce[CFG_NAME_STR];  /* message to play as the window opens */
+    int               link;        /* link= at the edges: 1 on, 0 off, -1 not set. At the
+                                    * close the link goes to link.start_on. */
     config_override_t sets[CFG_MAX_SCHEDULE_SETS];
     int               nsets;
 } config_schedule_t;

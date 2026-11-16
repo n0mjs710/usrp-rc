@@ -111,6 +111,11 @@ default_cw    = cw: {call}/R
 # if the repeater is idle. See MANUAL.md 7.9.
 #
 #alarm = {site.alarm} announce=site_alarm
+#
+# link=on or link=off sets the link as the window opens; at the close it goes back to
+# link.start_on. 72 and 73 still work in between. See MANUAL.md 7.5.
+#
+#local_net = tue 19:30-20:30 link=off timeout=600
 
 # ── Optional: everything below shows the defaults ─────────────────────────
 #
