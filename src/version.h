@@ -1,3 +1,3 @@
 #pragma once
 
-#define USRP_RC_VERSION "1.0"
+#define USRP_RC_VERSION "1.1"

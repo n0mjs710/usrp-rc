@@ -27,7 +27,7 @@ Buffington, N0MJS.
 
 For operation and the settings reference, see [MANUAL.md](MANUAL.md).
 
-Version: 1.0. To update from 1.0b or an earlier `main`, see [UPGRADE.md](UPGRADE.md).
+Version: 1.1. To update from 1.0 or an earlier `main`, see [UPGRADE.md](UPGRADE.md).
 
 > [!WARNING]
 > **MMDVM FM audio quality.** MMDVM and MMDVM-Host releases before November 2026 have
