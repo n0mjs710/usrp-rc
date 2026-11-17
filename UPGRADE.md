@@ -4,7 +4,7 @@ This document lists the configuration changes necessary for each new version. Af
 each change, examine the configuration with `usrp-rc --check <file>`. `--check` shows
 each out-of-date setting by line number.
 
-## 1.2
+## 1.2 (November 2026)
 
 These changes apply when you update from 1.1. No configuration change is necessary.
 
