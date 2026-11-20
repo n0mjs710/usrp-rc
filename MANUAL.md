@@ -1088,6 +1088,12 @@ A schedule window can also turn the link on or off. See [7.5](#75-settings).
 - Each station can use `72` and `73`. A control operator command to lock out the link
   commands is planned.
 - At this time, `codec = opus` operates only with other tools from the same author.
+- `usrp-rc` plays link audio in PCM or Opus, with any Opus frame size. `codec` and
+  `opus_frame_ms` set only what it sends.
+- An Opus transmission is all Opus: 20 ms of encoded silence keys it, and a packet with no
+  audio unkeys it. A PCM-only peer, for example ASL, ignores it.
+- The log line `link: RX ended` shows the codec of each received transmission, for
+  example `codec=opus`.
 
 #### Auto-off
 
@@ -1494,9 +1500,9 @@ the ports to agree with `MMDVM-Host.ini`. For the procedure, see
 | `remote_port` | `34001` | | Port of the peer |
 | `local_port` | `34002` | | Port on which `usrp-rc` receives |
 | `bind_address` | `0.0.0.0` | | IPv4 address on which `usrp-rc` receives |
-| `codec` | `pcm` | `pcm`, `opus` | Audio format of the link |
+| `codec` | `pcm` | `pcm`, `opus` | Audio format that `usrp-rc` sends to the link. It receives both. |
 | `opus_bitrate` | `8000` | 4000-64000 | Applies when `codec = opus`. One frame must be 256 bytes or less: `opus_bitrate` × `opus_frame_ms` / 8000. |
-| `opus_frame_ms` | `60` | 20, 40, 60 | Applies when `codec = opus` |
+| `opus_frame_ms` | `60` | 20, 40, 60 | Applies when `codec = opus`. Received audio can use any of these. |
 
 ### 11.5 `[timers]`
 

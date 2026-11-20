@@ -68,7 +68,7 @@ typedef struct {
     command_session_t *cmd;   /* NULL = dtmf.enabled is false */
     crx_t          *crx;      /* the control terminal; NULL = none */
     jitter_buffer_t *jb;
-    opus_codec_t   *opus;   /* NULL in PCM mode */
+    opus_codec_t   *opus;   /* always created: either codec is accepted on receive */
 
     int mmdvm_sock;
     int link_sock;
@@ -85,6 +85,7 @@ typedef struct {
 
     bool prev_mmdvm_keyup;
     bool prev_link_keyup;
+    unsigned link_rx_opus;   /* Opus audio packets in this link transmission */
 
     /* No mmdvm-side sequence counter: MMDVM-Host's FM protocol has no
      * sequence field. Only the link (still USRP) needs one. */
@@ -220,13 +221,24 @@ static void send_link_voice(app_t *a, const int16_t frame[160])
         flush_opus_uplink(a);
 }
 
+/* An Opus stream stays all Opus: it keys with 20 ms of encoded silence and unkeys
+ * with a bare header, so a PCM-only peer such as ASL never sees part of it. */
 static void send_link_key(app_t *a, bool keyup)
 {
     if (a->link_sock < 0)
         return;
     uint8_t buf[USRP_PKT_LEN];
-    usrp_build_key(buf, a->link_tx_seq++, keyup ? 1 : 0);
-    send(a->link_sock, buf, USRP_PKT_LEN, 0);
+    if (a->cfg.link.codec == LINK_CODEC_PCM) {
+        usrp_build_key(buf, a->link_tx_seq++, keyup ? 1 : 0);
+        send(a->link_sock, buf, USRP_PKT_LEN, 0);
+        return;
+    }
+    uint8_t opus_buf[OPUS_MAX_FRAME_BYTES];
+    int len = keyup ? opus_codec_encode_key(a->opus, opus_buf) : 0;
+    if (len < 0)
+        len = 0;
+    size_t n = usrp_build_opus_voice(buf, a->link_tx_seq++, keyup ? 1 : 0, opus_buf, (size_t)len);
+    send(a->link_sock, buf, n, 0);
 }
 
 /* ── port PTT callback: arm/disarm mmdvm-TX pacing ──────────────────────── */
@@ -380,11 +392,12 @@ static void link_rx_end(app_t *a, uint64_t now, const char *why)
     a->link_watchdog_deadline = 0;
     uint64_t overflow = jitter_buffer_overflow_count(a->jb);
     uint64_t silence  = jitter_buffer_silence_count(a->jb);
+    const char *codec = a->link_rx_opus ? "opus" : "pcm";
     if (why)
-        LOGW("link: RX ended, %s  overflow=%llu silence=%llu\n", why,
+        LOGW("link: RX ended, %s  codec=%s overflow=%llu silence=%llu\n", why, codec,
              (unsigned long long)overflow, (unsigned long long)silence);
     else
-        LOGI("link: RX ended  overflow=%llu silence=%llu\n",
+        LOGI("link: RX ended  codec=%s overflow=%llu silence=%llu\n", codec,
              (unsigned long long)overflow, (unsigned long long)silence);
     jitter_buffer_flush(a->jb);
     port_on_link_keyup(a->port, false, now);
@@ -836,6 +849,7 @@ static void handle_link(app_t *a)
         link_traffic(a);
         if (!a->prev_link_keyup) {
             a->prev_link_keyup = true;
+            a->link_rx_opus = 0;
             port_on_link_keyup(a->port, true, now);
         }
 
@@ -848,8 +862,9 @@ static void handle_link(app_t *a)
         if (pkt.has_audio) {
             if (keep)
                 jitter_buffer_push(a->jb, pkt.audio);
-        } else if (pkt.type == USRP_TYPE_OPUS && a->opus) {
-            int16_t pcm[480];
+        } else if (pkt.type == USRP_TYPE_OPUS && pkt.opus_len > 0) {
+            a->link_rx_opus++;
+            int16_t pcm[OPUS_MAX_DECODE_SAMPLES];
             int dn = opus_codec_decode(a->opus, pkt.opus, (int)pkt.opus_len, pcm);
             for (int i = 0; keep && i < dn / 160; i++)
                 jitter_buffer_push(a->jb, pcm + i * 160);
@@ -1105,11 +1120,9 @@ int main(int argc, char *argv[])
             LOGE("usrp-rc: failed to init jitter buffer\n");
             return 1;
         }
-        if (a->cfg.link.codec == LINK_CODEC_OPUS) {
-            if (opus_codec_create(&a->opus, a->cfg.link.opus_bitrate, a->cfg.link.opus_frame_ms) != 0) {
-                LOGE("usrp-rc: failed to init opus codec\n");
-                return 1;
-            }
+        if (opus_codec_create(&a->opus, a->cfg.link.opus_bitrate, a->cfg.link.opus_frame_ms) != 0) {
+            LOGE("usrp-rc: failed to init opus codec\n");
+            return 1;
         }
     }
 

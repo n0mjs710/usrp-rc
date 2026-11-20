@@ -4,6 +4,18 @@ This document lists the configuration changes necessary for each new version. Af
 each change, examine the configuration with `usrp-rc --check <file>`. `--check` shows
 each out-of-date setting by line number.
 
+## Unreleased
+
+These changes apply when you update from 1.2. No configuration change is necessary.
+
+### Changes in operation
+
+- The link receives PCM and Opus, with any Opus frame size, whatever `codec` is set to.
+- With `codec = opus`, the key and unkey packets are Opus too. A 1.2 receiver with
+  `codec = pcm` keys on Opus but cannot decode it: update every repeater that can hear an
+  Opus repeater.
+- `link: RX ended` shows `codec=pcm` or `codec=opus`.
+
 ## 1.2 (November 2026)
 
 These changes apply when you update from 1.1. No configuration change is necessary.
