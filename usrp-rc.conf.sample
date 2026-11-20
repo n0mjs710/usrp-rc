@@ -20,7 +20,7 @@ local_port  = 34002
 codec       = pcm      # pcm or opus: what is sent; both are received
 #bind_address  = 0.0.0.0
 #opus_bitrate  = 8000   # 4000 to 64000; used when codec = opus
-#opus_frame_ms = 60     # 20, 40, or 60; used when codec = opus
+#opus_frame_ms = 60     # 20, 40 or 60 only; 20 = least delay, 60 = fewest packets (MANUAL 8.1)
 #start_on      = true   # link state at startup; the DTMF link commands change it after that
 #auto_off_min  = 0      # turn the link off after this many minutes; 0 = never
 #auto_off_mode = idle   # idle: minutes with no link traffic. absolute: minutes after it

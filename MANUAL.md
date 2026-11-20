@@ -1095,6 +1095,28 @@ A schedule window can also turn the link on or off. See [7.5](#75-settings).
 - The log line `link: RX ended` shows the codec of each received transmission, for
   example `codec=opus`.
 
+#### Opus frame size
+
+The only valid values of `opus_frame_ms` are 20, 40 and 60. Each repeater sets its own,
+and each repeater receives all three.
+
+Measured at `opus_bitrate = 8000`, with the USRP and IP/UDP headers:
+
+| Frame | Bandwidth | Packets/s | Added delay | One lost packet |
+| --- | --- | --- | --- | --- |
+| 20 ms | 31.2 kbps | 50 | none | 20 ms gap |
+| 40 ms | 19.0 kbps | 25 | +20 ms | 40 ms gap |
+| 60 ms | 14.7 kbps | 16.7 | +40 ms | 60 ms gap |
+| PCM | 152 kbps | 50 | none | 20 ms gap |
+
+- Use 20 ms on most links, for example cable, fiber or cellular with spare capacity. It
+  has the least delay and the shortest gap for a lost packet.
+- Use 60 ms where the number of packets is the limit, for example an RF mesh such as
+  AREDN, or satellite. It sends one third of the packets of PCM or 20 ms.
+- 40 ms is between the two.
+- The Opus codec itself does not get more efficient with longer frames. A longer frame
+  only sends fewer headers.
+
 #### Auto-off
 
 The auto-off timer turns the link off after a time. Use it if the link must not stay
@@ -1502,7 +1524,7 @@ the ports to agree with `MMDVM-Host.ini`. For the procedure, see
 | `bind_address` | `0.0.0.0` | | IPv4 address on which `usrp-rc` receives |
 | `codec` | `pcm` | `pcm`, `opus` | Audio format that `usrp-rc` sends to the link. It receives both. |
 | `opus_bitrate` | `8000` | 4000-64000 | Applies when `codec = opus`. One frame must be 256 bytes or less: `opus_bitrate` × `opus_frame_ms` / 8000. |
-| `opus_frame_ms` | `60` | 20, 40, 60 | Applies when `codec = opus`. Received audio can use any of these. |
+| `opus_frame_ms` | `60` | 20, 40, 60 | Applies when `codec = opus`. Received audio can use any of these. See [Opus frame size](#opus-frame-size). |
 
 ### 11.5 `[timers]`
 
